@@ -30,11 +30,16 @@ Without arguments:
 2. Follow the repository history's message format and language.
 3. If no history exists, write an English Conventional Commit using an appropriate standard type: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, or `revert`.
 4. Ask the user which type to use when no standard type fits, or when repository history contains a custom type and using it is uncertain.
-5. If the diff contains independent concerns that should be separate commits, suggest the split and produce one complete message candidate per proposed commit. Do not split merely because several files support one intent.
+5. If the diff contains independent concerns that should be separate commits, suggest the split and produce one complete message candidate per proposed commit. Do not split merely because several files support one intent. If a split is recommended, do not create a commit from the mixed staged state. Show the proposed change groups and message candidates, tell the user to stage one group at a time, and stop.
+
 
 ## Write the body
 
-Always include a body separated from the title by a blank line, even when repository history uses subject-only messages. Do not merely repeat the title: summarize the concrete changes and why they were made when evidenced by the diff, history, or explicit user context. When supported by evidence, naturally mention applicable cautions or reasons such as a workaround, a design reason or constraint, an intentional non-change, or a difference that may surprise a later reader. Omit unsupported details; never invent motivation, behavior, or impact.
+Include a body when it adds useful information beyond the title. Follow the repository history's convention when deciding whether a body is appropriate. For simple, self-explanatory changes, a title-only message is acceptable.
+
+When writing a body, separate it from the title by a blank line. Do not merely repeat the title: summarize the concrete changes and why they were made when evidenced by the diff, history, or explicit user context.
+
+When supported by evidence, naturally mention applicable cautions or reasons such as a workaround, a design reason or constraint, an intentional non-change, or a difference that may surprise a later reader. Omit unsupported details; never invent motivation, behavior, or impact.
 
 Keep each body paragraph on one physical line; never wrap a sentence or paragraph in the middle. Use a blank line only to separate paragraphs.
 
