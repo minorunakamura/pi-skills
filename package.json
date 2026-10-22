@@ -13,13 +13,6 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "^11.22.0",
-      "onFail": "download"
-    }
-  },
   "type": "module",
   "devDependencies": {
     "@biomejs/biome": "2.5.9",
