@@ -356,7 +356,7 @@ def main():
         lambda: (
             check(args.remote, args.repo, args.base)
             if args.operation == "check"
-            else create(json.load(sys.stdin))
+            else create(json.load(sys.stdin.buffer))
         )
     )
 

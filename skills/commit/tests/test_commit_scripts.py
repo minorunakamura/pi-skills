@@ -43,7 +43,11 @@ class TestCommitScripts:
             cwd=cwd or self.repo,
             env=self.env,
             capture_output=True,
-            input=json.dumps(request).encode() if request is not None else None,
+            input=(
+                json.dumps(request, ensure_ascii=False).encode("utf-8")
+                if request is not None
+                else None
+            ),
             timeout=20,
         )
         assert (result.returncode == 0) is success, result.stdout + result.stderr
@@ -156,6 +160,13 @@ print("[]")
         assert self.git("log", "-1", "--format=%B").decode() == message + "\n"
         assert result["commit"] == self.git("rev-parse", "HEAD").strip().decode()
         assert (self.root / "scan.count").read_text() == "scan\n"
+
+    def test_japanese_message_is_preserved_with_cp932_stdin(self):
+        self.stage()
+        self.env["PYTHONIOENCODING"] = "cp932:surrogateescape"
+        message = "fix: 日本語のコミットメッセージ\n\n文字化けを防ぐ。\n"
+        self.commit(self.check(), message)
+        assert self.git("log", "-1", "--format=%B").decode("utf-8") == message + "\n"
 
     def test_unborn_commit_and_missing_gitleaks(self):
         (self.bin / "gitleaks").unlink()
