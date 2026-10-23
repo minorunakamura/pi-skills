@@ -42,7 +42,7 @@ Pi を作業対象のプロジェクトで起動し、入力欄で `/skill:<ス�
 /skill:commit
 ```
 
-Git の変更状態を確認し、必要な選択・承認を求めながらコミットまで進めます。すでに Stage 済みの変更があれば、その部分だけを対象にします。
+Git の変更状態を確認し、必要な選択・承認を求めながらコミットまで進めます。すでに Stage 済みの変更があれば、その部分だけを対象にします。Python 3.14以上がPiから利用できる場合は同梱scriptを優先します。Python未導入・3.13以下なら、開始時にLLMがGit・ghコマンドを直接実行する互換経路へ切り替えます。Pythonはスキル全体の必須要件ではなく、どちらの経路も追加のPython packageは不要です。
 
 コミットタイトルを指定する場合は、コマンドの後に続けて入力します。指定したタイトルは、そのまま使われます。
 
@@ -51,8 +51,14 @@ Git の変更状態を確認し、必要な選択・承認を求めながらコ�
 ```
 
 - Stage、ブランチ作成・切り替え、commit、push、PR 作成には、それぞれ承認が必要です。
-- Gitleaks が利用可能なら、コミット予定の Staged diff を検査します。未導入の場合は未検査であることを報告します。
-- push と PR 作成は希望した場合だけ行います。GitHub PR の自動作成には、認証済みの GitHub CLI `gh` が必要です。
+- Gitを変更する前にshellでPythonの存在・バージョンを確認し、実行経路を選びます。標準経路ではGit状態の取得に `git-status.py`、Staged diffの検査・照合・commitに `staged-commit.py`、pushに `guarded-push.py`、GitHub PR作成に `github-pr.py` を使います。
+- 互換経路では[専用手順](skills/commit/references/compatibility.md)に従ってLLMがGit・ghコマンドを実行します。承認、部分Stageの保護、Gitleaks検査、commit/push/PR直前の状態照合は省略しません。ただしscriptと同等の機械的ガードは保証できず、特殊なファイル名等を安全に扱えない場合は停止します。
+- 経路選択は開始時だけです。Pythonの起動失敗・不正応答は停止し、script実行後の検査失敗・状態不一致・認証/通信エラー・timeout等から互換経路へ切り替えて再実行しません。Pythonの自動installやPATH変更もしません。
+- Gitleaks が利用可能なら、コミット予定の Staged diff を検査します。未導入の場合は未検査であることを報告します。検査後に差分・index・ブランチ・HEADが変わっていればcommitせず停止します。
+- scriptはユーザー承認を代行しません。承認はPi側で行い、検査結果は呼出し元で保持します。永続的な承認DBは作りません。同時に別プロセスからGitを変更しないでください。
+- push と PR 作成は希望した場合だけ行います。各経路で保持した確認結果を承認後に再照合し、pushは承認時のSHAだけを送信、PRはpush済みのhead/baseと認証アカウントを確認して作成します。既存PRは重複作成しません。通信エラーでは成否を照会し、自動再試行しません。
+- PR本文はブランチ全体のdiff・commit履歴とGitHubのテンプレートを根拠にします。両経路ともPRの自動作成には認証済みの `gh` が必要です。同一repository内のPRのみ対応し、SSH host aliasの解決にはOpenSSHを使います。fork間PRや独自SSH commandは自動処理しません。
+- 必要なcommit objectがローカルにない場合は、自動fetchせず停止します。照合とリモート操作は完全にatomicではありません。失敗してもリモート変更が完了している場合があるため、結果確認前に再実行しないでください。
 - reset、amend、force push、rebase、merge、release、deploy は行いません。
 
 ### design-discussion
@@ -77,3 +83,27 @@ Git の変更状態を確認し、必要な選択・承認を求めながらコ�
 `design-discussion` の調査では、必要に応じて CodeGraph、`pi-ketch`、`pi-web-access`、`pi-subagents` を使います。これらはこのリポジトリには同梱されていません。利用できない場合は制約を伝え、既存の別手段で確認できる範囲に絞ります。
 
 詳しい手順と制約は、各スキルの `SKILL.md` を参照してください。
+
+## 開発時の検証
+
+開発にはmiseとGitを使います。Python 3.14系・uv・Node.js・pnpm・Ruff・tyのバージョンは`mise.toml`で固定します。pytest 9系は開発用依存として`pyproject.toml`と`uv.lock`で管理し、uvが`.venv`に導入します。miseを有効化したshellで次を実行してください。
+
+```bash
+mise install
+pnpm install --frozen-lockfile
+mise exec -- uv sync --locked --python python
+pnpm lint
+pnpm typecheck
+pnpm format:check
+pnpm test
+```
+
+`pnpm lint`はRuff、`pnpm typecheck`はty、`pnpm format:check`はBiomeとRuff、`pnpm test`はpytestを実行します。`pnpm lint:fix`でRuffの自動修正、`pnpm format`で整形を適用します。BiomeはJSON等のformatに使います。Ruffの`target-version`とtyの`python-version`も3.14に合わせています。型検査はscript・テスト・fixtureを含み、診断の一括無効化やテスト除外はしません。これらは開発用です。同梱scriptはPython標準ライブラリだけを使い、互換経路はPythonを必要としません。
+
+pytestでは`tmp_path`・共通fixture・`parametrize`・`monkeypatch`を使い、一時Gitリポジトリとbare remoteでstatus解析、部分Stage、Gitleaks検査、状態変化時のcommit/push拒否、main保護と初回登録の例外、PRの本文・Draft・重複防止、認証・通信エラーとtimeout時の再試行禁止などを検証します。Gitleaks・gh・SSHはテスト用の実行ファイルで再現するため、実行時には不要です。実remoteやGitHubには接続しません。回帰テストはGitとPOSIX環境を対象とします。
+
+## CI
+
+`.github/workflows/ci.yml`で、PRの作成・更新とmainへのpush時にUbuntu上で同じlint・型検査・format確認・pytestを実行します。依存は`pnpm install --frozen-lockfile`と`uv sync --locked`で固定し、Pythonはmiseで選ばれた実行ファイルを使います。Actionはcommit SHA、mise本体もバージョンを固定しています。
+
+権限は`contents: read`のみで、checkoutの認証情報は永続化しません。実GitHubへのpush・PR作成や個人の認証情報は不要です。CI成功をmerge条件にする場合は、workflowとは別にGitHubのRuleset等で必須チェックを設定してください。

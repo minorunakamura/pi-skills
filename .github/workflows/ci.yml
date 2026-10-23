@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: lint, types, format, tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5
+        with:
+          version: 2026.10.17
+      - name: Install Node dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Python dependencies
+        run: mise exec -- uv sync --locked --python python
+      - name: Lint
+        run: pnpm lint
+      - name: Type check
+        run: pnpm typecheck
+      - name: Check formatting
+        run: pnpm format:check
+      - name: Test
+        run: pnpm test

@@ -1,4 +1,8 @@
 node_modules/
+.ruff_cache/
+.pytest_cache/
+.venv/
+__pycache__/
 .DS_Store
 docs/
 pi-output-style.local.json

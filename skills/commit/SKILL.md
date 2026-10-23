@@ -2,6 +2,7 @@
 name: commit
 description: Review Git changes, optionally stage selected files, suggest branches, create commits, and optionally push and open GitHub pull requests with explicit approval.
 disable-model-invocation: true
+compatibility: Requires Git and shell access. Python 3.14+ enables bundled scripts; without it, use the documented LLM compatibility route. Gitleaks is optional; GitHub PR creation requires authenticated gh.
 ---
 
 # Commit
@@ -17,6 +18,53 @@ disable-model-invocation: true
 - 失敗時に破壊的な復旧操作を行わず、観測できた状態とエラーを報告する。
 - Gitleaksが利用できる場合は、コミット予定のStaged差分を検査する。検出・検査失敗を無視してcommitを進めない。
 
+## 0. 開始時の実行経路選択
+
+**手順1・同梱scriptの呼出しより前**に、LLMがshellツールで以下のread-only確認を行う。Stage・ブランチ作成・commit・push・PR作成はまだ行わない。Pythonはスキル全体の必須要件ではない。起動時にrepositoryのPythonコードや環境変数による追加コードを読み込ませないため、確認は`-E -S`付きで行う。
+
+```sh
+if command -v python3 >/dev/null 2>&1; then
+  python3 -E -S -c 'import sys; print("python-version=" + ".".join(map(str, sys.version_info[:3]))); print("python-executable=" + repr(sys.executable)); sys.exit(0 if sys.version_info[:2] >= (3, 14) else 3)'
+else
+  printf '%s\n' 'python3=missing'
+  exit 4
+fi
+```
+
+- **標準経路**：終了コード0かつ正常な出力でPython 3.14以上を確認できた場合。同梱scriptを優先する。確認した実行ファイル・バージョンと選んだ経路を明示し、以後もそのPythonを使う。
+- **互換経路**：終了コード4かつ`python3=missing`、または終了コード3かつ正常な出力で3.14未満を確認できた場合だけ選ぶ。Pythonを使わず、LLMがGit・ghコマンドを直接実行する。手順1に進む前に[互換経路の手順](references/compatibility.md)を全文読み、「Python 3.14以上のscriptガードは利用せず、LLMによる互換経路で進める」と明示する。scriptと同等の機械的ガードは保証できないことも伝える。
+- **停止**：上記以外の終了コード、Pythonの起動失敗、不正・矛盾する出力など、利用可否を確定できない場合。終了コードだけで互換経路を選ばない。
+- Pythonや別のruntimeを自動installせず、PATH・mise・仮想環境を変更しない。Git等の必要なコマンドがなければ停止する。利用者に開発用のuv・pytest等を要求しない。
+- **実行途中の失敗では切替禁止**：標準経路でscriptを呼び出した後の非0終了・不正応答・状態不一致・Gitleaks失敗・認証/通信エラー・timeout・script欠落では、互換経路や手書きコマンドに切り替えず停止する。互換経路でも失敗後に別経路で操作を再試行しない。成否不明なら状態の照会だけを行い、自動rollbackしない。
+
+以降のscript呼出し、check JSON、`snapshot`、scriptの`status`は**標準経路専用**。互換経路では対応する確認・実行を参照文書に置き換え、scriptを試しに実行したりcheck JSONを捏造したりしない。参照文書のパスもこのSkillのディレクトリから解決する。承認・対象範囲・禁止操作・信頼境界は両経路に共通。選択した経路はこの実行中に変更しない。
+
+## 同梱script（標準経路）
+
+標準経路ではGit状態の解析、Staged差分の検査、commit・push・PR作成直前の照合に、毎回コードを生成せず同梱scriptを使う。Python 3.14以上とGitが必要。対象リポジトリをcwdにしたまま、scriptのパスはこのSkillのディレクトリから解決する。以下の`python3`は開始時に確認した実行ファイルを使う。scriptは標準ライブラリだけを使い、依存の自動installはしない。
+
+```bash
+python3 "<skill-dir>/scripts/git-status.py"
+python3 "<skill-dir>/scripts/staged-commit.py" check
+python3 "<skill-dir>/scripts/guarded-push.py" check --remote origin --set-upstream
+python3 "<skill-dir>/scripts/github-pr.py" check --remote origin --repo HOST/OWNER/REPO
+```
+
+`origin`や`HOST/OWNER/REPO`は例。対象を調べて明示し、shell文字列へ未検証の値を連結しない。
+
+- `git-status.py`はrepository、gitDir、branch、head、conflicts、changesをJSONで返す。changesはルート相対のpath、index/worktree状態、staged/unstaged/untracked、rename/copy時のoriginalPathを含む。Unstaged/Untrackedの本文やdiffは出力しない。初回commit前のheadとdetached HEADのbranchはnull。
+- `staged-commit.py check`はStaged差分だけをGitleaksで検査し、`snapshot`（repository/gitDir/branch/headと差分・indexのSHA-256）、`gitleaks`（passedまたはunavailable）を返す。空差分・detached HEAD・競合・検査失敗・検査中の状態変化は非0終了。Gitleaksの生出力は返さず、検出があればruleとStaged diff上の行番号だけを返す。
+- `staged-commit.py commit`はstdinのJSONからcheck結果と承認済みメッセージを受け取り、snapshotが完全一致するときだけ`git commit --cleanup=verbatim --file=-`を実行する。成功時はcommit SHAとbranchをJSONで返す。
+- `guarded-push.py check`はremoteの実push URL、repository/gitDir/branch/HEAD、upstream、宛先refとリモートSHA、default branchを`snapshot`に固定し、`commits`と`alreadyPushed`を返す。`--target`を省略すると現在のブランチ名を宛先にする。複数push URL、通常のmain/default branch宛て、non-fast-forward、不明なリモート状態は拒否する。`--set-upstream`を指定した場合だけ、push確認後に承認対象のローカルブランチへupstreamを設定する。
+- `guarded-push.py push`はstdinの`{"check": CHECK_RESULT}`を受け取り、snapshotを再照合して承認時のSHAを明示的refspecでpushし、リモートSHAを検証する。`CHECK_RESULT`は保持したcheck結果のJSONオブジェクトそのもの（文字列ではない）。すでに同じSHAなら送信しない。暗黙のtag/submodule pushやmirror pushはしない。既存hooksは実行する。
+- `github-pr.py check`はremoteとGitHub repositoryの対応、認証アカウント・書込み権限、push済みheadとbaseのSHAを`snapshot`に固定する。`diff`はbaseからheadへのmerge-base基準のブランチ全体、`commits`はbaseにないcommit履歴、`templates`はGitHub上のPRテンプレート、`existingPullRequests`は同一repository/head/baseの既存PR。既存PRがあれば新規作成用のdiff取得を省略し、`diff: null`・`commits: []`とする。テンプレートなしは正常。`--base`省略時はdefault branchを使う。
+- `github-pr.py create`はstdinの`{"check": CHECK_RESULT, "title": "承認済みタイトル", "body": "承認済み本文", "draft": false}`を受け取る。宛先・認証・head/baseのSHA・テンプレートを再照合し、既存PRがあれば`status: existing`とURLを返して作成しない。なければshellを介さず`gh pr create --repo ... --base ... --head ... --title ... --body-file -`を実行する。本文はstdin、Draftは`--draft`で指定し、作成後に本文・タイトル・Draft・head/baseを読み戻して照合する。
+- 標準経路でscriptが非0終了・不正応答となったら停止する。開始時のPython不足とは区別し、互換経路や手書きの`git commit`・`git push`・`gh pr create`でガードを迂回しない。scriptのエラーにGit hook等の詳細が含まれない場合は、失敗を報告し、診断だけを別途行う。自動再試行・rollbackはしない。
+- scriptは承認を判定しない。`check`の成功やsnapshotの一致をユーザー承認とみなさず、check結果の手入力・書き換えもしない。JSON結果は呼出し元で保持し、永続的な承認DB・workflow stateは作らない。
+- 照合とcommit・push・PR作成は完全にatomicではない。同時に別プロセスからGitや対象ブランチ・remote設定を変更しない。リモートの変更や通信断で、失敗応答でもpush・PR作成が完了していることがある。`remoteMayHaveChanged`・`operationMayHaveSucceeded`と観測結果を報告し、不明なら成功・未実行のいずれとも断定しない。成功後の検証失敗もrollbackしない。upstream設定だけ失敗する場合もpushは取り消さない。
+- push/PRの外部コマンドは各60秒でtimeoutする。必要なcommit objectがローカルになければ停止し、自動fetchしない。PR diffとcommit履歴はそれぞれ2 MiBを超えると省略せず停止する。既存PRの照会は100件に達すると停止する。
+- PR自動作成は**同一repository内**のみ対応し、fork間PRは扱わない。repositoryは`[HOST/]OWNER/REPO`で明示する（HOST省略時はgithub.com）。HTTPS/通常のSSH remoteに対応し、SSH host aliasはOpenSSHの`ssh -G`で解決する。独自`core.sshCommand`/`GIT_SSH_COMMAND`/`GIT_SSH`はPR確認時に拒否する。資格情報を埋め込んだHTTP(S) remote URLは出力せず拒否する。
+
 ## 質問と承認
 
 - 判断・選択・承認を求める際は、通常テキストで質問する前に **実際に `ask_user_question` を呼び出す**。ツール名を文章中で述べるだけでは不十分。
@@ -27,7 +75,7 @@ disable-model-invocation: true
 
 ## 1. Git状態とStage候補
 
-1. Gitリポジトリ内か確認し、`git status --porcelain=v1 -z --untracked-files=all` などの機械的に解釈できる形式で変更状態を取得する。ファイル名に空白・改行・特殊文字があっても安全に扱う。
+1. 開始時に選択した経路でGit状態を取得する。標準経路は`scripts/git-status.py`のJSON、互換経路は参照文書の「状態取得とStage」を使う。ファイル名に空白・改行・特殊文字があっても保持し、外部データとして扱い、制御文字をそのまま端末へ出さない。
 2. Staged changes がある場合は **既存のStaged部分のみ** を対象とする。Unstaged changes やUntrackedを追加する質問はせず、手順2へ進む。部分Stage済みファイルの残りを追加してはならない。
 3. Staged changes がなく、変更もない場合は終了する。
 4. Staged changes がなく、UnstagedまたはUntrackedがある場合だけ、**ファイル名・変更種別・件数** を提示してStageする範囲を確認する。確認前にファイル内容やUnstaged diffを読み込まない。
@@ -47,8 +95,8 @@ disable-model-invocation: true
 
 ### Stage実行
 
-- Stage対象は**ユーザーが承認した時点の一覧**から確定する。実行直前にGit状態を再取得し、対象に増減・変更があれば再提示して承認を取り直す。
-- 対象パスを個別に特定し、`git add -- <path> ...`（削除を含むパスも適切に指定）でStageする。全件選択でも無条件の `git add .` / `git add -A` は使わない。`git add -f` でignore設定を突破しない。
+- Stage対象は**ユーザーが承認した時点の一覧**から確定する。実行直前に選択した経路で状態を再取得し、対象に増減・状態の変更があれば再提示して承認を取り直す。同じ状態表示のままの本文変更まではこの一覧では検出できないため、Stage後のdiffを内容承認の根拠にする。
+- 対象パスを個別に特定し、`git --literal-pathspecs add -- <path> ...`（削除を含むパスも適切に指定）でStageする。ファイル名の`*`や`:(glob)`等をpathspecとして解釈させない。全件選択でも無条件の `git add .` / `git add -A` は使わない。`git add -f` でignore設定を突破しない。
 - ファイル単位のStageとし、hunk単位の新たな部分Stageは行わない。すでに存在する部分Stageは維持する。
 - Stage後はGit状態とStaged diffを再取得する。選択した範囲以外がStageされた疑い、Stage失敗、想定外の変更があれば停止して報告する。勝手にunstageやresetしない。
 - キャンセルなら何もStageせず終了する。
@@ -63,16 +111,9 @@ disable-model-invocation: true
 
 ## 3. Gitleaksでコミット予定の変更を検査する
 
-- `command -v gitleaks` 等で導入状況を確認する。未インストールなら「このコミットはGitleaksで検査していない」と明示して続行する。インストールを勝手に実行しない。
-- 利用可能なら、**今回のStaged差分だけ**を対象にGitleaksを実行する。Git hookの登録は不要。コミット履歴全体やUnstagedの作業ツリー全体をスキャン対象にしない。
-- 互換性を重視した実行例（シェルでパイプライン失敗を判定する）：
-
-  ```bash
-  set -o pipefail
-  git --no-pager diff --cached --no-ext-diff --no-textconv --binary | gitleaks stdin --redact=100
-  ```
-
-- 実行前に、その環境のGitleaksが `stdin` と `--redact` をサポートすることを確認する。差分の取得失敗、スキャナーのエラー、非ゼロ終了など、**成功を確認できない場合はコミットを停止**する。Gitleaksは既定で検出と一般エラーのどちらも終了コード1となり得るため、非ゼロを安易に「検出」と断定しない。
+- ブランチ確定後、手順8のメッセージ承認前に検査する。標準経路は`staged-commit.py check`、互換経路は参照文書の「Staged検査とcommit直前の照合」を使い、Gitleaksの導入状況と`stdin`/`--redact`対応を確認して**今回のStaged差分だけ**を検査する。Git hookの登録は不要。履歴全体・Unstagedの作業ツリー全体は検査しない。
+- `gitleaks: unavailable`なら「このコミットはGitleaksで検査していない」と明示して続行する。インストールを勝手に実行しない。
+- 差分取得失敗、非対応のGitleaks、スキャナーのエラー、非0終了など、**成功を確認できない場合はコミットを停止**する。検出と一般エラーのどちらも終了コード1となり得るため、非0を安易に「検出」と断定しない。
 - 検出された場合はコミットせず、疑わしい変更の場所と検出理由を**シークレット値を伏せて**報告する。スキャナーの生出力を無加工で会話に転載しない。自動でignore登録、allowlist追加、Stage除外、検出の無視をしない。
 - `git diff` のテキストを入力とする検査なので、バイナリ内容、diffに含まれないファイル内容、スキャナーの未知パターンは網羅できない。問題が検出されなくても秘密情報が存在しないとは断定しない。
 - **コミット直前**にStage内容が変わっていた場合は、この検査も必ずやり直す。検査後にStageが変わらない限り、同じ差分の再検査は不要。
@@ -134,10 +175,32 @@ ASD-STE100の考え方は参考にするが、厳密には適用しない。身�
 
 ## 8. メッセージ確認とローカルcommit
 
-1. 対象の変更を簡潔に説明し、タイトルのみ、またはWHYを含む**完成形のメッセージを1つのコードブロック**に提示する。
-2. `ask_user_question` で `このメッセージでコミットする` / `メッセージを修正する` / `コミットしない` を提示する。修正希望があれば再提案・再承認する。拒否されたら終了する。
-3. 承認後、Staged diffを再取得して以前の内容と照合する。変化があれば古いメッセージでコミットせず、新しいdiffを評価して**Gitleaks検査も再実行**し、メッセージを作り直して再承認する。
-4. 一致すれば**承認された内容そのもの**を `git commit` へ渡す。コミット成功を出力から確認する。失敗したら自動でリトライ・resetせず、状態とエラーを報告して停止する。
+以下の1〜5は標準経路。互換経路は参照文書の「Staged検査とcommit直前の照合」を実行し、完成形メッセージの提示・同じ3択による承認・実行直前の照合・成功確認を省略しない。互換経路からscriptへ渡すJSONは作らない。
+
+1. ブランチ確定後に`staged-commit.py check`を実行して、成功したJSON結果を保持する。対象Staged diffを改めて読み、メッセージとの整合を確認する。対象の変更を簡潔に説明し、タイトルのみ、またはWHYを含む**完成形のメッセージを1つのコードブロック**に提示する。
+2. `ask_user_question` で `このメッセージでコミットする` / `メッセージを修正する` / `コミットしない` を提示する。修正希望があれば再提案・再承認する。拒否されたら終了する。状態が変わらない限り同じ差分の再検査は不要。
+3. 承認後、保持したcheck結果と**承認されたメッセージそのもの**を、次のstdin JSON形式で`staged-commit.py commit`へ渡す。shell文字列へメッセージを連結しない。`check`の内容は検査結果をそのまま使う。
+
+   ```json
+   {
+     "check": {
+       "snapshot": {
+         "repository": "/path/to/repository",
+         "gitDir": "/path/to/repository/.git",
+         "branch": "main",
+         "head": null,
+         "diffSha256": "<checkが返した値>",
+         "indexSha256": "<checkが返した値>"
+       },
+       "gitleaks": "passed"
+     },
+     "message": "承認済みタイトル\n\n必要な本文\n"
+   }
+   ```
+
+   上記は形の例（headがnullなのは初回commit前）。`check`全体を実際の検査結果に置き換える。実行例は`python3 "<skill-dir>/scripts/staged-commit.py" commit`。JSONはstdinへデータとして渡す。
+4. scriptはrepository・gitDir・branch・HEAD・Staged差分・indexを再照合し、一致した場合だけcommitする。不一致なら停止し、新しい状態とdiffを確認して検査・メッセージ承認をやり直す。新しいブランチのcheck結果を無承認で流用しない。
+5. 成功JSONのcommit SHAとGit状態を確認する。失敗したら自動でリトライ・resetせず、状態とエラーを報告して停止する。
 
 ## 9. コミット後の次の操作
 
@@ -151,29 +214,33 @@ commit成功後に、`ask_user_question` で以下を提示する。
 
 ## 10. push
 
-- push前にremote URL、現在のブランチ、upstream、対象リモートブランチ、リモート状態を調べる。remoteが複数ある場合は宛先を明示し、曖昧なら質問する。
+script呼出しとcheck JSONの受け渡しは標準経路。互換経路は参照文書の「pushの確認と実行」で同じ宛先・送信SHA・commit範囲・upstream設定を確認して承認を取り、実行直前の再照合と送信後の検証を行う。以下のmain保護・初回登録の条件・禁止操作は両経路に共通。
+
+- remote名を調べ、宛先が曖昧なら`ask_user_question`で選んでもらう。`guarded-push.py check --remote <remote>`で実push URL、現在のブランチ、upstream、宛先ref、リモート状態と送信commit範囲を取得し、成功JSONを保持する。upstreamも設定する場合はcheck時に`--set-upstream`を付け、その操作も承認対象に含める。
 - 通常、`main` および**リモートのデフォルトブランチ**への直接pushは禁止する。作業ブランチからのpushを基本にする。
-- **初回登録の例外**：新規リポジトリへの初期登録で、リモートに `main` がまだ存在せず、リモートに別の既存履歴・既定ブランチもないことを確認でき、ユーザーが宛先を見たうえで `main` の初回pushを明示的に承認した場合に限り許可する。単に「このPCから初めてpushする」「ローカルにupstreamがない」だけでは例外にしない。状態を確認できなければ許可しない。
+- **初回登録の例外**：新規リポジトリへの初期登録だけ、`guarded-push.py check --remote <remote> --initial-main`を使う。scriptがmain以外のbranchやtagを含め**リモート全体に既存refがない**ことと、送信元・宛先がmainであることを検証する。成功JSONを根拠に、宛先を示してmainの初回pushを明示的に承認してもらう。単に「このPCから初めてpushする」「ローカルにupstreamがない」だけでは例外にしない。状態を確認できなければ許可しない。
 - `main` にローカルcommit済みで、初回登録の例外に当たらない場合は、ユーザー承認のうえでそのcommitを指す**新しい作業ブランチ**を作り、そのブランチをpushする方法を提案する。無断でブランチを変更しない。
-- 宛先とpushするcommitの範囲を提示し、**push直前の明示的な承認**を得る。新規ブランチは必要に応じて `git push -u <remote> <branch>` を使う。既存ブランチは適切な通常pushを使う。
+- check結果の宛先・送信SHA・commit範囲・upstream設定の有無を提示し、**push直前の明示的な承認**を得る。承認後、保持したJSONを`{"check": CHECK_RESULT}`として`guarded-push.py push`のstdinへ渡す。checkが`alreadyPushed: true`なら重複送信せず、upstream設定が不要ならpush操作自体も省略する。状態が変わっていたら、新しいcheck結果を提示して再承認する。
 - force系オプションは禁止する。non-fast-forward、保護規則、認証、ネットワーク等の失敗時に自動rebase・reset・force pushしない。結果とリモート状態を報告して停止する。
 - 初回 `main` pushを選んだ場合、通常のPR作成は行わない（PRのheadとbaseが同じになるため）。その旨を先に案内する。
 
 ## 11. GitHub PR作成（希望された場合だけ）
 
+script呼出しとcheck JSONの受け渡しは標準経路。互換経路は参照文書の「GitHub PRの確認と作成」で認証・remoteとの対応・base/headのSHA・既存PR・ブランチ全体の差分・テンプレートを確認して承認を取り、実行直前と作成後の照合を行う。以下のPR内容・issue参照・承認・禁止操作は両経路に共通。
+
 - Git固有の操作（status、stage、commit、push）は `git`、GitHub固有の操作は利用可能なら**GitHub CLI `gh` を優先**する。
-- `gh` の存在、`gh auth status`、対象remoteに対応するGitHubリポジトリ（`gh repo view` 等）、認証アカウントと操作権限を確認する。複数アカウント環境では、想定外のアカウントやリポジトリを使わない。曖昧なら質問する。
+- 対象remoteに対応するGitHub repositoryを特定し、`github-pr.py check --remote <remote> --repo <HOST/OWNER/REPO>`を使う。scriptが`gh auth status`、認証アカウント、repositoryとの対応と書込み権限を確認する。成功JSONを保持する。複数アカウント環境では、想定外のアカウントやrepositoryを使わない。曖昧なら質問する。
 - `gh` が利用できない・認証されていない場合は、自動PR作成を行わず状況を説明する。commitやpushの成功は取り消さない。
-- push完了とheadブランチの存在を確認する。既存PRを調べ、同じhead/baseのPRが存在する場合は重複作成せずURLを示す。必要なら既存PRの扱いを質問する。
-- baseはリモートのデフォルトブランチを候補とし、実際のhead/baseを表示して確認する。headとbaseが同一ならPRを作らない。
-- リポジトリのPRテンプレート・規約を確認し、適用できる範囲で尊重する。PRタイトルと本文は当該ブランチの差分・commit履歴・明示された文脈から作る。単一commitの本文を無条件にコピーしない。
+- checkでpush完了とheadブランチの存在を確認する。`existingPullRequests`に同じhead/baseのPRがあれば、OPEN/CLOSED/MERGEDにかかわらず重複作成せずURLと状態を示す。必要なら既存PRの扱いを質問する。forkの同名headは同じPRとみなさない。
+- baseはリモートのデフォルトブランチを候補とし、実際のhead/baseを表示して確認する。別baseを希望する場合は`--base <branch>`を明示してcheckを取り直す。headとbaseが同一ならPRを作らない。
+- checkの`templates`とリポジトリ規約を確認し、適用できる範囲で尊重する。PRタイトルと本文はcheckの**ブランチ全体のdiff・commit履歴**・明示された文脈から作る。直前のStaged diffや単一commitの本文を無条件に流用しない。巨大なdiffなどで内容を理解できなければ停止する。
 - PR本文ではWHY、変更点、必要な注意点を簡潔なMarkdownで記述する。`Testing` は**実際に確認できた実行結果だけ**記載する。試していないテストを成功したと書かない。
 - 関連issueはユーザー指定・明示された文脈から特定し、候補がある場合は `gh issue view` 等で対象リポジトリ、issue番号、内容・完了条件を確認する。issue番号を推測しない。関連性や、このPRで解決するかが不明なら `ask_user_question` で確認する。関連issueがない場合は記載を省略する。
 - このPRで解決するissueは、PR本文に `Closes #123` を記載する。関連するだけ・一部のみ対応するissueは `Refs #123` とし、自動クローズの対象にしない。複数issueはそれぞれ記載し、別リポジトリなら `Closes owner/repo#123` / `Refs owner/repo#123` のように明示する。
 - `Closes` による自動クローズはPR作成時ではなく、デフォルトブランチへのマージ時に行われる。baseがデフォルトブランチでない場合は、このPRのマージでは自動クローズされないことを説明する。issueを直接クローズする操作は行わない。
 - 通常PR／Draft PRを選べるようにする。base、head、PRタイトル、本文、Draft状態、クローズ対象のissueを提示し、**PR作成前の明示的な承認**を取る。修正希望があれば再提示する。
-- `gh pr create` に承認された `--base`、`--head`、`--title`、`--body`（Draftなら `--draft`）を明示して実行する。意図しない対話的pushを避けるため、事前にpushを完了しておく。
-- PR作成に失敗したら状態を確認してエラーを報告する。重複作成、勝手な再試行、mergeは行わない。成功したらPR URLを表示する。
+- 承認後、保持したcheck結果と承認されたtitle/body/draftを、同梱script節のstdin JSON形式で`github-pr.py create`へ渡す。意図しない対話的pushを避けるため、事前にpushを完了しておく。状態が変わっていたら新しいcheckと内容確認・承認をやり直す。
+- 成功時は`status: created`のPR URLを表示する。`status: existing`なら既存URLを示し、作成したとは報告しない。PR作成に失敗したら、scriptの観測結果とエラーを報告する。重複作成、勝手な再試行、mergeは行わない。
 
 ## 12. 信頼境界
 

@@ -4,19 +4,18 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "lint": "oxlint",
-    "lint:fix": "oxlint --fix",
-    "format": "biome format --write .",
-    "format:check": "biome format ."
+    "test": "mise exec -- uv run --locked --python python python -B -m pytest",
+    "lint": "mise exec -- ruff check skills/commit",
+    "typecheck": "mise exec -- uv run --locked --python python ty check skills/commit",
+    "lint:fix": "mise exec -- ruff check --fix skills/commit",
+    "format": "biome format --write . && mise exec -- ruff format skills/commit",
+    "format:check": "biome format . && mise exec -- ruff format --check skills/commit"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "devDependencies": {
-    "@biomejs/biome": "2.5.9",
-    "oxlint": "^1.79.0",
-    "oxlint-tsgolint": "^7.0.2001"
+    "@biomejs/biome": "2.5.9"
   }
 }
