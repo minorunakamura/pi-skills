@@ -181,7 +181,7 @@ def main():
         lambda: (
             check(args.remote, args.target, args.initial_main, args.set_upstream)
             if args.operation == "check"
-            else push(json.load(sys.stdin))
+            else push(json.load(sys.stdin.buffer))
         )
     )
 

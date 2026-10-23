@@ -146,7 +146,11 @@ def main():
     parser.add_argument("operation", choices=("check", "commit"))
     args = parser.parse_args()
     try:
-        result = check() if args.operation == "check" else commit(json.load(sys.stdin))
+        result = (
+            check()
+            if args.operation == "check"
+            else commit(json.load(sys.stdin.buffer))
+        )
         print(json.dumps(result, ensure_ascii=True))
         return 0
     except GuardError as error:
