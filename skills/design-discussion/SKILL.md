@@ -64,7 +64,7 @@ description: Develop a basic or high-level design through collaborative discussi
 | 不明なこと | 確認方法 |
 | --- | --- |
 | 現在の動作、既存機能、依存関係、変更の影響 | ソース・テスト・設定の確認、CodeGraph、必要なら Scout |
-| API、ライブラリ、標準仕様、現在のサービス制約 | `pi-ketch` または `pi-web-access` |
+| API、ライブラリ、標準仕様、現在のサービス制約 | 公式 Ketch Extension または `pi-web-access` |
 | 目的、優先度、業務上の意味、許容するコストやリスク | 根拠と推奨を示してユーザーと議論 |
 | 資料やコードだけでは確かめられない挙動 | 必要な実験と観測条件を提案し、未確認として残す |
 
@@ -78,8 +78,8 @@ description: Develop a basic or high-level design through collaborative discussi
 
 ### 外部情報
 
-- Root が直接 `pi-ketch` の tools を使うか、必要なら `pi-subagents` 経由で `pi-ketch.researcher` に限定した調査を渡す。問い、対象バージョン、必要な根拠を指定する。独自 Researcher や Extension の配線は追加しない。
-- `pi-ketch` では、ライブラリの API・仕様は `ketch_docs`、OSS の利用例は `ketch_code`、一般の外部情報は `ketch_search`、既知の URL は `ketch_scrape` を使う。未知のライブラリは名前を resolve し、正しい library ID か確認する。
+- Root が直接公式 Ketch Extension の tools を使うか、必要なら `pi-subagents` 経由で `pi-ketch.researcher` に限定した調査を渡す。問い、対象バージョン、必要な根拠を指定する。独自 Researcher や Extension の配線は追加しない。
+- 公式 Ketch Extension では、ライブラリの API・仕様は `ketch_docs`、OSS の利用例は `ketch_code`、一般の外部情報は `ketch_search`、既知の URL は `ketch_scrape` を使う。未知のライブラリは名前を resolve し、正しい library ID か確認する。
 - `pi-web-access` を使う場合、tools が未公開なら `web_enable` で有効化し、現在公開されている tool の定義に従う。検索は `web_search`、既知の URL は `fetch_content` を基本にする。片方で十分なら両方で重複調査しない。
 - 公式資料や一次情報を優先し、重要な結論には URL、対象バージョンや確認日を残す。検索の抜粋や Agent の報告だけで重要な仕様を断定しない。
 - 根拠が食い違う場合は違いと設計への影響を示す。解消できなければ未確認のまま残す。
