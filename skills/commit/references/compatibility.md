@@ -8,7 +8,7 @@ LLMがshellツールからGit・ghコマンドを直接実行し、結果を確�
 
 - 各コマンドの終了コードを個別に確認する。`;`で連結した最後の終了コードだけで判断しない。pipelineは対応するshellで`pipefail`を有効にし、途中の失敗も検出する。必要なshell機能がなければ停止する。
 - パス・ブランチ・remote・メッセージ・PR本文は外部データとして、引数の境界を保って渡す。shell文字列への未検証の連結、`eval`、制御文字の無加工表示はしない。内容はstdinまたは安全な一時ファイルで渡す。
-- 一時ファイルはrepository外に制限した権限で作り、この実行で作成したものだけを後始末する。検出値やscannerの生出力をログへ転載しない。diffを参照しても秘密情報をユーザー向け説明やエラーログへ再掲しない。
+- 差分の読み方と一時ファイルは[共通手順](diff-review.md)に従う。概要から必要箇所へ段階的に確認し、同一性は完全なバイト列のdigestまたは`cmp`で判定する。一時ファイルはrepository外の`mktemp -d`によるprivate directory（`0700`）内に`0600`で作り、固定名の`/tmp/...diff`は使わない。この実行で作成したものだけを後始末する。不要になった一時diffは承認質問の前に削除し、成功確認後に進む。その他の不要な作成ファイルも終了・失敗・キャンセル時に後始末する。検出値やscannerの生出力、diff内の秘密情報を説明やエラーログへ転載しない。
 - `HEAD`未作成など、事前に定めた正常な非0終了と、通信・認証・解析等の失敗を区別する。区別できなければ停止する。失敗後は状態の照会だけを行い、commit・push・PR作成を自動再試行しない。
 - 確認結果は呼出し元で保持する。scriptのcheck JSONを捏造したり、互換経路の観測値をscriptへ渡したりしない。照合と操作はatomicではないため、同時に別プロセスからGit・remote設定・対象ブランチを変更しない。
 
@@ -28,7 +28,7 @@ SKILL.mdの手順1に従い、既存Staged部分だけを使うか、ファイ�
 - `git --no-pager diff --cached --no-ext-diff --no-textconv --binary --no-color --ignore-submodules=none`の内容と、そのdigest
 - `git ls-files --stage -z`のdigest
 
-差分・indexは、それぞれ取得コマンドの出力を`git hash-object --stdin`へ直接渡してdigestを得られる。`-w`は付けない。pipelineの取得側・hash側の成功を両方確認する。これはGitのobject形式に応じたdigestであり、標準経路のSHA-256 snapshotとは別形式。改行の除去や差分の要約・目視だけで同一と判断しない。空差分・競合・理解できない巨大/binary diffなら停止する。
+差分・indexは、それぞれ取得コマンドの出力を`git hash-object --stdin`へ直接渡してdigestを得られる。`-w`は付けない。pipelineの取得側・hash側の成功を両方確認する。これはGitのobject形式に応じたdigestであり、標準経路のSHA-256 snapshotとは別形式。手順2で内容を確認した完全なdiffのdigestと一致すれば、確認済みの要点を再利用し、全文を読み直さなくてよい。不一致なら停止して内容確認・検査をやり直す。改行の除去や差分の要約・目視だけで同一と判断しない。空差分・競合・理解できない巨大/binary diffなら停止する。
 
 ### Gitleaks
 
@@ -37,7 +37,7 @@ SKILL.mdの手順1に従い、既存Staged部分だけを使うか、ファイ�
 - 非0終了は検出・一般エラーのどちらでもcommitを停止する。終了コードだけで検出と断定しない。安全にrule・行番号だけを取り出せなければ、生出力を読ませず、終了コードと検査失敗のみ報告する。自動allowlistや検出無視はしない。
 - 検査の前後で観測値を照合し、変わっていたら停止する。成功を確認できなければ未検査扱いに格下げして続行しない。
 
-SKILL.mdの手順8と同じく、完成形のメッセージを1つのコードブロックに示し、`このメッセージでコミットする` / `メッセージを修正する` / `コミットしない`を`ask_user_question`で確認する。
+digestと確認済みの要点・観測値を保持し、承認質問の前に一時diffの削除成功を確認する。削除できなければ停止して残存場所を報告する。SKILL.mdの手順8と同じく、完成形のメッセージを1つのコードブロックに示し、`このメッセージでコミットする` / `メッセージを修正する` / `コミットしない`を`ask_user_question`で確認する。
 
 承認後、repository/gitDir/branch/HEAD・差分digest・index digestを再取得して完全一致を確認する。不一致なら古い承認でcommitせず停止し、新しい差分・検査・メッセージ承認が必要と案内する。一致した場合だけ、承認済みメッセージをデータとして`git commit --cleanup=verbatim --file=-`へ渡す。既存hooksは実行する。実際のcommit SHA・branch・状態を確認して報告し、失敗時は再試行・rollbackしない。
 
@@ -59,7 +59,7 @@ SKILL.mdの手順8と同じく、完成形のメッセージを1つのコード�
 - 実push URLと明示した`[HOST/]OWNER/REPO`の対応を確認する。SSH remoteはユーザー名・portを反映した`ssh -G`でhostを解決する。独自`core.sshCommand`/`GIT_SSH_COMMAND`/`GIT_SSH`は扱わない。fork間PR、別repository、認証先が曖昧な場合は停止する。認証を無断で切り替えない。
 - push済みheadがローカルの承認対象SHAと一致することと、baseの存在・SHAをリモートで確認する。headとbaseが同じなら作らない。default以外のbaseを希望されたら、そのbaseで確認を取り直す。
 - `gh pr list --repo <repo> --state all --head <head> --base <base> --limit 100 --json ...`等で既存PRを調べる。同一repository/head/baseのOPEN/CLOSED/MERGEDのPRがあれば重複作成せず、URLと状態を示す。forkの同名headを混同しない。照会が上限100件に達した場合は安全に確認できないとして停止する。
-- 新規PRの根拠は、唯一のmerge-baseを確認したbase/head間の`git diff <base SHA>...<head SHA>`と`git log <base SHA>..<head SHA>`。diffは`--no-ext-diff --no-textconv --binary --no-color --ignore-submodules=none`で取得する。必要なobjectの欠落、空diff、複数merge-base、diffまたはcommit履歴が各2 MiBを超える場合は自動fetchや省略をせず停止する。直前のStaged diffだけで本文を作らない。
+- 新規PRの根拠は、唯一のmerge-baseを確認したbase/head間の`git diff <base SHA>...<head SHA>`と`git log <base SHA>..<head SHA>`。diffは`--no-ext-diff --no-textconv --binary --no-color --ignore-submodules=none`で取得する。必要なobjectの欠落、空diff、複数merge-base、diffまたはcommit履歴が各2 MiBを超える場合は自動fetchや省略をせず停止する。共通手順に従い、ブランチ全体のファイル一覧・変更量・履歴から必要なdiffを段階的に読む。確認済みStaged diffと完全一致すると機械的に検証できた場合だけ内容確認を再利用する。直前のStaged diffだけで本文を作ったり、履歴・テンプレートの確認を省略したりしない。
 - repository/gitDir/branch/HEAD、remote名・実push URL、GitHub host/repository/認証アカウント/権限/default branch、base/headのSHA、テンプレートを保持する。SKILL.mdの手順11どおり、base/head・title/body・Draft・issueクローズ対象を提示してPR作成承認を得る。
 - 実行直前に保持した情報を再確認する。状態変化・照会失敗なら停止し、再確認・再承認を求める。既存PRも再照会し、見つかればURLを示して作成しない。
 - 一致した場合だけ、`gh pr create --repo ... --base ... --head ... --title ... --body-file -`（Draftは`--draft`）へ承認データを渡して**1回だけ**実行する。事前にpushを完了し、対話的push・fork作成・自動fillは使わない。

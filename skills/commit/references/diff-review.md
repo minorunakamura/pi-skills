@@ -1,0 +1,70 @@
+# 差分の段階的な確認と一時ファイル
+
+標準・互換経路の両方で使う。SKILL.mdの手順2から読み、PRのブランチ全体の差分にも適用する。commitメッセージに必要な内容確認と、完全な差分の機械的な同一性判定を分ける。要約だけで未確認の変更を理解したことにしない。
+
+## 1. 全体像から必要箇所へ
+
+- Stagedでは、まず既存の状態取得結果と`git --no-pager diff --cached --no-ext-diff --no-textconv --ignore-submodules=none --stat`・`--numstat -z`等でファイル・変更種別・変更量を把握する。概要と本文は同じ差分に基づくことを確認する。NUL区切りのパスを改行・空白で分割したり、制御文字を無加工表示したりしない。
+- 本文は下記のcanonical diffを内部で保持し、必要なファイル・hunkだけを順に表示する。作業ツリーのファイルを代わりに読まない。概要だけでは分からない独立した変更、削除・rename・binary・mode変更も確認する。未確認部分が説明に影響するなら追加で読むか、理解できない理由を示して停止する。
+- 表示はツールの出力上限内に収める。切り詰めがあれば、その応答を完全なdiffとみなさず、欠けた必要箇所だけを読み足す。複数の大きな断片を一括出力し、切り詰め後に重複して読み直すことを避ける。
+- 全体像・確認済み箇所・変更の要点・未解決の疑問・完全なdiffのdigestを呼出し元で保持する。単なるdigestの取得は内容確認ではない。全ファイルの変更目的が説明でき、WHAT・WHY・分割判断に必要な疑問が解消するまで確認する。
+- Codemode等でツール結果を内部処理できる場合は、巨大な結果をそのまま`text()`等へ渡さず、必要な概要・部分だけを出力する。`github-pr.py check`のJSONは改変せず保持し、表示用のコピーから`diff`を除く。保持ツールの容量上限を超えるJSONは下記のprivate directory内の権限制限したファイルで保持し、全文を`read`しない。永続的な承認DBにはしない。
+
+## 2. 安全な一時diff
+
+一時ファイルが必要な場合だけ作る。OSの信頼できる一時領域を親にし、`mktemp -d`で毎回新しいprivate directory（`0700`）を確保する。固定名の`/tmp/...diff`、時刻・PIDだけの名前、既存directoryの再利用はしない。実体パスでrepository外と確認する。以下は対象repositoryをcwdにして、第1引数に信頼できる一時親directory（例：`/tmp`）を渡して実行するshell例。
+
+```sh
+repository=$(git rev-parse --show-toplevel) || exit 1
+repository=$(cd "$repository" && pwd -P) || exit 1
+temp_parent=$(cd "${1:?trusted temporary parent required}" && pwd -P) || exit 1
+case "$temp_parent/" in
+  "${repository%/}/"*) printf '%s\n' 'temporary parent is inside repository' >&2; exit 1 ;;
+esac
+umask 077
+review_dir=$(mktemp -d "$temp_parent/pi-commit-review.XXXXXXXXXX") || exit 1
+if ! git --no-pager diff --cached --no-ext-diff --no-textconv --binary --no-color --ignore-submodules=none > "$review_dir/staged.diff" || ! test -s "$review_dir/staged.diff"; then
+  rm -f -- "$review_dir/staged.diff"
+  rmdir -- "$review_dir"
+  exit 1
+fi
+printf '%s\n' "$review_dir"
+```
+
+- 成功時のdirectoryパスだけを保持し、その中で`staged.diff`・`pr.diff`等の用途別名を使う。完全なdiffを保存し、改行変換・末尾改行の除去・表示用の省略はしない。
+- fileは`0600`とする。`umask`は別のツール呼出しには引き継がれないため、保存するshell呼出しごとに`umask 077`を設定する。別の書込みツールでもこの権限を保証する。PRのdiffは`check.diff`をUTF-8で、JSON全体は保持した値を欠落なく保存する。確認できない切り詰め・取得失敗では停止する。
+- directory作成・書込み・コマンドの終了コードをそれぞれ確認する。`mktemp`失敗時に固定名で代用しない。stdout/stderrを捕捉する場合も同じ権限にする。検出値やscannerの生出力、diff内の秘密情報を説明やエラーログへ転載しない。
+
+## 3. 同一性判定と再利用
+
+- 標準経路では、確認したcanonical Staged diffの**生のバイト列全体**のSHA-256を計算し、`staged-commit.py check`の`snapshot.diffSha256`と照合する。次の例は第1引数をdiffのパスとし、`python3`は開始時に選択した実行ファイルに置き換える。`-I -S`でrepositoryや環境変数由来のPythonコードを読み込ませず、ファイル全体をLLMへ返さない。
+
+```sh
+python3 -I -S -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$1"
+```
+
+- 互換経路では、同じ完全なdiffを`git hash-object --stdin`へ渡したdigestで観測値を照合する（`-w`なし）。標準経路のSHA-256とは比較しない。全Staged差分のGitleaks検査と検査前後・操作直前の照合は省略しない。
+- PRはcheckが返したbase/head間のブランチ全体のdiffを対象に、まずファイル一覧・変更量・全commit履歴を把握する。標準経路の概要をGitで取る場合も、checkのbase/head SHAによる唯一のmerge-base基準を使う。確認済みStaged diffと同じだと仮定しない。
+- 完全な2つのdiffを比較するなら、次の例に各ファイルのパスを第1・第2引数で渡す。終了コード`0`だけが一致、`1`は相違、その他は比較失敗。相違ならブランチ全体の必要箇所を確認し、失敗なら停止する。一致した場合でも未読の履歴・テンプレートは確認する。
+
+```sh
+cmp -s -- "$1" "$2"
+```
+
+- digest比較でも、同じアルゴリズム・同じcanonical形式の完全なバイト列を使う。切り詰められる`read`結果・表示用の文字列・stat・要約を比較しない。部分diffのdigestを全体のものとして扱わない。
+- commit・push・PR作成の承認やscriptのsnapshot照合を、digest一致で代替しない。不一致なら古い内容確認・承認を流用せず、該当段階の確認・検査・承認をやり直す。
+
+## 4. 後始末
+
+内容確認と完全なdiffのdigest取得が終わり、不要になった一時diffはその時点で削除する。**承認質問の前に一時diffの削除成功を確認する**。ブランチ・分割・WHY・メッセージ・PR等の質問でも、後続の終了処理に削除を先送りしない。保持したdigest・確認済みの要点・操作に必要なcheck結果を使い、承認待ちに元のdiffファイルを残さない。後続のPRとの比較にも、元ファイルを残す代わりに同じcanonical形式・アルゴリズムのdigestを使える。
+
+この実行が作成したファイルだけを削除し、空になったprivate directoryを`rmdir`する。別ツールから読む間は残す必要があるため、作成したshellが終了しただけで消すtrapは使わない。以下は第1引数が保持したdirectoryで、この2ファイルだけを作成した場合。他にもJSON等を作った場合は、不要になったものの記録したパスだけを追加する。
+
+```sh
+rm -f -- "$1/staged.diff" "$1/pr.diff" || exit 1
+rmdir -- "$1"
+```
+
+他実行のdirectory、globで一致したファイル、作成記録のないものを削除しない。後始末失敗なら承認質問へ進まず停止し、残存場所と失敗を報告する。Gitのreset・rollbackは行わない。
+
+正常終了・失敗・キャンセル時にも、まだ不要な作成ファイルが残っていれば後始末する。ただし、UIキャンセルや強制中断ではLLMが再開せず終了処理を実行できない場合がある。承認待ち前の削除で今回の経路を防ぐのであり、削除前の任意のタイミングでの強制中断まで保証するものではない。

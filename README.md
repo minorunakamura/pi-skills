@@ -54,12 +54,37 @@ Git の変更状態を確認し、必要な選択・承認を求めながらコ�
 - Gitを変更する前にshellでPythonの存在・バージョンを確認し、実行経路を選びます。標準経路ではGit状態の取得に `git-status.py`、Staged diffの検査・照合・commitに `staged-commit.py`、pushに `guarded-push.py`、GitHub PR作成に `github-pr.py` を使います。
 - 互換経路では[専用手順](skills/commit/references/compatibility.md)に従ってLLMがGit・ghコマンドを実行します。承認、部分Stageの保護、Gitleaks検査、commit/push/PR直前の状態照合は省略しません。ただしscriptと同等の機械的ガードは保証できず、特殊なファイル名等を安全に扱えない場合は停止します。
 - 経路選択は開始時だけです。Pythonの起動失敗・不正応答は停止し、script実行後の検査失敗・状態不一致・認証/通信エラー・timeout等から互換経路へ切り替えて再実行しません。Pythonの自動installやPATH変更もしません。
+- diffはファイル一覧・変更量から必要箇所へ段階的に確認します。確認済みの完全なdiffとの同一性はdigestや`cmp`で判定し、再読を避けます。一時diffはrepository外のランダムなprivate directory（`0700`）内へ`0600`で保存し、不要になったら承認質問の前に削除します。digestと確認済みの要点は保持し、この実行のファイルだけを後始末します。
 - Gitleaks が利用可能なら、コミット予定の Staged diff を検査します。未導入の場合は未検査であることを報告します。検査後に差分・index・ブランチ・HEADが変わっていればcommitせず停止します。
 - scriptはユーザー承認を代行しません。承認はPi側で行い、検査結果は呼出し元で保持します。永続的な承認DBは作りません。同時に別プロセスからGitを変更しないでください。
 - push と PR 作成は希望した場合だけ行います。各経路で保持した確認結果を承認後に再照合し、pushは承認時のSHAだけを送信、PRはpush済みのhead/baseと認証アカウントを確認して作成します。既存PRは重複作成しません。通信エラーでは成否を照会し、自動再試行しません。
 - PR本文はブランチ全体のdiff・commit履歴とGitHubのテンプレートを根拠にします。両経路ともPRの自動作成には認証済みの `gh` が必要です。同一repository内のPRのみ対応し、SSH host aliasの解決にはOpenSSHを使います。fork間PRや独自SSH commandは自動処理しません。
 - 必要なcommit objectがローカルにない場合は、自動fetchせず停止します。照合とリモート操作は完全にatomicではありません。失敗してもリモート変更が完了している場合があるため、結果確認前に再実行しないでください。
 - reset、amend、force push、rebase、merge、release、deploy は行いません。
+
+#### 状態一覧の色付き表示
+
+同梱の`extensions/commit-status.js`は、取得済みの状態JSONを表示するだけの`commit_status_display` toolを追加します。Git操作や`git-status.py`のJSONは変更しません。Pi packageとして導入した場合は自動検出され、`/reload`後に使えます。Pi 1.3.0を対象としています。
+
+絵文字ではないテキストの`●`だけを色付けし、状態名・ファイル名は通常色で表示します。このtoolは標準の色付き背景枠を使わず、通常背景に一覧を表示します。theme設定や他のtoolの表示は変更しません。
+
+| 状態 | themeの色指定 | 標準darkでの色 |
+| --- | --- | --- |
+| Modified | `warning` | 黄色 |
+| Untracked | `mdLink` | 青色 |
+| Added | `success` | 緑色 |
+| Deleted | `error` | 赤色 |
+
+部分StageはStaged/Unstagedを分け、rename/copyは元パスも表示します。色は有効なthemeに従います。toolがない環境やTUI以外では通常のテキスト表示を使います。承認・検査の手順は変わりません。
+
+スキルだけをsymlinkで導入している場合は、cloneしたリポジトリのルートから表示extensionもリンクできます。既存ファイルは上書きしません。
+
+```bash
+mkdir -p ~/.pi/agent/extensions
+ln -s "$PWD/extensions/commit-status.js" ~/.pi/agent/extensions/commit-status.js
+```
+
+その後Piで`/reload`を実行してください。
 
 ### design-discussion
 
@@ -98,9 +123,9 @@ pnpm format:check
 pnpm test
 ```
 
-`pnpm lint`はRuff、`pnpm typecheck`はty、`pnpm format:check`はBiomeとRuff、`pnpm test`はpytestを実行します。`pnpm lint:fix`でRuffの自動修正、`pnpm format`で整形を適用します。BiomeはJSON等のformatに使います。Ruffの`target-version`とtyの`python-version`も3.14に合わせています。型検査はscript・テスト・fixtureを含み、診断の一括無効化やテスト除外はしません。これらは開発用です。同梱scriptはPython標準ライブラリだけを使い、互換経路はPythonを必要としません。
+`pnpm lint`はPythonにRuff、表示extensionとそのテストにBiomeを使います。`pnpm typecheck`はPythonをtyで検査し、`pnpm format:check`はBiomeとRuff、`pnpm test`はNode.js標準のtest runnerとpytestを実行します。`pnpm lint:fix`でRuffの自動修正、`pnpm format`で整形を適用します。BiomeはJSON・JavaScript等のformatに使います。Ruffの`target-version`とtyの`python-version`も3.14に合わせています。型検査はscript・テスト・fixtureを含み、診断の一括無効化やテスト除外はしません。これらは開発用です。同梱scriptはPython標準ライブラリだけを使い、互換経路はPythonを必要としません。
 
-pytestでは`tmp_path`・共通fixture・`parametrize`・`monkeypatch`を使い、一時Gitリポジトリとbare remoteでstatus解析、部分Stage、Gitleaks検査、状態変化時のcommit/push拒否、main保護と初回登録の例外、PRの本文・Draft・重複防止、認証・通信エラーとtimeout時の再試行禁止などを検証します。Gitleaks・gh・SSHはテスト用の実行ファイルで再現するため、実行時には不要です。実remoteやGitHubには接続しません。回帰テストはGitとPOSIX環境を対象とします。
+pytestでは`tmp_path`・共通fixture・`parametrize`・`monkeypatch`を使い、一時Gitリポジトリとbare remoteでstatus解析、部分Stage、Gitleaks検査、状態変化時のcommit/push拒否、main保護と初回登録の例外、PRの本文・Draft・重複防止、認証・通信エラーとtimeout時の再試行禁止などを検証します。Gitleaks・gh・SSHはテスト用の実行ファイルで再現するため、実行時には不要です。実remoteやGitHubには接続しません。回帰テストはGitとPOSIX環境を対象とします。表示extensionのNode.jsテストはPi提供moduleの境界だけをstubにし、色の割当て、部分Stage・rename・競合、制御文字のescape、不正JSONの拒否、TUI以外の表示を確認します。Pi本体の追加installや外部接続は不要です。Pi提供moduleはoptionalなpeer dependencyとして宣言し、`pnpm-workspace.yaml`でpeerの自動installを無効化して、開発時にもSDKを二重導入しません。
 
 ## CI
 
