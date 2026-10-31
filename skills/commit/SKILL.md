@@ -67,6 +67,25 @@ python3 "<skill-dir>/scripts/github-pr.py" check --remote origin --repo HOST/OWN
 - push/PRの外部コマンドは各60秒でtimeoutする。必要なcommit objectがローカルになければ停止し、自動fetchしない。PR diffとcommit履歴はそれぞれ2 MiBを超えると省略せず停止する。既存PRの照会は100件に達すると停止する。
 - PR自動作成は**同一repository内**のみ対応し、fork間PRは扱わない。repositoryは`[HOST/]OWNER/REPO`で明示する（HOST省略時はgithub.com）。HTTPS/通常のSSH remoteに対応し、SSH host aliasはOpenSSHの`ssh -G`で解決する。独自`core.sshCommand`/`GIT_SSH_COMMAND`/`GIT_SSH`はPR確認時に拒否する。資格情報を埋め込んだHTTP(S) remote URLは出力せず拒否する。
 
+### opt-in: commit前のpush／PR準備API
+
+以下は**同梱scriptの追加API契約だけ**であり、このSkillの既定フロー・Stage範囲・質問・承認手順は変更しない。呼出し元が明示的にこのAPIを利用する場合に限る。`COMMIT_CHECK`・`COMMIT_RESULT`は上記scriptが返したJSONオブジェクトそのもの、`PUSH_PREPARATION`・`PR_PREPARATION`も以下の成功stdoutを改変せず保持したものを指す（文字列ではない）。stdinはUTF-8 JSON、成功stdoutはJSON・終了コード0。
+
+| CLI（`python3 "<skill-dir>/scripts/…"`） | stdin | 成功stdout |
+| --- | --- | --- |
+| `guarded-push.py prepare --remote REMOTE [--target TARGET] [--initial-main] [--set-upstream]` | `{"commitCheck": COMMIT_CHECK}` | `PUSH_PREPARATION`: `kind: "push-preparation"`、元の`commitCheck`、`sourceUpstream`、`destination`、既存送信対象の`commits` |
+| `github-pr.py prepare --remote REMOTE --repo [HOST/]OWNER/REPO [--base BASE]` | `{"commitCheck": COMMIT_CHECK, "pushPreparation": PUSH_PREPARATION}` | `PR_PREPARATION`: `kind: "pr-preparation"`、元の両入力、`destination`、`mergeBase`、`diffSha256`、`units`、`fetchRefspecs`、`commitsSha256`、`diff`、`commits`、`templates`、`existingPullRequests` |
+| `github-pr.py verify` | `{"preparation": PR_PREPARATION, "commit": COMMIT_RESULT}` | `kind: "pr-verification"`、検証した`commit` SHA・`branch`・`diffSha256`（実行不可） |
+| `guarded-push.py check --prepared` | `{"preparation": PUSH_PREPARATION, "commit": COMMIT_RESULT}` | 既存のpush用checkと同じ`{snapshot, commits, alreadyPushed}` |
+| `github-pr.py check --prepared` | `{"preparation": PR_PREPARATION, "commit": COMMIT_RESULT}` | 既存のcreate用checkと同じ`{snapshot, diff, commits, templates, existingPullRequests}` |
+
+- 順序はStagedの`check` → pushの`prepare` →（PRを伴う場合）PRの`prepare` → 承認済み内容で既存の`staged-commit.py commit` →（PRを伴う場合）`verify` → pushの`check --prepared` → そのcheckを既存の`push`へ → push成功後にPRの`check --prepared` → そのcheckと確定title/body/draftを既存の`create`へ。commitのみならremote準備は不要、pushのみならPR準備・verifyは不要。
+- 準備はbranch作成・commit・push・upstream設定・PR作成を行わない（tree objectは作成し得る）。`destination`はrepository/gitDir、予定branch、実在する親head、upstream、remote・実push URL等を固定する。push準備はtarget・remote/default SHAとupstream設定方針も保持し、PR準備はbase/base SHA・認証account/permission・template digestも固定する。PRでは予定branch＝push target＝PR headが必要。未来のcommit SHAは生成しない。
+- 準備・verifyの結果は`kind`があり、実行用のトップレベル`snapshot`はない。これらを`push`／`create`のcheckとして渡すことは拒否される。verifyはpush前の一致確認だけであり、元のPR準備やCOMMIT_RESULTを置き換えない。元の入力・結果を最後までそのまま保持し、HEADやrefsを手書き更新しない。`--prepared`と宛先オプションの併用も拒否する。
+- PRの`diffSha256`は唯一のmerge-baseから予定index treeへの**完全なcanonical diff bytes**のSHA-256。`units`は`{path, oldMode, newMode, oldOid, newOid}`。既存branch履歴と今回のStagedを区別し、完全diff／変更単位が一致した確認済み要点だけを[共通手順](references/diff-review.md)に従い再利用する。既存PRがあればそのURL・状態を返し、新規文章用の`diff: null`・`commits: []`・`templates: []`とするが、照合用digest・unitsは保持する。
+- 許容する変化は予定branchの作成・検証済みcommitと、そのSHAへの予定pushだけ。`--set-upstream`は未設定または指定remote/targetと同じ設定だけを受け付け、push後の未設定→指定先への設定だけを追加で許す。指定なしなら無関係な既存upstreamも変更せず保持する。PRのpush後照合は、固定したfetch設定順で予定targetに最初に一致する正のrefspec（完全な`refs/...`のexact／wildcard）のtracking refだけを検証済みSHAへ更新・作成可能とする。負のfetch refspecはこのpush時の対応を取り消さない。その他のrefs・元branchのupstream・fetch設定等の変化、不正／非対応mappingは停止する。
+- 不正UTF-8／JSONは秘密値やtracebackを返さず非0終了（commitは`invalid_input`、push/PRは`invalid_input_or_response`）。不正な準備・結果、parent/tree/message/index・宛先・base/default・認証・template等の不一致でも停止し、準備を最新状態に書き換えて続行しない。従来の保護・2 MiB制限・自動fetch／再試行／rollback禁止・非atomic性は維持する。既存の引数付き`check`・`push`・`create`は変更せず、通常のPR `check`は引き続きpush済みHEADを要求する。
+
 ## 質問と承認
 
 - 判断・選択・承認を求める際は、通常テキストで質問する前に **実際に `ask_user_question` を呼び出す**。ツール名を文章中で述べるだけでは不十分。

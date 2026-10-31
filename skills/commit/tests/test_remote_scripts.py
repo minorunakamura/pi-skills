@@ -1,5 +1,6 @@
 """Real temporary Git remotes, with isolated gh/ssh fixtures and no network."""
 
+import hashlib
 import importlib.util
 import json
 import subprocess
@@ -30,6 +31,7 @@ class TestRemoteScripts:
         self.env.update(
             {
                 "REAL_GIT": git_executable,
+                "GIT_PUSH_LOG": str(self.root / "push.log"),
                 "REMOTE_PATH": str(self.remote),
                 "GH_LOG": str(self.root / "gh.log"),
                 "GH_STATE": str(self.root / "gh.json"),
@@ -143,6 +145,467 @@ class TestRemoteScripts:
         )
         return [args for args in calls if args[:2] == operation.split()]
 
+    def commit_check(self, *args):
+        (self.repo / "pending.txt").write_text("pending")
+        self.git("add", "pending.txt")
+        return self.script("staged-commit.py", "check", *args)
+
+    def push_prepare(self, checked, *args, **kwargs):
+        return self.script(
+            "guarded-push.py",
+            "prepare",
+            "--remote",
+            "origin",
+            *args,
+            request={"commitCheck": checked},
+            **kwargs,
+        )
+
+    def commit_checked(self, checked):
+        return self.script(
+            "staged-commit.py",
+            "commit",
+            request={"check": checked, "message": "feat: pending"},
+        )
+
+    def prepared_push_check(self, preparation, commit, **kwargs):
+        return self.script(
+            "guarded-push.py",
+            "check",
+            "--prepared",
+            request={"preparation": preparation, "commit": commit},
+            **kwargs,
+        )
+
+    def push_calls(self):
+        path = Path(self.env["GIT_PUSH_LOG"])
+        return path.read_text().splitlines() if path.exists() else []
+
+    def test_push_prepare_collects_destination_and_history_without_mutation(self):
+        checked = self.commit_check("--branch", "planned")
+        refs = self.git("show-ref")
+        preparation = self.push_prepare(
+            checked, "--target", "published", "--set-upstream"
+        )
+        assert preparation["kind"] == "push-preparation"
+        assert preparation["commitCheck"] == checked
+        assert preparation["destination"]["target"] == "published"
+        assert preparation["destination"]["branch"] == "planned"
+        assert preparation["destination"]["defaultHead"] == self.base
+        assert preparation["destination"]["setUpstream"] is True
+        assert [x["message"].strip() for x in preparation["commits"]] == [
+            "first",
+            "second",
+        ]
+        assert "snapshot" not in preparation
+        assert self.git("show-ref") == refs
+        assert self.git("branch", "--show-current").strip() == b"feature"
+        assert self.push_calls() == []
+
+    def test_prepared_push_check_accepts_verified_commit_without_json_rewriting(self):
+        checked = self.commit_check("--branch", "planned")
+        preparation = self.push_prepare(
+            checked, "--target", "published", "--set-upstream"
+        )
+        commit = self.commit_checked(checked)
+        executable = self.prepared_push_check(preparation, commit)
+        assert executable["snapshot"]["head"] == commit["commit"]
+        assert [x["message"].strip() for x in executable["commits"]] == [
+            "first",
+            "second",
+            "feat: pending",
+        ]
+        assert self.push_calls() == []
+        result = self.push(executable)
+        assert result["status"] == "pushed"
+        assert result["branch"] == "planned"
+        assert result["target"] == "published"
+        assert (
+            self.remote_git("rev-parse", "published").decode().strip()
+            == commit["commit"]
+        )
+        assert (
+            self.git("rev-parse", "--abbrev-ref", "@{upstream}").strip()
+            == b"origin/published"
+        )
+        assert len(self.push_calls()) == 1
+
+    @pytest.mark.parametrize("change", ["head", "branch", "index", "mode", "refs"])
+    def test_push_prepare_rejects_stale_commit_check_without_push(self, change):
+        checked = self.commit_check()
+        self.change_prepared_local_state(change)
+        self.push_prepare(checked, success=False)
+        assert self.push_calls() == []
+
+    def change_prepared_local_state(self, change):
+        if change == "head":
+            self.git("commit", "--allow-empty", "-m", "unexpected")
+        elif change == "branch":
+            self.git("switch", "-c", "unexpected")
+        elif change == "index":
+            (self.repo / "pending.txt").write_text("changed")
+            self.git("add", "pending.txt")
+        elif change == "mode":
+            self.git("update-index", "--chmod=+x", "pending.txt")
+        elif change == "refs":
+            self.git("tag", "unexpected")
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            "head",
+            "branch",
+            "index",
+            "mode",
+            "refs",
+            "url",
+            "target",
+            "default",
+            "upstream",
+        ],
+    )
+    def test_prepared_push_check_rejects_state_drift_without_push(self, change):
+        checked = self.commit_check()
+        preparation = self.push_prepare(checked)
+        commit = self.commit_checked(checked)
+        if change == "url":
+            self.git("config", "remote.origin.pushurl", str(self.remote) + "/")
+        elif change == "target":
+            self.remote_git("update-ref", "refs/heads/feature", self.base)
+        elif change == "default":
+            self.remote_git("fetch", str(self.repo), "feature:main")
+        elif change == "upstream":
+            self.git("config", "branch.feature.remote", "other")
+        else:
+            self.change_prepared_local_state(change)
+        self.prepared_push_check(preparation, commit, success=False)
+        assert self.push_calls() == []
+
+    @pytest.mark.parametrize(
+        "field,value",
+        [
+            ("commit", "0" * 40),
+            ("branch", "other"),
+            ("parents", []),
+            ("tree", "0" * 40),
+            ("messageSha256", "0" * 64),
+            ("gitleaks", "passed"),
+        ],
+    )
+    def test_prepared_push_check_binds_every_commit_result_field(self, field, value):
+        checked = self.commit_check()
+        preparation = self.push_prepare(checked)
+        commit = self.commit_checked(checked)
+        if field == "gitleaks":
+            value = "unavailable" if commit[field] == "passed" else "passed"
+        commit[field] = value
+        assert (
+            self.prepared_push_check(preparation, commit, success=False)["error"]
+            == "prepared_commit_changed"
+        )
+        assert self.push_calls() == []
+
+    def test_push_preparation_cannot_be_used_as_execution_check(self):
+        checked = self.commit_check()
+        preparation = self.push_prepare(checked)
+        assert self.push(preparation, success=False)["error"] == "invalid_push_request"
+        assert self.push_calls() == []
+
+    def test_push_prepare_revalidates_commit_check_after_remote_material_collection(
+        self,
+    ):
+        checked = self.commit_check()
+        wrapper = self.bin / "git"
+        source = wrapper.read_text()
+        counter = self.root / "ls-remote-count"
+        wrapper.write_text(
+            source.replace(
+                'if tool == "git":',
+                'if tool == "git":\n'
+                '    if "ls-remote" in args:\n'
+                f"        counter = Path({str(counter)!r})\n"
+                "        count = int(counter.read_text()) + 1 if counter.exists() else 1\n"
+                "        counter.write_text(str(count))\n"
+                "        if count == 2:\n"
+                '            subprocess.run([real_git, "update-index", "--chmod=+x", "pending.txt"], check=True)\n',
+            )
+        )
+        self.push_prepare(checked, success=False)
+        assert self.push_calls() == []
+
+    @pytest.mark.parametrize("parents", [[], ["base"], ["head"], ["head", "base"]])
+    def test_prepared_push_check_rejects_wrong_actual_parent_even_with_matching_result(
+        self, parents
+    ):
+        checked = self.commit_check()
+        preparation = self.push_prepare(checked)
+        commit = self.commit_checked(checked)
+        actual_parents = [
+            self.base if parent == "base" else commit["commit"] for parent in parents
+        ]
+        args = ["commit-tree", commit["tree"], "-m", "forged"]
+        for parent in actual_parents:
+            args.extend(["-p", parent])
+        forged = self.git(*args).decode().strip()
+        self.git("update-ref", "refs/heads/feature", forged)
+        commit.update(
+            commit=forged,
+            parents=actual_parents,
+            messageSha256=hashlib.sha256(b"forged\n").hexdigest(),
+        )
+        assert (
+            self.prepared_push_check(preparation, commit, success=False)["error"]
+            == "prepared_commit_changed"
+        )
+        assert self.push_calls() == []
+
+    def test_push_prepare_and_check_preserve_gitleaks_link_without_rescanning(self):
+        scanner = self.bin / "gitleaks"
+        log = self.root / "gitleaks.log"
+        scanner.write_text(
+            f"#!{sys.executable}\nfrom pathlib import Path\nimport sys\n"
+            f"with Path({str(log)!r}).open('a') as log: log.write('call\\n')\n"
+            "print('stdin --redact' if '--help' in sys.argv else '[]')\n"
+        )
+        scanner.chmod(0o700)
+        checked = self.commit_check()
+        assert checked["gitleaks"] == "passed"
+        preparation = self.push_prepare(checked)
+        commit = self.commit_checked(checked)
+        self.prepared_push_check(preparation, commit)
+        assert log.read_text() == "call\ncall\n"
+        assert self.push_calls() == []
+
+    @pytest.mark.parametrize("planned", [False, True])
+    def test_push_prepare_retains_effective_upstream_and_rejects_conflicts(
+        self, planned
+    ):
+        branch = "planned" if planned else "feature"
+        self.git("config", f"branch.{branch}.remote", "other")
+        self.git("config", f"branch.{branch}.merge", "refs/heads/other")
+        checked = self.commit_check(*(["--branch", branch] if planned else []))
+        assert (
+            self.push_prepare(checked, "--set-upstream", success=False)["error"]
+            == "conflicting_upstream"
+        )
+        self.git("config", f"branch.{branch}.remote", "origin")
+        self.git("config", f"branch.{branch}.merge", "refs/heads/feature")
+        preparation = self.push_prepare(
+            checked, "--target", "feature", "--set-upstream"
+        )
+        assert preparation["destination"]["upstream"] == {
+            "remote": "origin",
+            "merge": "refs/heads/feature",
+        }
+        commit = self.commit_checked(checked)
+        self.prepared_push_check(preparation, commit)
+        assert self.push_calls() == []
+
+    @pytest.mark.parametrize("planned", [False, True])
+    def test_prepared_push_preserves_different_upstream_when_not_setting_it(
+        self, planned
+    ):
+        branch = "planned" if planned else "feature"
+        self.git("config", f"branch.{branch}.remote", "other")
+        self.git("config", f"branch.{branch}.merge", "refs/heads/other")
+        checked = self.commit_check(*(["--branch", branch] if planned else []))
+        preparation = self.push_prepare(checked, "--target", "published")
+        assert preparation["destination"]["setUpstream"] is False
+        commit = self.commit_checked(checked)
+        executable = self.prepared_push_check(preparation, commit)
+        result = self.push(executable)
+        assert result["status"] == "pushed"
+        assert result["upstreamConfigured"] is False
+        assert self.git("config", f"branch.{branch}.remote").strip() == b"other"
+        assert (
+            self.git("config", f"branch.{branch}.merge").strip() == b"refs/heads/other"
+        )
+        assert (
+            self.remote_git("rev-parse", "published").decode().strip()
+            == commit["commit"]
+        )
+        assert len(self.push_calls()) == 1
+
+    def test_prepared_push_rejects_original_branch_upstream_drift(self):
+        checked = self.commit_check("--branch", "planned")
+        preparation = self.push_prepare(checked)
+        commit = self.commit_checked(checked)
+        self.git("config", "branch.feature.remote", "unexpected")
+        assert (
+            self.prepared_push_check(preparation, commit, success=False)["error"]
+            == "push_preparation_changed"
+        )
+        assert self.push_calls() == []
+
+    def test_prepared_push_supports_initial_local_main_commit_only_on_empty_remote(
+        self,
+    ):
+        self.repo = self.root / "unborn"
+        self.repo.mkdir()
+        self.git("init", "-b", "main")
+        self.git("config", "user.name", "Test User")
+        self.git("config", "user.email", "test@example.invalid")
+        self.git("config", "commit.gpgsign", "false")
+        self.git("remote", "add", "origin", str(self.remote))
+        checked = self.commit_check()
+        assert checked["snapshot"]["head"] is None
+        assert (
+            self.push_prepare(checked, "--target", "feature", success=False)["error"]
+            == "missing_local_commit"
+        )
+        self.remote_git("update-ref", "-d", "refs/heads/main")
+        assert (
+            self.push_prepare(checked, success=False)["error"]
+            == "protected_push_target"
+        )
+        preparation = self.push_prepare(checked, "--initial-main")
+        assert preparation["commits"] == []
+        assert preparation["destination"]["emptyRemote"] is True
+        commit = self.commit_checked(checked)
+        assert commit["parents"] == []
+        executable = self.prepared_push_check(preparation, commit)
+        assert self.push_calls() == []
+        assert self.push(executable)["status"] == "pushed"
+        assert self.remote_git("rev-parse", "main").decode().strip() == commit["commit"]
+
+    def test_push_prepare_preserves_non_fast_forward_and_protected_target_guards(self):
+        self.git("switch", "-c", "divergent", self.base)
+        self.add_commit("divergent.txt", "divergent")
+        self.git("push", "origin", "divergent:feature")
+        self.git("switch", "feature")
+        checked = self.commit_check()
+        assert self.push_prepare(checked, success=False)["error"] == "non_fast_forward"
+        assert (
+            self.push_prepare(checked, "--target", "main", success=False)["error"]
+            == "protected_push_target"
+        )
+        assert (
+            self.push_prepare(checked, "--initial-main", success=False)["error"]
+            == "initial_main_requires_empty_remote"
+        )
+        assert self.push_calls() == []
+
+    def test_push_prepare_initial_main_rejects_tag_only_remote(self):
+        self.git("switch", "main")
+        self.remote_git("update-ref", "refs/tags/existing", self.base)
+        self.remote_git("update-ref", "-d", "refs/heads/main")
+        checked = self.commit_check()
+        self.push_prepare(checked, "--initial-main", success=False)
+        assert self.push_calls() == []
+
+    @pytest.mark.parametrize("mapping", ["standard", "custom", "negative"])
+    def test_prepared_push_updates_only_git_mapped_tracking_refs(self, mapping):
+        if mapping == "custom":
+            self.git(
+                "config", "remote.origin.fetch", "+refs/heads/*:refs/custom/origin/*"
+            )
+        elif mapping == "negative":
+            self.git("config", "--add", "remote.origin.fetch", "^refs/heads/feature")
+        checked = self.commit_check()
+        preparation = self.push_prepare(checked)
+        commit = self.commit_checked(checked)
+        self.push(self.prepared_push_check(preparation, commit))
+        tracking = (
+            "refs/custom/origin/feature"
+            if mapping == "custom"
+            else "refs/remotes/origin/feature"
+        )
+        # Git push updates tracking refs even when a negative fetch mapping excludes it.
+        assert self.git("rev-parse", tracking).decode().strip() == commit["commit"]
+        assert (
+            self.git("rev-parse", "refs/remotes/origin/main").decode().strip()
+            == self.base
+        )
+        assert len(self.push_calls()) == 1
+
+    def test_prepared_push_check_rejects_missing_retained_diff_digest(self):
+        checked = self.commit_check()
+        preparation = self.push_prepare(checked)
+        commit = self.commit_checked(checked)
+        del preparation["commitCheck"]["snapshot"]["diffSha256"]
+        self.prepared_push_check(preparation, commit, success=False)
+        assert self.push_calls() == []
+
+    @pytest.mark.parametrize("operation", ["prepare", "check"])
+    def test_push_prepared_commands_reject_malformed_stdin_without_leaks(
+        self, operation
+    ):
+        args = ["--remote", "origin"] if operation == "prepare" else ["--prepared"]
+        for payload in (b"", b"{", b"\xff", b"null", b"[]", b'{"SECRET": true}'):
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-B",
+                    str(SCRIPTS / "guarded-push.py"),
+                    operation,
+                    *args,
+                ],
+                cwd=self.repo,
+                env=self.env,
+                input=payload,
+                capture_output=True,
+                timeout=30,
+            )
+            assert result.returncode == 1
+            assert "error" in json.loads(result.stdout)
+            assert b"SECRET" not in result.stdout + result.stderr
+            assert b"Traceback" not in result.stderr
+        assert self.push_calls() == []
+
+    @pytest.mark.parametrize(
+        "field", ["kind", "commitCheck", "destination", "sourceUpstream", "commits"]
+    )
+    def test_prepared_push_check_rejects_malformed_preparation(self, field):
+        checked = self.commit_check()
+        preparation = self.push_prepare(checked)
+        commit = self.commit_checked(checked)
+        preparation[field] = None
+        self.prepared_push_check(preparation, commit, success=False)
+        assert self.push_calls() == []
+
+    @pytest.mark.parametrize("result", [None, [], {}, {"commit": "SECRET"}])
+    def test_prepared_push_check_rejects_malformed_commit_result(self, result):
+        checked = self.commit_check()
+        preparation = self.push_prepare(checked)
+        self.commit_checked(checked)
+        self.prepared_push_check(preparation, result, success=False)
+        assert self.push_calls() == []
+
+    def test_prepared_push_check_revalidates_source_upstream_after_material_collection(
+        self,
+    ):
+        checked = self.commit_check("--branch", "planned")
+        preparation = self.push_prepare(checked)
+        commit = self.commit_checked(checked)
+        wrapper = self.bin / "git"
+        counter = self.root / "ls-remote-count"
+        wrapper.write_text(
+            wrapper.read_text().replace(
+                'if tool == "git":',
+                'if tool == "git":\n'
+                '    if "ls-remote" in args:\n'
+                f"        counter = Path({str(counter)!r})\n"
+                "        count = int(counter.read_text()) + 1 if counter.exists() else 1\n"
+                "        counter.write_text(str(count))\n"
+                "        if count == 2:\n"
+                '            subprocess.run([real_git, "config", "branch.feature.remote", "other"], check=True)\n',
+            )
+        )
+        self.prepared_push_check(preparation, commit, success=False)
+        assert self.push_calls() == []
+
+    @pytest.mark.parametrize("field", ["repository", "gitDir"])
+    def test_prepared_push_check_rejects_different_repository_identity(self, field):
+        checked = self.commit_check()
+        preparation = self.push_prepare(checked)
+        commit = self.commit_checked(checked)
+        preparation["commitCheck"]["snapshot"][field] = str(self.root / "different")
+        assert (
+            self.prepared_push_check(preparation, commit, success=False)["error"]
+            == "prepared_commit_changed"
+        )
+        assert self.push_calls() == []
+
     def test_push_exact_sha_and_optional_upstream(self):
         checked = self.push_check("--set-upstream")
         assert [x["message"].strip() for x in checked["commits"]] == ["first", "second"]
@@ -232,7 +695,8 @@ class TestRemoteScripts:
         assert not self.remote_git("for-each-ref", "refs/tags", "refs/heads/unapproved")
         assert self.remote_git("rev-parse", "main").decode().strip() == self.base
 
-    def test_push_failure_does_not_retry_or_recover(self):
+    @pytest.mark.parametrize("prepared", [False, True])
+    def test_push_failure_does_not_retry_or_recover(self, prepared):
         hook = self.remote / "hooks" / "pre-receive"
         log = self.root / "push-count"
         hook.write_text(
@@ -241,10 +705,616 @@ class TestRemoteScripts:
             "print('SECRET_HOOK_ERROR', file=sys.stderr)\nsys.exit(1)\n"
         )
         hook.chmod(0o700)
-        result = self.push(self.push_check(), success=False)
+        if prepared:
+            checked = self.commit_check()
+            preparation = self.push_prepare(checked)
+            executable = self.prepared_push_check(
+                preparation, self.commit_checked(checked)
+            )
+        else:
+            executable = self.push_check()
+        result = self.push(executable, success=False)
+        assert len(self.push_calls()) == 1
         assert result["error"] == "push_failed"
         assert result["observedHead"] is None
         assert log.read_text() == "attempt\n"
+
+    def future_pr(self, *branch_args, push_args=()):
+        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
+        checked = self.commit_check(*branch_args)
+        pushed = self.push_prepare(checked, *push_args)
+        preparation = self.pr_prepare(checked, pushed)
+        return checked, pushed, preparation
+
+    def pr_prepare(self, checked, pushed, *args, **kwargs):
+        return self.script(
+            "github-pr.py",
+            "prepare",
+            "--remote",
+            "origin",
+            "--repo",
+            "owner/repo",
+            *args,
+            request={"commitCheck": checked, "pushPreparation": pushed},
+            **kwargs,
+        )
+
+    def prepared_pr(self, operation, preparation, commit, **kwargs):
+        args = ("check", "--prepared") if operation == "check" else (operation,)
+        return self.script(
+            "github-pr.py",
+            *args,
+            request={"preparation": preparation, "commit": commit},
+            **kwargs,
+        )
+
+    def test_pr_prepare_collects_future_whole_branch_without_mutation(self):
+        refs = self.git("show-ref")
+        checked, pushed, preparation = self.future_pr("--branch", "planned")
+        assert preparation["kind"] == "pr-preparation"
+        assert "snapshot" not in preparation
+        assert preparation["commitCheck"] == checked
+        assert preparation["pushPreparation"] == pushed
+        assert preparation["destination"]["branch"] == "planned"
+        assert preparation["destination"]["head"] == self.head
+        assert preparation["mergeBase"] == self.base
+        assert [x["message"].strip() for x in preparation["commits"]] == [
+            "first",
+            "second",
+        ]
+        assert "first.txt" in preparation["diff"]
+        assert "second.txt" in preparation["diff"]
+        assert "pending.txt" in preparation["diff"]
+        assert (
+            preparation["diffSha256"]
+            == hashlib.sha256(preparation["diff"].encode()).hexdigest()
+        )
+        assert [x["path"] for x in preparation["units"]] == [
+            "first.txt",
+            "pending.txt",
+            "second.txt",
+        ]
+        assert preparation["diffSha256"] != checked["snapshot"]["diffSha256"]
+        assert preparation["diff"].encode() == self.git(
+            "--no-pager",
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--binary",
+            "--no-color",
+            "--no-renames",
+            "--ignore-submodules=none",
+            preparation["mergeBase"],
+            checked["snapshot"]["tree"],
+        )
+        unit = preparation["units"][1]
+        assert (
+            self.git("diff", "--cached", "--raw", "-z", "--no-abbrev", "--no-renames")
+            == (
+                f":{unit['oldMode']} {unit['newMode']} {unit['oldOid']} {unit['newOid']} A\0"
+                f"{unit['path']}\0"
+            ).encode()
+        )
+        assert unit == {
+            "path": "pending.txt",
+            "oldMode": "000000",
+            "newMode": "100644",
+            "oldOid": "0" * len(self.head),
+            "newOid": self.git("rev-parse", ":pending.txt").decode().strip(),
+        }
+        assert self.git("show-ref") == refs
+        assert self.git("branch", "--show-current").strip() == b"feature"
+        assert self.push_calls() == []
+        assert self.gh_calls("pr create") == []
+
+    def test_pr_verify_accepts_actual_commit_before_push_but_is_not_create_check(self):
+        checked, _, preparation = self.future_pr("--branch", "planned")
+        commit = self.commit_checked(checked)
+        verified = self.prepared_pr("verify", preparation, commit)
+        assert verified["kind"] == "pr-verification"
+        assert verified["commit"] == commit["commit"]
+        assert verified["diffSha256"] == preparation["diffSha256"]
+        assert "snapshot" not in verified
+        assert self.create(verified, success=False)["error"] == "invalid_pr_request"
+        assert self.create(preparation, success=False)["error"] == "invalid_pr_request"
+        assert self.push(preparation, success=False)["error"] == "invalid_push_request"
+        assert self.push(verified, success=False)["error"] == "invalid_push_request"
+        assert self.push_calls() == []
+        assert self.gh_calls("pr create") == []
+
+    @pytest.mark.parametrize("mapping", ["standard", "custom", "negative"])
+    def test_pr_prepared_check_accepts_only_planned_push_and_git_mapped_refs(
+        self, mapping
+    ):
+        if mapping == "custom":
+            self.git(
+                "config", "remote.origin.fetch", "+refs/heads/*:refs/custom/origin/*"
+            )
+        elif mapping == "negative":
+            self.git("config", "--add", "remote.origin.fetch", "^refs/heads/planned")
+        checked, pushed, preparation = self.future_pr(
+            "--branch", "planned", push_args=("--set-upstream",)
+        )
+        commit = self.commit_checked(checked)
+        self.prepared_pr("check", preparation, commit, success=False)
+        self.prepared_pr("verify", preparation, commit)
+        self.push(self.prepared_push_check(pushed, commit))
+        executable = self.prepared_pr("check", preparation, commit)
+        assert executable["snapshot"]["head"] == commit["commit"]
+        assert executable["snapshot"]["branch"] == "planned"
+        assert "first.txt" in executable["diff"]
+        assert len(executable["commits"]) == 3
+        result = self.create(executable, fields={"draft": True})
+        assert result["status"] == "created"
+        assert result["draft"] is True
+        assert len(self.push_calls()) == 1
+        assert len(self.gh_calls("pr create")) == 1
+
+    @pytest.mark.parametrize("exact_first", [False, True])
+    def test_pr_pipeline_updates_only_first_matching_positive_fetch_mapping(
+        self, exact_first
+    ):
+        mappings = [
+            ("+refs/heads/*:refs/remotes/origin/*", "refs/remotes/origin/planned"),
+            ("refs/heads/planned:refs/custom/exact", "refs/custom/exact"),
+        ]
+        if exact_first:
+            mappings.reverse()
+        self.git("config", "--unset-all", "remote.origin.fetch")
+        for spec, ref in mappings:
+            self.git("config", "--add", "remote.origin.fetch", spec)
+            self.git("update-ref", ref, self.base)
+        self.git("tag", "unrelated", self.base)
+        checked, pushed, preparation = self.future_pr("--branch", "planned")
+        commit = self.commit_checked(checked)
+        self.prepared_pr("verify", preparation, commit)
+        self.push(self.prepared_push_check(pushed, commit))
+        refs = dict(
+            line.split(" ", 1)
+            for line in self.git("for-each-ref", "--format=%(refname) %(objectname)")
+            .decode()
+            .splitlines()
+        )
+        assert refs == {
+            **checked["snapshot"]["refs"],
+            "refs/heads/planned": commit["commit"],
+            mappings[0][1]: commit["commit"],
+        }
+        assert refs[mappings[1][1]] == self.base
+        executable = self.prepared_pr("check", preparation, commit)
+        assert self.create(executable)["status"] == "created"
+        assert len(self.push_calls()) == 1
+        assert len(self.gh_calls("pr create")) == 1
+
+    @pytest.mark.parametrize("state", ["OPEN", "CLOSED", "MERGED"])
+    def test_pr_future_duplicate_omits_new_text_but_verifies_and_never_creates(
+        self, state
+    ):
+        self.gh_state["prs"] = [
+            {
+                "number": 1,
+                "url": "https://github.com/owner/repo/pull/1",
+                "state": state,
+                "isCrossRepository": False,
+                "headRefName": "feature",
+                "baseRefName": "main",
+            }
+        ]
+        self.save_gh()
+        checked, pushed, preparation = self.future_pr()
+        assert preparation["diff"] is None
+        assert preparation["commits"] == []
+        assert preparation["templates"] == []
+        assert preparation["diffSha256"]
+        commit = self.commit_checked(checked)
+        self.prepared_pr("verify", preparation, commit)
+        self.push(self.prepared_push_check(pushed, commit))
+        executable = self.prepared_pr("check", preparation, commit)
+        assert executable["diff"] is None
+        assert executable["commits"] == []
+        assert self.create(executable)["status"] == "existing"
+        assert self.gh_calls("pr create") == []
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            "head",
+            "branch",
+            "index",
+            "mode",
+            "refs",
+            "url",
+            "target",
+            "upstream",
+            "base",
+            "default",
+            "account",
+            "permission",
+            "template",
+            "fetch",
+            "parent",
+            "message",
+        ],
+    )
+    def test_pr_verify_rejects_drift_before_any_push(self, change):
+        checked, _, preparation = self.future_pr()
+        commit = self.commit_checked(checked)
+        self.change_pr_prepared_state(change, preparation, commit)
+        self.prepared_pr("verify", preparation, commit, success=False)
+        assert self.push_calls() == []
+        assert self.gh_calls("pr create") == []
+
+    def change_pr_prepared_state(self, change, preparation, commit):
+        if change in ("head", "branch", "index", "mode", "refs"):
+            self.change_prepared_local_state(change)
+        elif change == "url":
+            self.git("remote", "set-url", "--push", "origin", str(self.remote))
+        elif change == "target":
+            preparation["pushPreparation"]["destination"]["target"] = "other"
+        elif change == "upstream":
+            self.git("config", "branch.feature.remote", "elsewhere")
+        elif change == "base":
+            self.remote_git("fetch", str(self.repo), "feature:main")
+        elif change == "default":
+            self.remote_git("update-ref", "refs/heads/default", self.base)
+            self.remote_git("symbolic-ref", "HEAD", "refs/heads/default")
+            self.gh_state["metadata"]["defaultBranchRef"] = {"name": "default"}
+            self.save_gh()
+        elif change == "account":
+            self.gh_state["account"] = "other"
+            self.save_gh()
+        elif change == "permission":
+            self.gh_state["metadata"]["viewerPermission"] = "ADMIN"
+            self.save_gh()
+        elif change == "template":
+            self.gh_state["metadata"]["pullRequestTemplates"] = [
+                {"filename": "pr.md", "body": "changed"}
+            ]
+            self.save_gh()
+        elif change == "fetch":
+            self.git("config", "remote.origin.fetch", "+refs/heads/*:refs/other/*")
+        elif change == "parent":
+            wrong = (
+                self.git(
+                    "commit-tree",
+                    commit["tree"],
+                    "-p",
+                    self.base,
+                    "-m",
+                    "feat: pending",
+                )
+                .decode()
+                .strip()
+            )
+            self.git("update-ref", "refs/heads/feature", wrong)
+            commit.update(commit=wrong, parents=[self.base])
+        elif change == "message":
+            commit["messageSha256"] = "0" * 64
+        elif change == "mapped-sha":
+            self.git("update-ref", "refs/remotes/origin/feature", self.base)
+        elif change == "unmapped-ref":
+            self.git("update-ref", "refs/custom/unapproved", commit["commit"])
+        elif change == "remote-target":
+            self.remote_git("update-ref", "refs/heads/feature", self.base)
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            "refs",
+            "mapped-sha",
+            "unmapped-ref",
+            "remote-target",
+            "upstream",
+            "fetch",
+            "base",
+            "account",
+            "template",
+            "index",
+            "mode",
+        ],
+    )
+    def test_pr_prepared_check_rejects_unapproved_postpush_transitions(self, change):
+        checked, pushed, preparation = self.future_pr()
+        commit = self.commit_checked(checked)
+        self.push(self.prepared_push_check(pushed, commit))
+        self.change_pr_prepared_state(change, preparation, commit)
+        self.prepared_pr("check", preparation, commit, success=False)
+        assert len(self.push_calls()) == 1
+        assert self.gh_calls("pr create") == []
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            "target",
+            "remote",
+            "url",
+            "commit-check",
+            "branch",
+            "mode",
+            "account-response",
+            "auth",
+            "permission",
+            "base",
+        ],
+    )
+    def test_pr_prepare_rejects_invalid_early_materials_without_mutation(self, change):
+        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
+        checked = self.commit_check("--branch", "planned")
+        pushed = self.push_prepare(
+            checked, *(("--target", "other") if change == "target" else ())
+        )
+        args = ()
+        if change == "remote":
+            pushed["destination"]["remote"] = "other"
+        elif change == "url":
+            pushed["destination"]["pushUrl"] = "https://github.com/owner/repo.git"
+        elif change == "commit-check":
+            checked = json.loads(json.dumps(checked))
+            checked["snapshot"]["tree"] = (
+                self.git("rev-parse", "HEAD^{tree}").decode().strip()
+            )
+        elif change in ("branch", "mode"):
+            self.change_prepared_local_state(change)
+        elif change == "account-response":
+            self.env["GH_MODE"] = "bad-json"
+        elif change == "auth":
+            self.env["GH_MODE"] = "auth-fail"
+        elif change == "permission":
+            self.gh_state["metadata"]["viewerPermission"] = "READ"
+            self.save_gh()
+        elif change == "base":
+            args = ("--base", "missing")
+        self.pr_prepare(checked, pushed, *args, success=False)
+        assert self.push_calls() == []
+        assert self.gh_calls("pr create") == []
+
+    @pytest.mark.parametrize("mapping", ["custom", "negative", "exact"])
+    def test_pr_prepared_check_rejects_wrong_mapped_sha_for_frozen_mapping(
+        self, mapping
+    ):
+        if mapping == "custom":
+            spec, ref = (
+                "+refs/heads/*:refs/custom/origin/*",
+                "refs/custom/origin/feature",
+            )
+        elif mapping == "exact":
+            spec, ref = "refs/heads/feature:refs/custom/exact", "refs/custom/exact"
+        else:
+            spec, ref = (
+                "+refs/heads/*:refs/remotes/origin/*",
+                "refs/remotes/origin/feature",
+            )
+        self.git("config", "remote.origin.fetch", spec)
+        if mapping == "negative":
+            self.git("config", "--add", "remote.origin.fetch", "^refs/heads/feature")
+        checked, pushed, preparation = self.future_pr()
+        commit = self.commit_checked(checked)
+        self.push(self.prepared_push_check(pushed, commit))
+        self.prepared_pr("check", preparation, commit)
+        self.git("update-ref", ref, self.base)
+        self.prepared_pr("check", preparation, commit, success=False)
+        assert self.gh_calls("pr create") == []
+
+    @pytest.mark.parametrize(
+        "spec",
+        [
+            "refs/heads/*",
+            "refs/heads/*:refs/custom/exact",
+            "^refs/heads/*:refs/custom/*",
+            "+refs/heads/**:refs/custom/**",
+            "HEAD:refs/custom/head",
+        ],
+    )
+    def test_pr_prepare_rejects_unsupported_fetch_mapping(self, spec):
+        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
+        checked = self.commit_check()
+        pushed = self.push_prepare(checked)
+        self.git("config", "--add", "remote.origin.fetch", spec)
+        self.pr_prepare(checked, pushed, success=False)
+        assert self.push_calls() == []
+        assert self.gh_calls("pr create") == []
+
+    def test_pr_future_existing_merged_duplicate_allows_empty_planned_diff(self):
+        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
+        self.git("read-tree", self.base)
+        checked = self.script("staged-commit.py", "check")
+        pushed = self.push_prepare(checked)
+        self.gh_state["prs"] = [
+            {
+                "number": 1,
+                "url": "https://github.com/owner/repo/pull/1",
+                "state": "MERGED",
+                "isCrossRepository": False,
+                "headRefName": "feature",
+                "baseRefName": "main",
+            }
+        ]
+        self.save_gh()
+        preparation = self.pr_prepare(checked, pushed)
+        assert preparation["diff"] is None
+        assert preparation["diffSha256"] == hashlib.sha256(b"").hexdigest()
+        assert preparation["units"] == []
+        commit = self.commit_checked(checked)
+        self.prepared_pr("verify", preparation, commit)
+        self.push(self.prepared_push_check(pushed, commit))
+        assert (
+            self.create(self.prepared_pr("check", preparation, commit))["status"]
+            == "existing"
+        )
+        assert self.gh_calls("pr create") == []
+
+    @pytest.mark.parametrize("planned", [False, True])
+    def test_pr_pipeline_preserves_unrelated_upstream_without_set_upstream(
+        self, planned
+    ):
+        branch = "planned" if planned else "feature"
+        self.git("push", "origin", "HEAD~1:refs/heads/" + branch)
+        self.git("config", "branch." + branch + ".remote", "origin")
+        self.git("config", "branch." + branch + ".merge", "refs/heads/main")
+        checked, pushed, preparation = self.future_pr(
+            *(("--branch", branch) if planned else ())
+        )
+        assert pushed["destination"]["remoteHead"] != self.head
+        commit = self.commit_checked(checked)
+        self.prepared_pr("verify", preparation, commit)
+        self.push(self.prepared_push_check(pushed, commit))
+        executable = self.prepared_pr("check", preparation, commit)
+        assert executable["snapshot"]["upstream"] == {
+            "remote": "origin",
+            "merge": "refs/heads/main",
+        }
+        assert self.create(executable)["status"] == "created"
+
+    @pytest.mark.parametrize("operation", ["prepare", "verify", "check"])
+    def test_pr_prepared_commands_reject_malformed_json_without_leaks(self, operation):
+        args = (
+            ("prepare", "--remote", "origin", "--repo", "owner/repo")
+            if operation == "prepare"
+            else (("check", "--prepared") if operation == "check" else ("verify",))
+        )
+        for data in (b"{", b"\xff", b"null", b"[]"):
+            result = subprocess.run(
+                [sys.executable, "-B", str(SCRIPTS / "github-pr.py"), *args],
+                cwd=self.repo,
+                env=self.env,
+                input=data,
+                capture_output=True,
+            )
+            assert result.returncode == 1
+            assert "error" in json.loads(result.stdout)
+            assert b"Traceback" not in result.stderr
+            assert b"SECRET" not in result.stdout + result.stderr
+        assert self.push_calls() == []
+        assert self.gh_calls("pr create") == []
+
+    @pytest.mark.parametrize("operation", ["verify", "check"])
+    def test_pr_prepared_commands_bind_exact_result_and_preparation(self, operation):
+        checked, pushed, preparation = self.future_pr()
+        commit = self.commit_checked(checked)
+        if operation == "check":
+            self.push(self.prepared_push_check(pushed, commit))
+        for field, value in [
+            ("commit", self.head),
+            ("branch", "other"),
+            ("tree", self.base),
+            ("parents", []),
+            ("messageSha256", "0" * 64),
+            ("gitleaks", "failed"),
+        ]:
+            self.prepared_pr(
+                operation, preparation, {**commit, field: value}, success=False
+            )
+        for field in (
+            "kind",
+            "commitCheck",
+            "pushPreparation",
+            "destination",
+            "diffSha256",
+            "mergeBase",
+            "units",
+            "commitsSha256",
+            "fetchRefspecs",
+        ):
+            malformed = {**preparation, field: None}
+            self.prepared_pr(operation, malformed, commit, success=False)
+        for malformed in (None, [], {}, {"commit": "SECRET"}):
+            self.prepared_pr(operation, preparation, malformed, success=False)
+        assert self.gh_calls("pr create") == []
+
+    def test_pr_prepare_rejects_complete_branch_diff_over_two_mib(self):
+        (self.repo / "large.txt").write_text("x" * (2 * 1024 * 1024))
+        self.git("add", "large.txt")
+        self.git("commit", "-m", "large diff")
+        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
+        checked = self.commit_check()
+        pushed = self.push_prepare(checked)
+        assert (
+            self.pr_prepare(checked, pushed, success=False)["error"]
+            == "pr_diff_too_large"
+        )
+        assert self.push_calls() == []
+        assert self.gh_calls("pr create") == []
+
+    def test_pr_prepare_rejects_history_over_two_mib_even_when_push_history_is_short(
+        self,
+    ):
+        tree = self.git("rev-parse", "HEAD^{tree}").decode().strip()
+        large = (
+            subprocess.run(
+                [self.git_executable, "commit-tree", tree, "-p", self.head],
+                cwd=self.repo,
+                env=self.env,
+                input=b"x" * (2 * 1024 * 1024),
+                capture_output=True,
+                check=True,
+            )
+            .stdout.decode()
+            .strip()
+        )
+        self.git("update-ref", "refs/heads/feature", large)
+        self.git("push", "origin", "feature")
+        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
+        checked = self.commit_check()
+        pushed = self.push_prepare(checked)
+        assert pushed["commits"] == []
+        assert (
+            self.pr_prepare(checked, pushed, success=False)["error"]
+            == "commit_log_too_large"
+        )
+        assert self.push_calls() == []
+        assert self.gh_calls("pr create") == []
+
+    def test_pr_prepare_rejects_multiple_merge_bases_without_fetch(self):
+        tree = self.git("rev-parse", "HEAD^{tree}").decode().strip()
+        base_tree = self.git("rev-parse", self.base + "^{tree}").decode().strip()
+        left = (
+            self.git("commit-tree", base_tree, "-p", self.base, "-m", "left")
+            .decode()
+            .strip()
+        )
+        right = (
+            self.git("commit-tree", base_tree, "-p", self.base, "-m", "right")
+            .decode()
+            .strip()
+        )
+        parent = (
+            self.git("commit-tree", tree, "-p", left, "-p", right, "-m", "parent")
+            .decode()
+            .strip()
+        )
+        base = (
+            self.git("commit-tree", base_tree, "-p", right, "-p", left, "-m", "base")
+            .decode()
+            .strip()
+        )
+        self.git("update-ref", "refs/heads/feature", parent)
+        self.remote_git("fetch", str(self.repo), base + ":refs/heads/main")
+        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
+        checked = self.commit_check()
+        pushed = self.push_prepare(checked)
+        assert (
+            self.pr_prepare(checked, pushed, success=False)["error"]
+            == "ambiguous_merge_base"
+        )
+        assert self.push_calls() == []
+        assert self.gh_calls("pr create") == []
+
+    @pytest.mark.parametrize("object_name", ["base", "blob"])
+    def test_pr_prepare_rejects_missing_material_objects_without_fetch(
+        self, object_name
+    ):
+        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
+        checked = self.commit_check()
+        pushed = self.push_prepare(checked)
+        oid = (
+            self.base
+            if object_name == "base"
+            else self.git("rev-parse", "HEAD:first.txt").decode().strip()
+        )
+        (self.repo / ".git" / "objects" / oid[:2] / oid[2:]).unlink()
+        self.pr_prepare(checked, pushed, success=False)
+        assert self.push_calls() == []
+        assert self.gh_calls("pr create") == []
 
     def test_pr_context_uses_full_branch_and_missing_templates_are_normal(self):
         self.prepare_pr()
