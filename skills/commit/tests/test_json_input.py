@@ -35,7 +35,15 @@ def test_cli_reads_utf8_json_independently_of_stdin_encoding(
     tmp_path: Path, script: str, operation: str, encoding: str
 ):
     request = {
-        "check": {"snapshot": {"branch": "fix/日本語"}},
+        "check": {
+            "snapshot": {
+                "branch": "main",
+                "plannedBranch": "fix/日本語",
+                "tree": "a" * 40,
+                "head": None,
+            },
+            "gitleaks": "passed",
+        },
         "message": "fix: 日本語のコミットメッセージ\n\n文字化けを防ぐ。\n",
         "title": "日本語のタイトル",
         "body": "## 理由\n\n承認された本文を保持する。\n",
@@ -50,3 +58,19 @@ def test_cli_reads_utf8_json_independently_of_stdin_encoding(
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == request
+
+
+@pytest.mark.parametrize("payload", [b'{"message":"\xff"}', b'{"check":'])
+def test_staged_commit_rejects_invalid_utf8_or_json_without_traceback(
+    tmp_path: Path, payload: bytes
+):
+    result = subprocess.run(
+        [sys.executable, "-B", str(SCRIPTS / "staged-commit.py"), "commit"],
+        cwd=tmp_path,
+        input=payload,
+        capture_output=True,
+        timeout=20,
+    )
+    assert result.returncode == 1
+    assert json.loads(result.stdout) == {"error": "invalid_input"}
+    assert b"Traceback" not in result.stderr

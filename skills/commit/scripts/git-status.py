@@ -40,7 +40,7 @@ def status():
     root = line(git("rev-parse", "--show-toplevel"))
     git_dir = line(git("rev-parse", "--absolute-git-dir", cwd=root))
     branch = subprocess.run(
-        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+        ["git", "symbolic-ref", "--quiet", "HEAD"],
         cwd=root,
         capture_output=True,
     )
@@ -79,7 +79,11 @@ def status():
     return {
         "repository": root,
         "gitDir": git_dir,
-        "branch": line(branch.stdout) if branch.returncode == 0 else None,
+        "branch": (
+            line(branch.stdout).removeprefix("refs/heads/")
+            if branch.returncode == 0
+            else None
+        ),
         "head": line(head.stdout) if head.returncode == 0 else None,
         "conflicts": any(c["index"] + c["worktree"] in CONFLICTS for c in changes),
         "changes": changes,
