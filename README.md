@@ -6,7 +6,7 @@
 
 | スキル | 説明 |
 | --- | --- |
-| [commit](skills/commit/SKILL.md) | 変更を確認し、Stage 対象の選択、ブランチの提案、コミットメッセージの作成、コミットを支援します。希望した場合は push と GitHub PR 作成まで進めます。 |
+| [commit](skills/commit/SKILL.md) | 全変更をStageし、commitとPRの文章・実行設定を一括確認して、commit → push → 通常PRまで進めます。自由文で対象や進行範囲を指定できます。 |
 | [design-discussion](skills/design-discussion/SKILL.md) | アイデアや課題を議論し、必要なコード調査・外部調査を交えて基本設計・概要設計にまとめます。実装計画や実装には進みません。 |
 | [technical-writing](skills/technical-writing/SKILL.md) | 仕様書・設計書・Plan などの説明を組み立て、要件・条件・判断の状態を保ちながら、読みやすい日本語に整えます。 |
 
@@ -43,25 +43,29 @@ Pi を作業対象のプロジェクトで起動し、入力欄で `/skill:<ス�
 /skill:commit
 ```
 
-Git の変更状態を確認し、必要な選択・承認を求めながらコミットまで進めます。すでに Stage 済みの変更があれば、その部分だけを対象にします。Python 3.14以上がPiから利用できる場合は同梱scriptを優先します。Python未導入・3.13以下なら、開始時にLLMがGit・ghコマンドを直接実行する互換経路へ切り替えます。Pythonはスキル全体の必須要件ではなく、どちらの経路も追加のPython packageは不要です。
+**無指定ではrepository全体の全変更をStageし、commit → push → 通常PRまで進めます。** Untracked、既存Staged、部分Stageの残りも対象です（通常のignoreは維持）。外部操作までが既定です。Stageは最終確認より先に実行するため、**キャンセル・失敗でもStageが残り得ます**。勝手にreset／unstageしません。
 
-コミットタイトルを指定する場合は、コマンドの後に続けて入力します。指定したタイトルは、そのまま使われます。
+引数は固定タイトルではなく、対象・進行範囲・branch／宛先・文章への要望などの自由文です。明確な指定を聞き直さず反映します。「このタイトルをそのまま使う」と明示すれば、その文章を維持します。
 
 ```text
-/skill:commit docs: READMEにスキルの説明と使い方を追加
+/skill:commit commitのみ。READMEの説明を整理した変更として日本語で
+/skill:commit pushまで。既存Stagedだけ
+/skill:commit Draft PRを作成。skills/commitだけを対象に、Refs #13を記載
+/skill:commit --no-confirm
 ```
 
-- Stage、ブランチ作成・切り替え、commit、push、PR 作成には、それぞれ承認が必要です。
-- Gitを変更する前にshellでPythonの存在・バージョンを確認し、実行経路を選びます。標準経路ではGit状態の取得に `git-status.py`、Staged diffの検査・照合・commitに `staged-commit.py`、pushに `guarded-push.py`、GitHub PR作成に `github-pr.py` を使います。
-- 互換経路では[専用手順](skills/commit/references/compatibility.md)に従ってLLMがGit・ghコマンドを実行します。承認、部分Stageの保護、Gitleaks検査、commit/push/PR直前の状態照合は省略しません。ただしscriptと同等の機械的ガードは保証できず、特殊なファイル名等を安全に扱えない場合は停止します。
-- 経路選択は開始時だけです。Pythonの起動失敗・不正応答は停止し、script実行後の検査失敗・状態不一致・認証/通信エラー・timeout等から互換経路へ切り替えて再実行しません。Pythonの自動installやPATH変更もしません。
-- diffはファイル一覧・変更量から必要箇所へ段階的に確認します。確認済みの完全なdiffとの同一性はdigestや`cmp`で判定し、再読を避けます。一時diffはrepository外のランダムなprivate directory（`0700`）内へ`0600`で保存し、不要になったら承認質問の前に削除します。digestと確認済みの要点は保持し、この実行のファイルだけを後始末します。
-- Gitleaks が利用可能なら、コミット予定の Staged diff を検査します。未導入の場合は未検査であることを報告します。検査後に差分・index・ブランチ・HEADが変わっていればcommitせず停止します。
-- scriptはユーザー承認を代行しません。承認はPi側で行い、検査結果は呼出し元で保持します。永続的な承認DBは作りません。同時に別プロセスからGitを変更しないでください。
-- push と PR 作成は希望した場合だけ行います。各経路で保持した確認結果を承認後に再照合し、pushは承認時のSHAだけを送信、PRはpush済みのhead/baseと認証アカウントを確認して作成します。既存PRは重複作成しません。通信エラーでは成否を照会し、自動再試行しません。
-- PR本文はブランチ全体のdiff・commit履歴とGitHubのテンプレートを根拠にします。両経路ともPRの自動作成には認証済みの `gh` が必要です。同一repository内のPRのみ対応し、SSH host aliasの解決にはOpenSSHを使います。fork間PRや独自SSH commandは自動処理しません。
-- 必要なcommit objectがローカルにない場合は、自動fetchせず停止します。照合とリモート操作は完全にatomicではありません。失敗してもリモート変更が完了している場合があるため、結果確認前に再実行しないでください。
-- reset、amend、force push、rebase、merge、release、deploy は行いません。
+- 通常は完成形commitメッセージ、ブランチ全体を対象にしたPR title/body、対象範囲、branch作成、remote／実push URL／target、送信する既存commit＋今回のcommit、upstream、base/head、通常／Draft、Closes/Refsを**一回の確認**で提示します。「提示内容で実行／commitのみ修正／PR・実行設定を修正／キャンセル」と自由入力を使い、片方だけの文章修正では他方を保持して最終一式を再確認します。
+- `--no-confirm`は通常の内容確認・実行承認だけを省略します。予定内容・結果の報告、Gitleaks、照合、疑義の確認、異常時の停止は省略しません。scriptに承認省略フラグを渡すものではありません。
+- pushを伴いmain／remote default上なら、新しい作業branchを1件計画して一括確認に含めます。`--no-confirm`ではその予定branchを自動作成します。不正名・衝突では停止し、既存branchへ勝手に切り替えません。初回main push例外には明示指示・PRなしの範囲・リモート全体が空・送信元／宛先mainが必要で、`--no-confirm`だけでは許可しません。
+- 「commitのみ」はremote準備なし、「pushまで」はPR準備なし。PRまでの指定でgh・認証・remote／base等の準備に失敗したら**commit前に停止**し、無断で範囲を縮小しません。限定範囲外のStagedがあれば勝手にunstageせず停止・確認します。submodule内部の変更も親から自動commitせず停止します。
+- Python 3.14以上がPiから使える場合は同梱scriptを優先し、開始時probeで未導入・3.13以下と分かった場合だけ[Python不要の互換経路](skills/commit/references/compatibility.md)を使います。両経路の範囲・一括確認・許容遷移・停止条件は同じですが、互換経路はLLMの手順遵守に依存し、scriptと同等の機械的ガードは保証しません。特殊名等を安全に処理できなければ停止します。
+- 経路選択はGit変更前の開始時だけです。Python起動失敗・不正応答は停止し、script実行後の検査失敗・状態不一致・認証／通信エラー・timeout等から互換経路へ切り替えません。Pythonや別runtimeの自動install・PATH変更はしません。追加Python packageも不要です。
+- 標準経路は`git-status.py`、`staged-commit.py`、`guarded-push.py`、`github-pr.py`を使います。Stage後にcheck、必要なpush／PR prepareをcommit前に取得し、最終確認後にcommit → PR verify → push check／push → PR check／createと照合します。準備JSONは実行用checkやユーザー承認ではなく、手書き更新・永続承認DBは使いません。
+- diffは概要から必要箇所へ読み、commitと予定PRで全5フィールドが一致する変更単位の理解を再利用します。完全bytesのdigestは機械的に照合し、同じ本文を再読しません。一時diffはrepository外のprivate directory（`0700`）内に`0600`で保存し、不要になったら**どの質問よりも前に**削除成功を確認します。
+- Gitleaksがあれば全Staged差分を検査し、未導入なら未検査と報告します。検査失敗やbranch／parent／tree／raw本文／indexの不一致ではpushせず停止します。秘密値・scannerの生出力は表示しません。
+- PRはブランチ全体の差分・履歴・テンプレート・確認できたissueを根拠にし、実行したテスト結果だけを記載します。認証済み`gh`が必要で、同一repository内のみ対応します。SSH host aliasはOpenSSHで解決し、fork間PR・独自SSH commandは扱いません。既存PRはOPEN/CLOSED/MERGEDとも重複作成・自動編集しません。
+- 必要objectがなければ自動fetchせず停止します。同時に他プロセスからGitを変更しないでください。照合と操作は非atomicで、hook副作用や通信断による部分成功・成否不明は残ります。失敗時は照会だけを行い、自動再試行・rollbackしません。
+- reset、amend、force push、rebase、merge、release、deploy、PR自動mergeは行いません。
 
 #### 状態一覧の色付き表示
 

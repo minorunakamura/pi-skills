@@ -235,14 +235,81 @@ def test_both_routes_link_shared_review_and_bind_commit_to_checked_diff():
     assert "diff-review.md" in compatibility
     commit_section = skill.split("## 8.", 1)[1].split("## 9.", 1)[0]
     assert "snapshot.diffSha256" in commit_section
-    assert "改めて読み" not in commit_section
+    assert "一致した本文を改めて読み直す必要はない" in commit_section
     for section in (commit_section, compatibility):
         assert section.index("承認質問の前に一時diffの削除成功を確認") < section.index(
             "`ask_user_question`"
         )
     review = (SKILL_DIR / "references" / "diff-review.md").read_text()
-    assert "承認質問の前に一時diffの削除成功を確認" in review
+    assert "どの質問よりも前に一時diffの削除成功を確認" in review
     assert "後始末失敗なら承認質問へ進まず停止" in review
+
+
+def test_diff_review_prepares_both_scopes_and_reuses_only_exact_units():
+    review = (SKILL_DIR / "references" / "diff-review.md").read_text()
+    assert "並行準備" in review
+    assert "全5フィールドが一致する単位" in review
+    assert "異なる単位" in review
+    assert "どの質問よりも前" in review
+    assert "opt-in" not in review
+    assert "既定の進行順序や承認手順は変更しない" not in review
+
+
+def test_documented_raw_units_match_for_one_file_when_whole_pr_diff_differs(
+    tmp_path: Path, review_env: dict[str, str], git_executable: str
+):
+    repo = tmp_path / "repo"
+
+    def git(*args: str) -> bytes:
+        return subprocess.run(
+            [git_executable, *args],
+            cwd=repo,
+            env=review_env,
+            capture_output=True,
+            check=True,
+        ).stdout
+
+    (repo / "shared.txt").write_text("base\n")
+    git("add", "shared.txt")
+    git("commit", "-m", "base")
+    base = git("rev-parse", "HEAD").decode().strip()
+    (repo / "branch-only.txt").write_text("already committed\n")
+    git("add", "branch-only.txt")
+    git("commit", "-m", "existing branch change")
+    parent = git("rev-parse", "HEAD").decode().strip()
+    (repo / "shared.txt").write_text("pending\n")
+    git("add", "shared.txt")
+    tree = git("write-tree").decode().strip()
+    assert git("diff", parent, tree) != git("diff", base, tree)
+    review = (SKILL_DIR / "references" / "diff-review.md").read_text()
+    match = re.search(r"```bash\n(.*?)\n```", review, re.DOTALL)
+    assert match is not None, "Document the raw unit enumeration"
+    shell = shutil.which("bash")
+    assert shell is not None
+
+    def units(start: str) -> dict[bytes, list[bytes]]:
+        result = subprocess.run(
+            [shell, "-c", match.group(1), "raw-units", start, tree],
+            cwd=repo,
+            env=review_env,
+            capture_output=True,
+            check=True,
+        )
+        records = result.stdout.split(b"\0")[:-1]
+        return {
+            records[i + 1]: records[i].split()[:4] for i in range(0, len(records), 2)
+        }
+
+    staged, whole = units(parent), units(base)
+    assert set(staged) == {b"shared.txt"}
+    assert set(whole) == {b"shared.txt", b"branch-only.txt"}
+    assert staged[b"shared.txt"] == whole[b"shared.txt"]
+    assert staged[b"shared.txt"] == [
+        b":100644",
+        b"100644",
+        git("rev-parse", "HEAD:shared.txt").strip(),
+        git("rev-parse", ":shared.txt").strip(),
+    ]
 
 
 def test_same_path_and_new_blob_are_not_reusable_when_old_blob_differs(

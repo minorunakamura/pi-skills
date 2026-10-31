@@ -107,8 +107,10 @@ def test_skill_selects_route_before_scripts_and_links_compatibility_instructions
     assert (
         text.index("## 0. 開始時の実行経路選択")
         < text.index("## 同梱script")
-        < text.index("## 1.")
+        < text.index("## 1. 入力・Git状態とStage")
     )
     assert "references/compatibility.md" in text
     assert (SKILL.parent / "references" / "compatibility.md").is_file()
     assert "実行途中の失敗では切替禁止" in text
+    assert text.index("## 0.") < text.index("### Stage実行")
+    assert "選択した経路はこの実行中に変更しない" in text
