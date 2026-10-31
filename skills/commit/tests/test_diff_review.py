@@ -121,7 +121,14 @@ def test_capture_is_private_unique_and_matches_checked_staged_bytes(
         text=True,
         timeout=10,
     )
-    assert json.loads(committed.stdout)["branch"] == "main"
+    result = json.loads(committed.stdout)
+    assert result["branch"] == check["snapshot"]["plannedBranch"] == "main"
+    assert result["tree"] == check["snapshot"]["tree"]
+    assert result["parents"] == []
+    assert (
+        result["messageSha256"]
+        == hashlib.sha256(b"docs: review staged changes\n").hexdigest()
+    )
     assert target.read_text() == "ONLY_UNSTAGED_CONTENT"
 
 

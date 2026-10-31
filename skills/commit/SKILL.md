@@ -53,8 +53,10 @@ python3 "<skill-dir>/scripts/github-pr.py" check --remote origin --repo HOST/OWN
 `origin`や`HOST/OWNER/REPO`は例。対象を調べて明示し、shell文字列へ未検証の値を連結しない。
 
 - `git-status.py`はrepository、gitDir、branch、head、conflicts、changesをJSONで返す。changesはルート相対のpath、index/worktree状態、staged/unstaged/untracked、rename/copy時のoriginalPathを含む。Unstaged/Untrackedの本文やdiffは出力しない。初回commit前のheadとdetached HEADのbranchはnull。
-- `staged-commit.py check`はStaged差分だけをGitleaksで検査し、`snapshot`（repository/gitDir/branch/headと差分・indexのSHA-256）、`gitleaks`（passedまたはunavailable）を返す。空差分・detached HEAD・競合・検査失敗・検査中の状態変化は非0終了。Gitleaksの生出力は返さず、検出があればruleとStaged diff上の行番号だけを返す。
-- `staged-commit.py commit`はstdinのJSONからcheck結果と承認済みメッセージを受け取り、snapshotが完全一致するときだけ`git commit --cleanup=verbatim --file=-`を実行する。成功時はcommit SHAとbranchをJSONで返す。
+- `staged-commit.py check [--branch NEW]`はStaged差分だけをGitleaksで検査し、`COMMIT_CHECK`として`{snapshot, gitleaks}`を返す。snapshotはrepository/gitDir、元branch、親head（初回はnull）、`git write-tree`で取得した予定tree、予定`plannedBranch`（省略時は元branch）、`refs`（ref名→OID）、差分・indexのSHA-256を固定する。`--branch`は未存在の新branchだけを指定でき、不正名・現branch・ref名の衝突は拒否する。checkではbranch/refを作らない（tree objectは作成し得る）。空差分・detached HEAD・競合・検査失敗・検査中の状態変化は非0終了。gitleaksはpassedまたはunavailable。生出力は返さず、検出があればruleとStaged diff上の行番号だけを返す。
+- `staged-commit.py commit`はstdinの`{"check": COMMIT_CHECK, "message": "承認済み本文"}`を受け取り、snapshotの完全一致を再確認する。予定新branchがある場合だけ未存在条件を再確認して`git switch --no-track -c`で作成し、親HEAD・index・その他のrefsが変わっていないことをcommit直前に照合する。upstreamは暗黙継承しない。`git commit --cleanup=verbatim --file=-`の後、raw commit objectのtree・親一覧・本文bytes、実branchとbranch ref、残indexを検証する。通常は準備HEADだけを親に持ち、初回は親0個。本文はUTF-8 bytesの完全一致を原則とし、末尾LFなしの入力に限り1 LFの付与だけを許容する。既存LFの追加・除去、space等の変更は許容しない。`git log`の整形結果は検証に使わない。
+- 成功時の`COMMIT_RESULT`は`{commit, branch, parents, tree, messageSha256, gitleaks}`。commitは実SHA、branchは実branch、parentsは検証済み親SHAの配列（初回は`[]`）、treeは検証済みtree OID、messageSha256は**実raw本文bytes**のSHA-256。後続処理ではこのJSONと元COMMIT_CHECKをそのまま保持し、head等を手書きで差し替えない。この拡張は同梱scriptの契約であり、以下のSkill既定フローや質問手順を変更しない。
+- branch作成コマンドの失敗・作成直後の照合不一致は`git_branch_failed`または`state_changed_before_commit`と`branchMayHaveChanged: true`、commitコマンドの失敗・timeout等は`git_commit_failed`、成功応答後の不一致・観測失敗は`commit_verification_failed`で非0終了する。commitを試みた後のエラーには`operationMayHaveSucceeded: true`を付ける（成功を意味しない）。`observed`は取得できたrepository/gitDir/branch/head、予定branchの`branchRef`、refs、tree/parents/messageSha256、indexTree/indexSha256を含み、照会できなかった場合は`observationError`を含む。本文やhookの生出力は返さない。観測SHA・可能な部分成功・成否不明を報告して停止し、pushへ進まず自動再commit・rollbackしない。
 - `guarded-push.py check`はremoteの実push URL、repository/gitDir/branch/HEAD、upstream、宛先refとリモートSHA、default branchを`snapshot`に固定し、`commits`と`alreadyPushed`を返す。`--target`を省略すると現在のブランチ名を宛先にする。複数push URL、通常のmain/default branch宛て、non-fast-forward、不明なリモート状態は拒否する。`--set-upstream`を指定した場合だけ、push確認後に承認対象のローカルブランチへupstreamを設定する。
 - `guarded-push.py push`はstdinの`{"check": CHECK_RESULT}`を受け取り、snapshotを再照合して承認時のSHAを明示的refspecでpushし、リモートSHAを検証する。`CHECK_RESULT`は保持したcheck結果のJSONオブジェクトそのもの（文字列ではない）。すでに同じSHAなら送信しない。暗黙のtag/submodule pushやmirror pushはしない。既存hooksは実行する。
 - `github-pr.py check`はremoteとGitHub repositoryの対応、認証アカウント・書込み権限、push済みheadとbaseのSHAを`snapshot`に固定する。`diff`はbaseからheadへのmerge-base基準のブランチ全体、`commits`はbaseにないcommit履歴、`templates`はGitHub上のPRテンプレート、`existingPullRequests`は同一repository/head/baseの既存PR。既存PRがあれば新規作成用のdiff取得を省略し、`diff: null`・`commits: []`とする。テンプレートなしは正常。`--base`省略時はdefault branchを使う。
@@ -201,6 +203,9 @@ ASD-STE100の考え方は参考にするが、厳密には適用しない。身�
          "gitDir": "/path/to/repository/.git",
          "branch": "main",
          "head": null,
+         "tree": "<checkが返したtree OID>",
+         "plannedBranch": "main",
+         "refs": {},
          "diffSha256": "<checkが返した値>",
          "indexSha256": "<checkが返した値>"
        },
