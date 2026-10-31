@@ -243,3 +243,70 @@ def test_both_routes_link_shared_review_and_bind_commit_to_checked_diff():
     review = (SKILL_DIR / "references" / "diff-review.md").read_text()
     assert "承認質問の前に一時diffの削除成功を確認" in review
     assert "後始末失敗なら承認質問へ進まず停止" in review
+
+
+def test_same_path_and_new_blob_are_not_reusable_when_old_blob_differs(
+    tmp_path: Path, review_env: dict[str, str], git_executable: str
+):
+    repo = tmp_path / "repo"
+
+    def git(*args):
+        return subprocess.run(
+            [git_executable, *args],
+            cwd=repo,
+            env=review_env,
+            capture_output=True,
+            check=True,
+            timeout=10,
+        ).stdout
+
+    target = repo / "shared.txt"
+    target.write_text("base\n")
+    git("add", target.name)
+    git("commit", "-m", "base")
+    base = git("rev-parse", "HEAD").decode().strip()
+    target.write_text("existing branch change\n")
+    git("add", target.name)
+    git("commit", "-m", "existing branch change")
+    target.write_text("pending change\n")
+    git("add", target.name)
+    checked = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            str(SKILL_DIR / "scripts" / "staged-commit.py"),
+            "check",
+        ],
+        cwd=repo,
+        env=review_env,
+        capture_output=True,
+        check=True,
+        timeout=10,
+    )
+    snapshot = json.loads(checked.stdout)["snapshot"]
+    diff_args = (
+        "--no-ext-diff",
+        "--no-textconv",
+        "--binary",
+        "--no-color",
+        "--no-renames",
+        "--ignore-submodules=none",
+    )
+    staged_diff = git("diff", "--cached", *diff_args)
+    whole_diff = git("diff", *diff_args, base, snapshot["tree"])
+    assert hashlib.sha256(staged_diff).hexdigest() == snapshot["diffSha256"]
+    assert hashlib.sha256(whole_diff).hexdigest() != snapshot["diffSha256"]
+    raw_args = ("--raw", "-z", "--no-abbrev", "--no-renames")
+    staged_header, staged_path, _ = git("diff", "--cached", *raw_args).split(b"\0")
+    whole_header, whole_path, _ = git("diff", *raw_args, base, snapshot["tree"]).split(
+        b"\0"
+    )
+    staged_fields, whole_fields = staged_header.split(), whole_header.split()
+    assert staged_path == whole_path == b"shared.txt"
+    assert staged_fields[:2] == whole_fields[:2] == [b":100644", b"100644"]
+    assert (
+        staged_fields[3] == whole_fields[3] == git("rev-parse", ":shared.txt").strip()
+    )
+    assert staged_fields[2] == git("rev-parse", "HEAD:shared.txt").strip()
+    assert whole_fields[2] == git("rev-parse", f"{base}:shared.txt").strip()
+    assert staged_fields[2] != whole_fields[2]

@@ -54,6 +54,15 @@ cmp -s -- "$1" "$2"
 - digest比較でも、同じアルゴリズム・同じcanonical形式の完全なバイト列を使う。切り詰められる`read`結果・表示用の文字列・stat・要約を比較しない。部分diffのdigestを全体のものとして扱わない。
 - commit・push・PR作成の承認やscriptのsnapshot照合を、digest一致で代替しない。不一致なら古い内容確認・承認を流用せず、該当段階の確認・検査・承認をやり直す。
 
+### opt-in準備APIが返す完全digestと変更単位
+
+これは`SKILL.md`の同梱script追加APIを使う呼出し元向けの材料契約であり、既定の進行順序や承認手順は変更しない。
+
+- `github-pr.py prepare`は、唯一の`merge-base(baseHead, 親HEAD)`から保持したindex treeまでの予定PR全体を返す。`diffSha256`は`--no-ext-diff --no-textconv --binary --no-color --no-renames --ignore-submodules=none`による**完全bytes**のSHA-256、`mergeBase`はその起点。`commits`は既存branch履歴だけで、今回予定するcommitのSHAや本文と混同しない。既存PRでは新規文章用の`diff`はnullだが、照合用digest・unitsは保持される。
+- `units`の各要素は`{path, oldMode, newMode, oldOid, newOid}`。`git diff --raw -z --no-abbrev --no-renames`相当のpath・mode・完全OIDによる変更単位であり、パスを空白・改行で分割しない。Staged側も保持した親HEAD／index treeに対応する同じraw形式で比較できる。Stagedの完全diff digestは引き続き`COMMIT_CHECK.snapshot.diffSha256`を使う。
+- PR全体のdigestがStagedと異なっても、**全5フィールドが一致する単位**の確認済み要点は再利用できる。既存branch commitが同じパスを変更している場合、new blobが同じでもold blobが異なれば別単位であり、再利用しない。pathだけ・stat・要約で一致を推定せず、異なる単位と未確認の履歴・テンプレートを必要範囲で読む。これは機械的な材料の同一性であり、Agentが内容を理解した証明ではない。
+- このStaged対PRの相違と、固定したPR準備対実commitの不一致を区別する。後者は`verify`（commit後・push前）と`check --prepared`（push後）が完全digest・units等を再計算して停止判定する。元の準備・commit結果を改変せず保持し、一致時は本文を再表示せず確認済み要点を使う。digest取得・安全な再計算はLLMへの再読ではない。一時diffの権限・質問前削除、検査・承認は上記のまま維持する。
+
 ## 4. 後始末
 
 内容確認と完全なdiffのdigest取得が終わり、不要になった一時diffはその時点で削除する。**承認質問の前に一時diffの削除成功を確認する**。ブランチ・分割・WHY・メッセージ・PR等の質問でも、後続の終了処理に削除を先送りしない。保持したdigest・確認済みの要点・操作に必要なcheck結果を使い、承認待ちに元のdiffファイルを残さない。後続のPRとの比較にも、元ファイルを残す代わりに同じcanonical形式・アルゴリズムのdigestを使える。

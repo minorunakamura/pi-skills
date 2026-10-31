@@ -12,6 +12,14 @@ real_git = os.environ["REAL_GIT"]
 remote = os.environ["REMOTE_PATH"]
 
 if tool == "git":
+    if "push" in args:
+        with open(os.environ["GIT_PUSH_LOG"], "a") as log:
+            log.write(json.dumps(args) + "\n")
+        args = [
+            "-c",
+            "url." + remote + ".insteadOf=git@github-work:owner/repo.git",
+            *args,
+        ]
     args = [remote if x == "git@github-work:owner/repo.git" else x for x in args]
     sys.exit(subprocess.run([real_git, *args]).returncode)
 if tool == "ssh":
