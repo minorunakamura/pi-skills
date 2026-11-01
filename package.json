@@ -1,8 +1,26 @@
 {
   "name": "pi-skills",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Pi skills for design discussions, technical writing, and Git commit workflows",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/minorunakamura/pi-skills.git"
+  },
+  "files": [
+    "CONTRIBUTING.md",
+    "extensions/",
+    "skills/*/SKILL.md",
+    "skills/*/references/*.md",
+    "skills/*/scripts/*.py"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/commit-status.js"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
   "scripts": {
     "test": "node --test tests/*.test.js && mise exec -- uv run --locked --python python python -B -m pytest",
     "lint": "mise exec -- ruff check skills/commit && biome lint extensions tests",
@@ -11,7 +29,9 @@
     "format": "biome format --write . && mise exec -- ruff format skills/commit",
     "format:check": "biome format . && mise exec -- ruff format --check skills/commit"
   },
-  "keywords": [],
+  "keywords": [
+    "pi-package"
+  ],
   "author": "",
   "license": "ISC",
   "type": "module",
