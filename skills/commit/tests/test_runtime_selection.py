@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-SKILL = Path(__file__).resolve().parents[1] / "SKILL.md"
+SKILL = Path(__file__).resolve().parents[1] / "references" / "workflow.md"
 
 
 def startup_probe() -> str:
@@ -103,14 +103,14 @@ def test_probe_does_not_load_python_startup_code(tmp_path: Path):
 
 def test_skill_selects_route_before_scripts_and_links_compatibility_instructions():
     text = SKILL.read_text()
-    assert "compatibility: Requires Git and shell access." in text
+    assert "Python 3.14以上" in text
     assert (
         text.index("## 0. 開始時の実行経路選択")
         < text.index("## 同梱script")
         < text.index("## 1. 入力・Git状態とStage")
     )
-    assert "references/compatibility.md" in text
-    assert (SKILL.parent / "references" / "compatibility.md").is_file()
+    assert "compatibility.md" in text
+    assert (SKILL.parent / "compatibility.md").is_file()
     assert "実行途中の失敗では切替禁止" in text
     assert text.index("## 0.") < text.index("### Stage実行")
     assert "選択した経路はこの実行中に変更しない" in text

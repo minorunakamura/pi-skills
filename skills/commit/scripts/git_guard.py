@@ -505,3 +505,155 @@ def emit(action):
         result = {"error": "command_failed", "message": type(error).__name__}
     print(json.dumps(result, ensure_ascii=True))
     return 1
+
+
+def existing_head_source(planned=None):
+    """Capture an actual HEAD and clean index, without creating a commit or ref."""
+    state = local_state()
+    root = state["repository"]
+    refs = local_refs(root)
+    if planned is not None:
+        target = "refs/heads/" + branch_name(planned)
+        if planned == "HEAD" or any(
+            ref == target
+            or ref.startswith(target + "/")
+            or target.startswith(ref + "/")
+            for ref in refs
+        ):
+            raise GuardError("branch_exists")
+    planned = planned if planned is not None else state["branch"]
+    tree = git(root, "rev-parse", state["head"] + "^{tree}").decode().strip()
+    if git(root, "write-tree").decode().strip() != tree:
+        raise GuardError("existing_head_index_changed")
+    return {
+        **state,
+        "tree": tree,
+        "indexSha256": hashlib.sha256(
+            git(root, "ls-files", "--stage", "-z")
+        ).hexdigest(),
+        "refs": refs,
+        "plannedBranch": planned,
+        "plannedUpstream": branch_upstream(root, planned),
+    }
+
+
+def validate_existing_push(
+    preparation, *, before_branch=False, after_push=False, before_upstream=False
+):
+    """Allow only the retained same-HEAD branch and the planned push transitions."""
+    if (
+        not isinstance(preparation, dict)
+        or set(preparation)
+        != {"kind", "source", "destination", "commits", "fetchRefspecs"}
+        or preparation.get("kind") != "push-existing-head-preparation"
+        or not isinstance(preparation.get("source"), dict)
+        or not isinstance(preparation.get("destination"), dict)
+    ):
+        raise GuardError("invalid_push_preparation")
+    original, before = preparation["source"], preparation["destination"]
+    if set(original) != {
+        "repository",
+        "gitDir",
+        "branch",
+        "head",
+        "upstream",
+        "tree",
+        "indexSha256",
+        "refs",
+        "plannedBranch",
+        "plannedUpstream",
+    } or not isinstance(original.get("refs"), dict):
+        raise GuardError("invalid_push_preparation")
+    planned = branch_name(original.get("plannedBranch"))
+    if not isinstance(before.get("initialMain"), bool) or not isinstance(
+        before.get("setUpstream"), bool
+    ):
+        raise GuardError("invalid_push_preparation")
+    state = local_state()
+    root = state["repository"]
+    refs = dict(original["refs"])
+    branch = original["branch"] if before_branch else planned
+    if before_branch and planned != branch:
+        target = "refs/heads/" + planned
+        if planned == "HEAD" or any(
+            ref == target
+            or ref.startswith(target + "/")
+            or target.startswith(ref + "/")
+            for ref in local_refs(root)
+        ):
+            raise GuardError("branch_exists")
+    elif planned != original["branch"]:
+        refs["refs/heads/" + planned] = original["head"]
+    specs = remote_fetch_refspecs(root, before.get("remote"))
+    mapped = mapped_tracking_refs(specs, before.get("target"))
+    if after_push and before.get("remoteHead") != original["head"]:
+        refs.update({ref: original["head"] for ref in mapped})
+    upstream = original["plannedUpstream"]
+    approved = {
+        "remote": before.get("remote"),
+        "merge": "refs/heads/" + branch_name(before.get("target")),
+    }
+    if before["setUpstream"]:
+        if upstream not in ({"remote": None, "merge": None}, approved):
+            raise GuardError("conflicting_upstream")
+        if after_push and not before_upstream:
+            upstream = approved
+    source_upstream = (
+        upstream if planned == original["branch"] else original["upstream"]
+    )
+    planned_state = {
+        **state,
+        "branch": planned,
+        "upstream": upstream,
+    }
+    expected = {**before}
+    if after_push:
+        expected.update(
+            remoteHead=original["head"], upstream=upstream, emptyRemote=False
+        )
+        if before["initialMain"]:
+            expected.update(defaultBranch="main", defaultHead=original["head"])
+    if after_push:
+        url = push_url(root, before["remote"])
+        observed = remote_refs(root, url)
+        current = {
+            **before,
+            **planned_state,
+            "pushUrl": url,
+            "remoteHead": observed["refs"].get("refs/heads/" + before["target"]),
+            "defaultBranch": observed["defaultBranch"],
+            "defaultHead": observed["refs"].get(
+                "refs/heads/" + observed["defaultBranch"]
+            )
+            if observed["defaultBranch"]
+            else None,
+            "emptyRemote": observed["empty"],
+        }
+    else:
+        current = push_destination(
+            planned_state,
+            before.get("remote"),
+            before.get("target"),
+            before["initialMain"],
+            before["setUpstream"],
+        )
+    base = before.get("remoteHead") or before.get("defaultHead")
+    if (
+        any(state[key] != original.get(key) for key in ("repository", "gitDir", "head"))
+        or state["branch"] != branch
+        or state["upstream"] != (original["upstream"] if before_branch else upstream)
+        or branch_upstream(root, original["branch"]) != source_upstream
+        or branch_upstream(root, planned)
+        != (original["plannedUpstream"] if before_branch else upstream)
+        or git(root, "rev-parse", state["head"] + "^{tree}").decode().strip()
+        != original.get("tree")
+        or git(root, "write-tree").decode().strip() != original.get("tree")
+        or hashlib.sha256(git(root, "ls-files", "--stage", "-z")).hexdigest()
+        != original.get("indexSha256")
+        or local_refs(root) != refs
+        or specs != preparation.get("fetchRefspecs")
+        or current != expected
+        or commit_log(root, original["head"], base) != preparation.get("commits")
+    ):
+        raise GuardError("push_preparation_changed")
+    return planned_state

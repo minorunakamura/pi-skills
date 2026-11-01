@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-SKILL = Path(__file__).resolve().parents[1] / "SKILL.md"
+SKILL = Path(__file__).resolve().parents[1] / "references" / "workflow.md"
 
 
 def stage_example() -> str:

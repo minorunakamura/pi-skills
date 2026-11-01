@@ -6,7 +6,9 @@
 
 | スキル | 説明 |
 | --- | --- |
-| [commit](skills/commit/SKILL.md) | 全変更をStageし、commitとPRの文章・実行設定を一括確認して、commit → push → 通常PRまで進めます。自由文で対象や進行範囲を指定できます。 |
+| [commit](skills/commit/SKILL.md) | 全変更をStageし、内容を確認してローカルcommitで終了します。remote準備はしません。 |
+| [commit-push](skills/commit-push/SKILL.md) | 必要ならcommitし、既存HEADをpushします。PR準備・作成はしません。 |
+| [commit-pr](skills/commit-pr/SKILL.md) | 必要ならcommit・pushし、通常PR作成または既存PRの報告まで進めます。 |
 | [design-discussion](skills/design-discussion/SKILL.md) | アイデアや課題を議論し、必要なコード調査・外部調査を交えて基本設計・概要設計にまとめます。実装計画や実装には進みません。 |
 | [technical-writing](skills/technical-writing/SKILL.md) | 仕様書・設計書・Plan などの説明を組み立て、要件・条件・判断の状態を保ちながら、読みやすい日本語に整えます。 |
 
@@ -31,36 +33,50 @@ git clone https://github.com/minorunakamura/pi-skills.git
 pi install ./pi-skills
 ```
 
+package全体で3入口と共有資材を配布します。スキルを個別配置する場合は、共有scripts／referencesを持つ`commit`と必要な`commit-push`／`commit-pr`入口を同じ`skills/`配下に置いてください。入口だけでは動きません。導入作業で既存global設定やsymlinkを自動変更しません。
+
 導入後は Pi を起動し直すか、起動中のセッションで `/reload` を実行してください。
 
 ## 使い方
 
 Pi を作業対象のプロジェクトで起動し、入力欄で `/skill:<スキル名>` を実行します。各スキルは自動選択を無効にしているため、明示的に呼び出してください。
 
-### commit
+### commit / commit-push / commit-pr
 
 ```text
 /skill:commit
+/skill:commit-push
+/skill:commit-pr
 ```
 
-**無指定ではrepository全体の全変更をStageし、commit → push → 通常PRまで進めます。** Untracked、既存Staged、部分Stageの残りも対象です（通常のignoreは維持）。外部操作までが既定です。Stageは最終確認より先に実行するため、**キャンセル・失敗でもStageが残り得ます**。勝手にreset／unstageしません。
+**到達点はSkill名で固定です。** `/skill:commit`はcommit、`/skill:commit-push`はpush、`/skill:commit-pr`はcommit → push → 通常PRまで進めます。無指定ではrepository全体の全変更をStageします。 Untracked、既存Staged、部分Stageの残りも対象です（通常のignoreは維持）。従来の`commit`はPRまで進みましたが、現在はローカルcommitで止まります。Stageは最終確認より先に実行するため、**キャンセル・失敗でもStageが残り得ます**。勝手にreset／unstageしません。
 
-引数は固定タイトルではなく、対象・進行範囲・branch／宛先・文章への要望などの自由文です。明確な指定を聞き直さず反映します。「このタイトルをそのまま使う」と明示すれば、その文章を維持します。
+引数は固定タイトルではなく、対象・branch／宛先・文章・言語・Draftへの要望などの自由文です。明確な指定を聞き直さず反映します。「このタイトルをそのまま使う」と明示すれば、その文章を維持します。到達点と矛盾する自由文（例：`/skill:commit pushまで`）はGit変更前に停止し、対応Skillを案内します。同じ到達点を重ねても矛盾ではありません。
 
 ```text
-/skill:commit commitのみ。READMEの説明を整理した変更として日本語で
-/skill:commit pushまで。既存Stagedだけ
-/skill:commit Draft PRを作成。skills/commitだけを対象に、Refs #13を記載
+/skill:commit READMEの説明を整理した変更として日本語で
+/skill:commit-push 既存Stagedだけ
+/skill:commit-pr Draft。skills/commitだけを対象に、Refs #17を記載
 /skill:commit --no-confirm
 ```
 
-- 通常は完成形commitメッセージ、ブランチ全体を対象にしたPR title/body、対象範囲、branch作成、remote／実push URL／target、送信する既存commit＋今回のcommit、upstream、base/head、通常／Draft、Closes/Refsを**一回の確認**で提示します。「提示内容で実行／commitのみ修正／PR・実行設定を修正／キャンセル」と自由入力を使い、片方だけの文章修正では他方を保持して最終一式を再確認します。
+段階実行もできます。各呼出しはその時点の状態・送信履歴・PR全体を改めて確認し、過去の承認は流用しません。
+
+```text
+/skill:commit
+/skill:commit-push
+/skill:commit-pr
+```
+
+Stage後の対象差分がなければ新commit・空commit・amendは作りません。commitは操作せず終了し、push／PRは既存HEADから残りへ進みます。HEADも対象差分もなければ送信なし。同SHAの重複push、OPEN/CLOSED/MERGEDの既存PRの重複作成・自動編集はしません。呼出し間に新たな対象変更があれば新commitを作ります。対象外の未Stage変更を勝手に送信へ取り込まず、既存HEADで送信する場合はbranchの既存履歴全体が対象だと示します。
+
+- 必要な項目だけ通常は完成形commitメッセージ、ブランチ全体を対象にしたPR title/body、対象範囲、branch作成、remote／実push URL／target、送信する既存commit＋今回のcommit、upstream、base/head、通常／Draft、Closes/Refsを**一回の確認**で提示します。「提示内容で実行／commitのみ修正／PR・実行設定を修正／キャンセル」と自由入力を使い、片方だけの文章修正では他方を保持して最終一式を再確認します。作成しないcommit／PRの文章や存在しない項目の修正選択肢は出さず、全操作完了済みなら通常承認も求めません。
 - `--no-confirm`は通常の内容確認・実行承認だけを省略します。予定内容・結果の報告、Gitleaks、照合、疑義の確認、異常時の停止は省略しません。scriptに承認省略フラグを渡すものではありません。
-- pushを伴いmain／remote default上なら、新しい作業branchを1件計画して一括確認に含めます。`--no-confirm`ではその予定branchを自動作成します。不正名・衝突では停止し、既存branchへ勝手に切り替えません。初回main push例外には明示指示・PRなしの範囲・リモート全体が空・送信元／宛先mainが必要で、`--no-confirm`だけでは許可しません。
-- 「commitのみ」はremote準備なし、「pushまで」はPR準備なし。PRまでの指定でgh・認証・remote／base等の準備に失敗したら**commit前に停止**し、無断で範囲を縮小しません。限定範囲外のStagedがあれば勝手にunstageせず停止・確認します。submodule内部の変更も親から自動commitせず停止します。
+- pushを伴いmain／remote default上なら、新しい作業branchを1件計画して一括確認に含めます。`--no-confirm`ではその予定branchを自動作成します。不正名・衝突では停止し、既存branchへ勝手に切り替えません。main上の既存commitも同HEADから作業branchへ載せられますが、元mainを巻き戻さずローカルmainにもcommitが残ると報告します。初回main push例外はcommit-pushだけで、明示指示・リモート全体が空・送信元／宛先mainが必要で、`--no-confirm`だけでは許可しません。
+- `commit`はremote準備なし、`commit-push`はPR準備なし。PRまでの指定でgh・認証・remote／base等の準備に失敗したら**新commit／push前に停止**し、無断で範囲を縮小しません。限定範囲外のStagedがあれば勝手にunstageせず停止・確認します。submodule内部の変更も親から自動commitせず停止します。
 - Python 3.14以上がPiから使える場合は同梱scriptを優先し、開始時probeで未導入・3.13以下と分かった場合だけ[Python不要の互換経路](skills/commit/references/compatibility.md)を使います。両経路の範囲・一括確認・許容遷移・停止条件は同じですが、互換経路はLLMの手順遵守に依存し、scriptと同等の機械的ガードは保証しません。特殊名等を安全に処理できなければ停止します。
 - 経路選択はGit変更前の開始時だけです。Python起動失敗・不正応答は停止し、script実行後の検査失敗・状態不一致・認証／通信エラー・timeout等から互換経路へ切り替えません。Pythonや別runtimeの自動install・PATH変更はしません。追加Python packageも不要です。
-- 標準経路は`git-status.py`、`staged-commit.py`、`guarded-push.py`、`github-pr.py`を使います。Stage後にcheck、必要なpush／PR prepareをcommit前に取得し、最終確認後にcommit → PR verify → push check／push → PR check／createと照合します。準備JSONは実行用checkやユーザー承認ではなく、手書き更新・永続承認DBは使いません。
+- 3入口は[共有workflow](skills/commit/references/workflow.md)を全文読みます。scriptは入口でなく`skills/commit/`基準で、対象repositoryをcwdのまま実行します。標準経路は`git-status.py`、`staged-commit.py`、`guarded-push.py`、`github-pr.py`を使います。Stage後にcheck、必要なpush／PR prepareをcommit前に取得し、最終確認後にcommit → PR verify → push check／push → PR check／createと照合します。既存HEADは`prepare --existing-head`→承認→予定branch作成（必要時だけ）→verify／checkへ進み、commitCheckやcommit結果と混在させません。push済みからPRだけなら通常PR checkを使います。準備JSONは実行用checkやユーザー承認ではなく、手書き更新・永続承認DBは使いません。
 - diffは概要から必要箇所へ読み、commitと予定PRで全5フィールドが一致する変更単位の理解を再利用します。完全bytesのdigestは機械的に照合し、同じ本文を再読しません。一時diffはrepository外のprivate directory（`0700`）内に`0600`で保存し、不要になったら**どの質問よりも前に**削除成功を確認します。
 - Gitleaksがあれば全Staged差分を検査し、未導入なら未検査と報告します。検査失敗やbranch／parent／tree／raw本文／indexの不一致ではpushせず停止します。秘密値・scannerの生出力は表示しません。
 - PRはブランチ全体の差分・履歴・テンプレート・確認できたissueを根拠にし、実行したテスト結果だけを記載します。認証済み`gh`が必要で、同一repository内のみ対応します。SSH host aliasはOpenSSHで解決し、fork間PR・独自SSH commandは扱いません。既存PRはOPEN/CLOSED/MERGEDとも重複作成・自動編集しません。
@@ -126,7 +142,7 @@ ln -s "$PWD/extensions/commit-status.js" ~/.pi/agent/extensions/commit-status.js
 
 ## ツールについて
 
-`commit` の選択・承認には `ask_user_question` を使い、利用できない場合は通常のテキストで確認します。`design-discussion` は通常の対話を基本とし、その場で選んでもらうことが議論を助ける場合に使います。
+3つのcommit系Skillの選択・承認には `ask_user_question` を使い、利用できない場合は通常のテキストで確認します。`design-discussion` は通常の対話を基本とし、その場で選んでもらうことが議論を助ける場合に使います。
 
 `design-discussion` の調査では、必要に応じて CodeGraph、`pi-ketch`、`pi-web-access`、`pi-subagents` を使います。これらはこのリポジトリには同梱されていません。利用できない場合は制約を伝え、既存の別手段で確認できる範囲に絞ります。
 

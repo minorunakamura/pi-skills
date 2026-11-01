@@ -229,9 +229,10 @@ def test_cleanup_does_not_delete_unrecorded_files(
 
 
 def test_both_routes_link_shared_review_and_bind_commit_to_checked_diff():
-    skill = (SKILL_DIR / "SKILL.md").read_text()
+    skill = (SKILL_DIR / "references" / "workflow.md").read_text()
     compatibility = (SKILL_DIR / "references" / "compatibility.md").read_text()
-    assert "references/diff-review.md" in skill
+    assert "(diff-review.md)" in skill
+    assert (SKILL_DIR / "references" / "diff-review.md").is_file()
     assert "diff-review.md" in compatibility
     commit_section = skill.split("## 8.", 1)[1].split("## 9.", 1)[0]
     assert "snapshot.diffSha256" in commit_section
