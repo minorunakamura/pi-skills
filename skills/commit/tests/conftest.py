@@ -17,7 +17,7 @@ def git_executable() -> str:
 
 
 @pytest.fixture
-def git_env(tmp_path: Path, git_executable: str) -> dict[str, str]:
+def isolated_env(tmp_path: Path) -> dict[str, str]:
     repo = tmp_path / "repo"
     repo.mkdir()
     (tmp_path / "bin").mkdir()
@@ -34,6 +34,14 @@ def git_env(tmp_path: Path, git_executable: str) -> dict[str, str]:
             "GIT_CONFIG_GLOBAL": os.devnull,
         }
     )
+    return env
+
+
+@pytest.fixture
+def git_env(
+    tmp_path: Path, git_executable: str, isolated_env: dict[str, str]
+) -> dict[str, str]:
+    repo = tmp_path / "repo"
     for args in (
         ("init", "-b", "main"),
         ("config", "user.name", "Test User"),
@@ -41,6 +49,10 @@ def git_env(tmp_path: Path, git_executable: str) -> dict[str, str]:
         ("config", "commit.gpgsign", "false"),
     ):
         subprocess.run(
-            [git_executable, *args], cwd=repo, env=env, capture_output=True, check=True
+            [git_executable, *args],
+            cwd=repo,
+            env=isolated_env,
+            capture_output=True,
+            check=True,
         )
-    return env
+    return isolated_env

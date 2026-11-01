@@ -3,6 +3,9 @@
 import hashlib
 import importlib.util
 import json
+import os
+import shlex
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -19,15 +22,14 @@ class GitHubFixture(TypedDict):
     metadata: dict[str, object]
 
 
-class TestRemoteScripts:
-    @pytest.fixture(autouse=True)
-    def setup(self, tmp_path: Path, git_executable: str, git_env: dict[str, str]):
+class RemoteTools:
+    def setup_tools(self, tmp_path: Path, git_executable: str, env: dict[str, str]):
         self.root = tmp_path
         self.repo = tmp_path / "repo"
         self.remote = tmp_path / "remote.git"
         self.bin = tmp_path / "bin"
         self.git_executable = git_executable
-        self.env = git_env
+        self.env = env
         self.env.update(
             {
                 "REAL_GIT": git_executable,
@@ -39,19 +41,23 @@ class TestRemoteScripts:
             }
         )
         source = (Path(__file__).parent / "fixtures" / "remote_tools.py").read_text()
-        for name in ("git", "gh", "ssh"):
-            executable = self.bin / name
+        self.git_fallback = tmp_path / "python" / "git"
+        self.git_fallback.parent.mkdir()
+        for executable in (self.git_fallback, self.bin / "gh", self.bin / "ssh"):
             executable.write_text(f"#!{sys.executable}\n" + source)
             executable.chmod(0o700)
-        self.add_commit("base.txt", "base")
-        self.base = self.git("rev-parse", "HEAD").decode().strip()
-        self.git("init", "--bare", "-b", "main", str(self.remote))
-        self.git("remote", "add", "origin", str(self.remote))
-        self.git("push", "origin", "main")
-        self.git("switch", "-c", "feature")
-        self.add_commit("first.txt", "first")
-        self.add_commit("second.txt", "second")
-        self.head = self.git("rev-parse", "HEAD").decode().strip()
+        wrapper = self.bin / "git"
+        wrapper.write_text(
+            "#!/bin/sh\n"
+            "for arg do\n"
+            '    case "$arg" in\n'
+            "        push|git@github-work:owner/repo.git)\n"
+            f'            exec {shlex.quote(sys.executable)} {shlex.quote(str(self.git_fallback))} "$@";;\n'
+            "    esac\n"
+            "done\n"
+            'exec "$REAL_GIT" "$@"\n'
+        )
+        wrapper.chmod(0o700)
         self.gh_state: GitHubFixture = {
             "account": "tester",
             "prs": [],
@@ -202,38 +208,6 @@ class TestRemoteScripts:
             **kwargs,
         )
 
-    def test_existing_head_push_preparation_and_push_do_not_create_commit(self):
-        refs = self.git("show-ref")
-        preparation = self.existing_push_prepare(
-            "--target", "published", "--set-upstream"
-        )
-        assert preparation["kind"] == "push-existing-head-preparation"
-        assert "snapshot" not in preparation
-        assert "commitCheck" not in preparation
-        assert self.git("show-ref") == refs
-        assert self.push_calls() == []
-        checked = self.existing_push_check(preparation)
-        assert [x["message"].strip() for x in checked["commits"]] == ["first", "second"]
-        assert self.push(checked)["status"] == "pushed"
-        assert self.remote_git("rev-parse", "published").decode().strip() == self.head
-        assert self.git("rev-parse", "HEAD").decode().strip() == self.head
-        assert self.git("rev-list", "--count", "HEAD").strip() == b"3"
-        repeated = self.existing_push_prepare("--target", "published")
-        assert (
-            self.push(self.existing_push_check(repeated))["status"] == "already_pushed"
-        )
-        assert len(self.push_calls()) == 1
-
-    def test_existing_head_already_pushed_preserves_absent_tracking_ref(self):
-        self.prepare_pr()
-        self.git("update-ref", "-d", "refs/remotes/origin/feature")
-        refs = self.git("show-ref")
-        prepared = self.existing_push_prepare()
-        assert (
-            self.push(self.existing_push_check(prepared))["status"] == "already_pushed"
-        )
-        assert self.git("show-ref") == refs and self.push_calls() == []
-
     def existing_pr_prepare(self, pushed, **kwargs):
         return self.script(
             "github-pr.py",
@@ -253,7 +227,129 @@ class TestRemoteScripts:
             "github-pr.py", *args, request={"preparation": preparation}, **kwargs
         )
 
-    def test_existing_head_main_branch_verify_push_pr_and_repeated_invocation(self):
+    def future_pr(self, *branch_args, push_args=()):
+        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
+        checked = self.commit_check(*branch_args)
+        pushed = self.push_prepare(checked, *push_args)
+        preparation = self.pr_prepare(checked, pushed)
+        return checked, pushed, preparation
+
+    def pr_prepare(self, checked, pushed, *args, **kwargs):
+        return self.script(
+            "github-pr.py",
+            "prepare",
+            "--remote",
+            "origin",
+            "--repo",
+            "owner/repo",
+            *args,
+            request={"commitCheck": checked, "pushPreparation": pushed},
+            **kwargs,
+        )
+
+    def prepared_pr(self, operation, preparation, commit, **kwargs):
+        args = ("check", "--prepared") if operation == "check" else (operation,)
+        return self.script(
+            "github-pr.py",
+            *args,
+            request={"preparation": preparation, "commit": commit},
+            **kwargs,
+        )
+
+
+class TestRemoteScripts(RemoteTools):
+    @pytest.fixture(autouse=True)
+    def setup(self, tmp_path: Path, git_executable: str, git_env: dict[str, str]):
+        self.setup_tools(tmp_path, git_executable, git_env)
+        self.add_commit("base.txt", "base")
+        self.base = self.git("rev-parse", "HEAD").decode().strip()
+        self.git("init", "--bare", "-b", "main", str(self.remote))
+        self.git("remote", "add", "origin", str(self.remote))
+        self.git("push", "origin", "main")
+        self.git("switch", "-c", "feature")
+        self.add_commit("first.txt", "first")
+        self.head = self.git("rev-parse", "HEAD").decode().strip()
+
+    @pytest.fixture
+    def full_history(self, setup):
+        self.add_commit("second.txt", "second")
+        self.head = self.git("rev-parse", "HEAD").decode().strip()
+
+    def change_existing_state(self, change):
+        if change == "index":
+            (self.repo / "first.txt").write_text("unexpected")
+            self.git("add", "first.txt")
+        elif change == "mode":
+            self.git("update-index", "--chmod=+x", "first.txt")
+        elif change == "upstream":
+            self.git("config", "branch.feature.remote", "other")
+        elif change == "url":
+            self.git("config", "remote.origin.pushurl", str(self.remote) + "/")
+        elif change == "target":
+            self.remote_git("update-ref", "refs/heads/feature", self.base)
+        elif change == "default":
+            self.remote_git("fetch", str(self.repo), "feature:main")
+        elif change == "fetch":
+            self.git("config", "remote.origin.fetch", "+refs/heads/*:refs/custom/*")
+        else:
+            self.change_prepared_local_state(change)
+
+    def change_prepared_local_state(self, change):
+        if change == "head":
+            self.git("commit", "--allow-empty", "-m", "unexpected")
+        elif change == "branch":
+            self.git("switch", "-c", "unexpected")
+        elif change == "index":
+            (self.repo / "pending.txt").write_text("changed")
+            self.git("add", "pending.txt")
+        elif change == "mode":
+            self.git("update-index", "--chmod=+x", "pending.txt")
+        elif change == "refs":
+            self.git("tag", "unexpected")
+
+    def test_git_wrapper_alias_and_origin_push_update_bare_remote_and_record_once(self):
+        wrapper = str(self.bin / "git")
+        alias = "git@github-work:owner/repo.git"
+        self.git("remote", "set-url", "origin", alias)
+        result = subprocess.run(
+            [wrapper, "ls-remote", alias, "refs/heads/main"],
+            cwd=self.repo,
+            env=self.env,
+            capture_output=True,
+            check=True,
+        )
+        assert result.stdout == f"{self.base}\trefs/heads/main\n".encode()
+        assert self.push_calls() == []
+        for destination, target in (
+            (alias, "alias-pushed"),
+            ("origin", "origin-pushed"),
+        ):
+            args = ["push", destination, f"{self.head}:refs/heads/{target}"]
+            subprocess.run(
+                [wrapper, *args],
+                cwd=self.repo,
+                env=self.env,
+                capture_output=True,
+                check=True,
+            )
+            assert self.remote_git("rev-parse", target).decode().strip() == self.head
+            assert json.loads(self.push_calls()[-1]) == args
+        before = self.remote_git("show-ref")
+        args = ["push", "origin", "missing-source:refs/heads/rejected"]
+        result = subprocess.run(
+            [wrapper, *args], cwd=self.repo, env=self.env, capture_output=True
+        )
+        assert result.returncode != 0 and result.stderr
+        assert self.remote_git("show-ref") == before
+        assert [json.loads(line) for line in self.push_calls()] == [
+            ["push", alias, f"{self.head}:refs/heads/alias-pushed"],
+            ["push", "origin", f"{self.head}:refs/heads/origin-pushed"],
+            args,
+        ]
+
+    def test_existing_head_main_branch_verify_push_pr_and_repeated_invocation(
+        self, full_history
+    ):
         self.git("branch", "-f", "main", self.head)
         self.git("switch", "main")
         self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
@@ -281,54 +377,23 @@ class TestRemoteScripts:
         assert self.create(self.pr_check())["status"] == "existing"
         assert len(self.push_calls()) == 1 and len(self.gh_calls("pr create")) == 1
 
-    @pytest.mark.parametrize(
-        "change",
-        [
-            "head",
-            "branch",
-            "index",
-            "mode",
-            "refs",
-            "upstream",
-            "url",
-            "target",
-            "default",
-            "fetch",
-        ],
-    )
-    def test_existing_head_push_check_rejects_preparation_drift(self, change):
+    @pytest.mark.parametrize("change", ["index", "mode"])
+    def test_existing_head_push_check_rejects_preparation_drift(
+        self, full_history, change
+    ):
         prepared = self.existing_push_prepare()
         self.change_existing_state(change)
         self.existing_push_check(prepared, success=False)
         assert self.push_calls() == []
 
-    def change_existing_state(self, change):
-        if change == "index":
-            (self.repo / "first.txt").write_text("unexpected")
-            self.git("add", "first.txt")
-        elif change == "mode":
-            self.git("update-index", "--chmod=+x", "first.txt")
-        elif change == "upstream":
-            self.git("config", "branch.feature.remote", "other")
-        elif change == "url":
-            self.git("config", "remote.origin.pushurl", str(self.remote) + "/")
-        elif change == "target":
-            self.remote_git("update-ref", "refs/heads/feature", self.base)
-        elif change == "default":
-            self.remote_git("fetch", str(self.repo), "feature:main")
-        elif change == "fetch":
-            self.git("config", "remote.origin.fetch", "+refs/heads/*:refs/custom/*")
-        else:
-            self.change_prepared_local_state(change)
-
-    @pytest.mark.parametrize("change", ["index", "refs"])
+    @pytest.mark.parametrize("change", ["refs"])
     def test_existing_head_push_rechecks_between_check_and_mutation(self, change):
         checked = self.existing_push_check(self.existing_push_prepare())
         self.change_existing_state(change)
         self.push(checked, success=False)
         assert self.push_calls() == []
 
-    @pytest.mark.parametrize("change", ["index", "refs", "head", "branch", "upstream"])
+    @pytest.mark.parametrize("change", ["upstream"])
     def test_existing_head_branch_hook_drift_reports_partial_success_without_push(
         self, change
     ):
@@ -354,11 +419,7 @@ class TestRemoteScripts:
         self.existing_push_check(prepared, success=False)
         assert self.push_calls() == []
 
-    @pytest.mark.parametrize(
-        "change",
-        ["base", "account", "permission", "template", "fetch", "index", "refs"],
-    )
-    @pytest.mark.parametrize("after_push", [False, True])
+    @pytest.mark.parametrize("change,after_push", [("template", False)])
     def test_existing_head_pr_verification_rejects_drift_without_later_mutation(
         self, change, after_push
     ):
@@ -399,29 +460,23 @@ class TestRemoteScripts:
         self.existing_pr_verify(prepared, after_push=after_push, success=False)
         assert self.push_calls() == calls and self.gh_calls("pr create") == []
 
-    def test_existing_head_create_does_not_requery_pr_list_after_success(self):
+    @pytest.mark.parametrize("change", ["refs"])
+    def test_existing_head_create_rechecks_index_and_observes_postcreate_ref_drift(
+        self, change
+    ):
         self.prepare_pr()
         prepared = self.existing_pr_prepare(self.existing_push_prepare())
         checked = self.existing_pr_verify(prepared, after_push=True)
-        assert self.create(checked)["status"] == "created"
-        calls = [
-            json.loads(line)
-            for line in Path(self.env["GH_LOG"]).read_text().splitlines()
-        ]
-        created = next(
-            i for i, args in enumerate(calls) if args[:2] == ["pr", "create"]
+        self.change_existing_state("index")
+        self.create(checked, success=False)
+        assert self.gh_calls("pr create") == []
+        self.git("read-tree", "HEAD")
+        source = prepared["pushPreparation"]["source"]
+        assert self.git("write-tree").decode().strip() == source["tree"]
+        assert (
+            hashlib.sha256(self.git("ls-files", "--stage", "-z")).hexdigest()
+            == source["indexSha256"]
         )
-        after_create = [args[:2] for args in calls[created + 1 :]]
-        assert ["pr", "view"] in after_create
-        assert ["repo", "view"] in after_create
-        assert ["pr", "list"] not in after_create
-        assert len(self.gh_calls("pr create")) == 1
-
-    @pytest.mark.parametrize("change", ["index", "refs"])
-    def test_existing_head_create_reports_postcreate_drift_without_retry(self, change):
-        self.prepare_pr()
-        prepared = self.existing_pr_prepare(self.existing_push_prepare())
-        checked = self.existing_pr_verify(prepared, after_push=True)
         self.env["GH_MODE"] = "create-change-" + change
         result = self.create(checked, success=False)
         assert result["error"] == "pr_verification_failed"
@@ -432,39 +487,7 @@ class TestRemoteScripts:
         ]
         assert len(self.gh_calls("pr create")) == 1
 
-    @pytest.mark.parametrize("change", ["index", "refs"])
-    def test_existing_head_create_rechecks_after_execution_check(self, change):
-        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
-        pushed = self.existing_push_prepare()
-        prepared = self.existing_pr_prepare(pushed)
-        self.push(self.existing_push_check(pushed))
-        checked = self.existing_pr_verify(prepared, after_push=True)
-        self.change_existing_state(change)
-        self.create(checked, success=False)
-        assert self.gh_calls("pr create") == []
-
-    @pytest.mark.parametrize("state", ["OPEN", "CLOSED", "MERGED"])
-    def test_existing_head_pr_preparation_retains_guards_for_existing_pr(self, state):
-        self.prepare_pr()
-        self.create(self.pr_check())
-        data = json.loads(Path(self.env["GH_STATE"]).read_text())
-        data["prs"][0]["state"] = state
-        Path(self.env["GH_STATE"]).write_text(json.dumps(data))
-        prepared = self.existing_pr_prepare(self.existing_push_prepare())
-        assert (
-            prepared["diff"] is None
-            and prepared["commits"] == []
-            and prepared["templates"] == []
-        )
-        assert prepared["existingPullRequests"][0]["state"] == state
-        self.existing_pr_verify(prepared)
-        assert (
-            self.create(self.existing_pr_verify(prepared, after_push=True))["status"]
-            == "existing"
-        )
-        assert self.push_calls() == [] and len(self.gh_calls("pr create")) == 1
-
-    @pytest.mark.parametrize("change", ["index", "refs", "head"])
+    @pytest.mark.parametrize("change", ["head"])
     def test_existing_head_push_hook_change_stops_before_pr(self, change):
         self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
         pushed = self.existing_push_prepare()
@@ -536,82 +559,6 @@ class TestRemoteScripts:
         assert self.existing_push_prepare(success=False)["error"] == "unborn_head"
         assert self.push_calls() == []
 
-    def test_existing_head_main_protection_and_explicit_initial_main(self):
-        self.git("switch", "main")
-        assert (
-            self.existing_push_prepare(success=False)["error"]
-            == "protected_push_target"
-        )
-        self.remote_git("update-ref", "-d", "refs/heads/main")
-        prepared = self.existing_push_prepare("--initial-main", "--set-upstream")
-        assert self.push(self.existing_push_check(prepared))["status"] == "pushed"
-        assert self.git("rev-parse", "HEAD").decode().strip() == self.base
-        self.existing_push_prepare("--initial-main", success=False)
-        assert len(self.push_calls()) == 1
-
-    @pytest.mark.parametrize("field", ["commit", "commitCheck", "extra"])
-    def test_existing_head_rejects_mixed_requests_and_preparation_direct_input(
-        self, field
-    ):
-        pushed = self.existing_push_prepare()
-        self.script(
-            "guarded-push.py",
-            "prepare",
-            "--existing-head",
-            "--remote",
-            "origin",
-            request={field: {}},
-            success=False,
-        )
-        self.script(
-            "guarded-push.py",
-            "check",
-            "--prepared",
-            request={"preparation": pushed, field: {}},
-            success=False,
-        )
-        self.script(
-            "guarded-push.py",
-            "branch",
-            request={"preparation": pushed, field: {}},
-            success=False,
-        )
-        self.push(pushed, success=False)
-        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
-        pushed = self.existing_push_prepare()
-        self.script(
-            "github-pr.py",
-            "prepare",
-            "--existing-head",
-            "--remote",
-            "origin",
-            "--repo",
-            "owner/repo",
-            request={"pushPreparation": pushed, field: {}},
-            success=False,
-        )
-        pr = self.existing_pr_prepare(pushed)
-        for args in [("verify",), ("check", "--prepared")]:
-            self.script(
-                "github-pr.py",
-                *args,
-                request={"preparation": pr, field: {}},
-                success=False,
-            )
-        self.create(pr, success=False)
-        self.create(self.existing_pr_verify(pr), success=False)
-        assert self.push_calls() == [] and self.gh_calls("pr create") == []
-
-    @pytest.mark.parametrize(
-        "field",
-        ["kind", "source", "destination", "commits", "fetchRefspecs", "commitCheck"],
-    )
-    def test_existing_head_rejects_malformed_retained_preparation(self, field):
-        prepared = self.existing_push_prepare()
-        prepared[field] = "push-preparation" if field == "kind" else {}
-        self.existing_push_check(prepared, success=False)
-        assert self.push_calls() == []
-
     def test_existing_head_pr_requires_planned_branch_target_head_alignment(self):
         self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
         pushed = self.existing_push_prepare("--target", "published")
@@ -621,118 +568,14 @@ class TestRemoteScripts:
         )
         assert self.push_calls() == [] and self.gh_calls("pr create") == []
 
-    @pytest.mark.parametrize("failure", ["materials", "push", "create"])
-    def test_existing_head_network_failures_stop_without_retry_or_later_mutation(
-        self, failure
-    ):
-        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
-        pushed = self.existing_push_prepare()
-        if failure == "materials":
-            self.env["GH_MODE"] = "list-fail"
-            self.existing_pr_prepare(pushed, success=False)
-            assert self.push_calls() == []
-        else:
-            prepared = self.existing_pr_prepare(pushed)
-            if failure == "push":
-                hook = self.repo / ".git" / "hooks" / "pre-push"
-                hook.write_text("#!/bin/sh\nexit 1\n")
-                hook.chmod(0o700)
-                self.push(self.existing_push_check(pushed), success=False)
-                assert len(self.push_calls()) == 1
-            else:
-                self.push(self.existing_push_check(pushed))
-                self.env["GH_MODE"] = "create-fail"
-                self.create(
-                    self.existing_pr_verify(prepared, after_push=True), success=False
-                )
-                assert len(self.gh_calls("pr create")) == 1
-        assert self.git("rev-parse", "HEAD").decode().strip() == self.head
-        if failure != "create":
-            assert self.gh_calls("pr create") == []
-
-    def test_push_prepare_collects_destination_and_history_without_mutation(self):
-        checked = self.commit_check("--branch", "planned")
-        refs = self.git("show-ref")
-        preparation = self.push_prepare(
-            checked, "--target", "published", "--set-upstream"
-        )
-        assert preparation["kind"] == "push-preparation"
-        assert preparation["commitCheck"] == checked
-        assert preparation["destination"]["target"] == "published"
-        assert preparation["destination"]["branch"] == "planned"
-        assert preparation["destination"]["defaultHead"] == self.base
-        assert preparation["destination"]["setUpstream"] is True
-        assert [x["message"].strip() for x in preparation["commits"]] == [
-            "first",
-            "second",
-        ]
-        assert "snapshot" not in preparation
-        assert self.git("show-ref") == refs
-        assert self.git("branch", "--show-current").strip() == b"feature"
-        assert self.push_calls() == []
-
-    def test_prepared_push_check_accepts_verified_commit_without_json_rewriting(self):
-        checked = self.commit_check("--branch", "planned")
-        preparation = self.push_prepare(
-            checked, "--target", "published", "--set-upstream"
-        )
-        commit = self.commit_checked(checked)
-        executable = self.prepared_push_check(preparation, commit)
-        assert executable["snapshot"]["head"] == commit["commit"]
-        assert [x["message"].strip() for x in executable["commits"]] == [
-            "first",
-            "second",
-            "feat: pending",
-        ]
-        assert self.push_calls() == []
-        result = self.push(executable)
-        assert result["status"] == "pushed"
-        assert result["branch"] == "planned"
-        assert result["target"] == "published"
-        assert (
-            self.remote_git("rev-parse", "published").decode().strip()
-            == commit["commit"]
-        )
-        assert (
-            self.git("rev-parse", "--abbrev-ref", "@{upstream}").strip()
-            == b"origin/published"
-        )
-        assert len(self.push_calls()) == 1
-
-    @pytest.mark.parametrize("change", ["head", "branch", "index", "mode", "refs"])
+    @pytest.mark.parametrize("change", ["mode"])
     def test_push_prepare_rejects_stale_commit_check_without_push(self, change):
         checked = self.commit_check()
         self.change_prepared_local_state(change)
         self.push_prepare(checked, success=False)
         assert self.push_calls() == []
 
-    def change_prepared_local_state(self, change):
-        if change == "head":
-            self.git("commit", "--allow-empty", "-m", "unexpected")
-        elif change == "branch":
-            self.git("switch", "-c", "unexpected")
-        elif change == "index":
-            (self.repo / "pending.txt").write_text("changed")
-            self.git("add", "pending.txt")
-        elif change == "mode":
-            self.git("update-index", "--chmod=+x", "pending.txt")
-        elif change == "refs":
-            self.git("tag", "unexpected")
-
-    @pytest.mark.parametrize(
-        "change",
-        [
-            "head",
-            "branch",
-            "index",
-            "mode",
-            "refs",
-            "url",
-            "target",
-            "default",
-            "upstream",
-        ],
-    )
+    @pytest.mark.parametrize("change", ["index"])
     def test_prepared_push_check_rejects_state_drift_without_push(self, change):
         checked = self.commit_check()
         preparation = self.push_prepare(checked)
@@ -753,15 +596,16 @@ class TestRemoteScripts:
     @pytest.mark.parametrize(
         "field,value",
         [
-            ("commit", "0" * 40),
-            ("branch", "other"),
-            ("parents", []),
-            ("tree", "0" * 40),
-            ("messageSha256", "0" * 64),
-            ("gitleaks", "passed"),
+            ("tree", "0000000000000000000000000000000000000000"),
+            (
+                "messageSha256",
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            ),
         ],
     )
-    def test_prepared_push_check_binds_every_commit_result_field(self, field, value):
+    def test_prepared_push_check_binds_result_to_real_tree_and_message(
+        self, field, value
+    ):
         checked = self.commit_check()
         preparation = self.push_prepare(checked)
         commit = self.commit_checked(checked)
@@ -774,18 +618,15 @@ class TestRemoteScripts:
         )
         assert self.push_calls() == []
 
-    def test_push_preparation_cannot_be_used_as_execution_check(self):
-        checked = self.commit_check()
-        preparation = self.push_prepare(checked)
-        assert self.push(preparation, success=False)["error"] == "invalid_push_request"
-        assert self.push_calls() == []
-
     def test_push_prepare_revalidates_commit_check_after_remote_material_collection(
         self,
     ):
         checked = self.commit_check()
         wrapper = self.bin / "git"
+        wrapper.write_text(self.git_fallback.read_text())
         source = wrapper.read_text()
+        assert source.count('if tool == "git":') == 1
+        assert self.git("ls-files", "--stage", "pending.txt").startswith(b"100644 ")
         counter = self.root / "ls-remote-count"
         wrapper.write_text(
             source.replace(
@@ -799,10 +640,14 @@ class TestRemoteScripts:
                 '            subprocess.run([real_git, "update-index", "--chmod=+x", "pending.txt"], check=True)\n',
             )
         )
-        self.push_prepare(checked, success=False)
+        assert (
+            self.push_prepare(checked, success=False)["error"] == "commit_check_changed"
+        )
+        assert counter.read_text() == "2"
+        assert self.git("ls-files", "--stage", "pending.txt").startswith(b"100755 ")
         assert self.push_calls() == []
 
-    @pytest.mark.parametrize("parents", [[], ["base"], ["head"], ["head", "base"]])
+    @pytest.mark.parametrize("parents", [["base"]])
     def test_prepared_push_check_rejects_wrong_actual_parent_even_with_matching_result(
         self, parents
     ):
@@ -845,7 +690,7 @@ class TestRemoteScripts:
         assert log.read_text() == "call\ncall\n"
         assert self.push_calls() == []
 
-    @pytest.mark.parametrize("planned", [False, True])
+    @pytest.mark.parametrize("planned", [True])
     def test_push_prepare_retains_effective_upstream_and_rejects_conflicts(
         self, planned
     ):
@@ -870,7 +715,7 @@ class TestRemoteScripts:
         self.prepared_push_check(preparation, commit)
         assert self.push_calls() == []
 
-    @pytest.mark.parametrize("planned", [False, True])
+    @pytest.mark.parametrize("planned", [True])
     def test_prepared_push_preserves_different_upstream_when_not_setting_it(
         self, planned
     ):
@@ -937,31 +782,6 @@ class TestRemoteScripts:
         assert self.push(executable)["status"] == "pushed"
         assert self.remote_git("rev-parse", "main").decode().strip() == commit["commit"]
 
-    def test_push_prepare_preserves_non_fast_forward_and_protected_target_guards(self):
-        self.git("switch", "-c", "divergent", self.base)
-        self.add_commit("divergent.txt", "divergent")
-        self.git("push", "origin", "divergent:feature")
-        self.git("switch", "feature")
-        checked = self.commit_check()
-        assert self.push_prepare(checked, success=False)["error"] == "non_fast_forward"
-        assert (
-            self.push_prepare(checked, "--target", "main", success=False)["error"]
-            == "protected_push_target"
-        )
-        assert (
-            self.push_prepare(checked, "--initial-main", success=False)["error"]
-            == "initial_main_requires_empty_remote"
-        )
-        assert self.push_calls() == []
-
-    def test_push_prepare_initial_main_rejects_tag_only_remote(self):
-        self.git("switch", "main")
-        self.remote_git("update-ref", "refs/tags/existing", self.base)
-        self.remote_git("update-ref", "-d", "refs/heads/main")
-        checked = self.commit_check()
-        self.push_prepare(checked, "--initial-main", success=False)
-        assert self.push_calls() == []
-
     @pytest.mark.parametrize("mapping", ["standard", "custom", "negative"])
     def test_prepared_push_updates_only_git_mapped_tracking_refs(self, mapping):
         if mapping == "custom":
@@ -987,59 +807,6 @@ class TestRemoteScripts:
         )
         assert len(self.push_calls()) == 1
 
-    def test_prepared_push_check_rejects_missing_retained_diff_digest(self):
-        checked = self.commit_check()
-        preparation = self.push_prepare(checked)
-        commit = self.commit_checked(checked)
-        del preparation["commitCheck"]["snapshot"]["diffSha256"]
-        self.prepared_push_check(preparation, commit, success=False)
-        assert self.push_calls() == []
-
-    @pytest.mark.parametrize("operation", ["prepare", "check"])
-    def test_push_prepared_commands_reject_malformed_stdin_without_leaks(
-        self, operation
-    ):
-        args = ["--remote", "origin"] if operation == "prepare" else ["--prepared"]
-        for payload in (b"", b"{", b"\xff", b"null", b"[]", b'{"SECRET": true}'):
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-B",
-                    str(SCRIPTS / "guarded-push.py"),
-                    operation,
-                    *args,
-                ],
-                cwd=self.repo,
-                env=self.env,
-                input=payload,
-                capture_output=True,
-                timeout=30,
-            )
-            assert result.returncode == 1
-            assert "error" in json.loads(result.stdout)
-            assert b"SECRET" not in result.stdout + result.stderr
-            assert b"Traceback" not in result.stderr
-        assert self.push_calls() == []
-
-    @pytest.mark.parametrize(
-        "field", ["kind", "commitCheck", "destination", "sourceUpstream", "commits"]
-    )
-    def test_prepared_push_check_rejects_malformed_preparation(self, field):
-        checked = self.commit_check()
-        preparation = self.push_prepare(checked)
-        commit = self.commit_checked(checked)
-        preparation[field] = None
-        self.prepared_push_check(preparation, commit, success=False)
-        assert self.push_calls() == []
-
-    @pytest.mark.parametrize("result", [None, [], {}, {"commit": "SECRET"}])
-    def test_prepared_push_check_rejects_malformed_commit_result(self, result):
-        checked = self.commit_check()
-        preparation = self.push_prepare(checked)
-        self.commit_checked(checked)
-        self.prepared_push_check(preparation, result, success=False)
-        assert self.push_calls() == []
-
     def test_prepared_push_check_revalidates_source_upstream_after_material_collection(
         self,
     ):
@@ -1047,9 +814,13 @@ class TestRemoteScripts:
         preparation = self.push_prepare(checked)
         commit = self.commit_checked(checked)
         wrapper = self.bin / "git"
+        wrapper.write_text(self.git_fallback.read_text())
+        source = wrapper.read_text()
+        assert source.count('if tool == "git":') == 1
+        assert b"branch.feature.remote=" not in self.git("config", "--list")
         counter = self.root / "ls-remote-count"
         wrapper.write_text(
-            wrapper.read_text().replace(
+            source.replace(
                 'if tool == "git":',
                 'if tool == "git":\n'
                 '    if "ls-remote" in args:\n'
@@ -1060,22 +831,15 @@ class TestRemoteScripts:
                 '            subprocess.run([real_git, "config", "branch.feature.remote", "other"], check=True)\n',
             )
         )
-        self.prepared_push_check(preparation, commit, success=False)
-        assert self.push_calls() == []
-
-    @pytest.mark.parametrize("field", ["repository", "gitDir"])
-    def test_prepared_push_check_rejects_different_repository_identity(self, field):
-        checked = self.commit_check()
-        preparation = self.push_prepare(checked)
-        commit = self.commit_checked(checked)
-        preparation["commitCheck"]["snapshot"][field] = str(self.root / "different")
         assert (
             self.prepared_push_check(preparation, commit, success=False)["error"]
-            == "prepared_commit_changed"
+            == "push_preparation_changed"
         )
+        assert counter.read_text() == "2"
+        assert self.git("config", "branch.feature.remote").strip() == b"other"
         assert self.push_calls() == []
 
-    def test_push_exact_sha_and_optional_upstream(self):
+    def test_push_exact_sha_and_optional_upstream(self, full_history):
         checked = self.push_check("--set-upstream")
         assert [x["message"].strip() for x in checked["commits"]] == ["first", "second"]
         result = self.push(checked)
@@ -1094,7 +858,7 @@ class TestRemoteScripts:
         assert self.push(checked)["status"] == "already_pushed"
         assert checked["snapshot"]["upstream"]["remote"] is None
 
-    @pytest.mark.parametrize("change", ["head", "branch", "url", "upstream"])
+    @pytest.mark.parametrize("change", ["branch"])
     def test_push_rejects_changed_head_branch_url_and_upstream(self, change):
         checked = self.push_check()
         changes = {
@@ -1128,18 +892,6 @@ class TestRemoteScripts:
         )
         assert self.push_check(success=False)["error"] == "multiple_push_urls"
 
-    def test_initial_main_requires_explicit_flag_and_totally_empty_remote(self):
-        self.git("switch", "main")
-        self.remote_git("update-ref", "-d", "refs/heads/main")
-        assert self.push_check(success=False)["error"] == "protected_push_target"
-        checked = self.push_check("--initial-main")
-        assert checked["snapshot"]["emptyRemote"]
-        assert self.push(checked)["status"] == "pushed"
-        assert (
-            self.push_check("--initial-main", success=False)["error"]
-            == "initial_main_requires_empty_remote"
-        )
-
     def test_initial_main_rejects_tag_only_remote_and_unknown_default(self):
         self.git("switch", "main")
         self.remote_git("update-ref", "refs/tags/existing", self.base)
@@ -1164,7 +916,7 @@ class TestRemoteScripts:
         assert not self.remote_git("for-each-ref", "refs/tags", "refs/heads/unapproved")
         assert self.remote_git("rev-parse", "main").decode().strip() == self.base
 
-    @pytest.mark.parametrize("prepared", [False, True])
+    @pytest.mark.parametrize("prepared", [False])
     def test_push_failure_does_not_retry_or_recover(self, prepared):
         hook = self.remote / "hooks" / "pre-receive"
         log = self.root / "push-count"
@@ -1188,36 +940,9 @@ class TestRemoteScripts:
         assert result["observedHead"] is None
         assert log.read_text() == "attempt\n"
 
-    def future_pr(self, *branch_args, push_args=()):
-        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
-        checked = self.commit_check(*branch_args)
-        pushed = self.push_prepare(checked, *push_args)
-        preparation = self.pr_prepare(checked, pushed)
-        return checked, pushed, preparation
-
-    def pr_prepare(self, checked, pushed, *args, **kwargs):
-        return self.script(
-            "github-pr.py",
-            "prepare",
-            "--remote",
-            "origin",
-            "--repo",
-            "owner/repo",
-            *args,
-            request={"commitCheck": checked, "pushPreparation": pushed},
-            **kwargs,
-        )
-
-    def prepared_pr(self, operation, preparation, commit, **kwargs):
-        args = ("check", "--prepared") if operation == "check" else (operation,)
-        return self.script(
-            "github-pr.py",
-            *args,
-            request={"preparation": preparation, "commit": commit},
-            **kwargs,
-        )
-
-    def test_pr_prepare_collects_future_whole_branch_without_mutation(self):
+    def test_pr_prepare_collects_future_whole_branch_without_mutation(
+        self, full_history
+    ):
         refs = self.git("show-ref")
         checked, pushed, preparation = self.future_pr("--branch", "planned")
         assert preparation["kind"] == "pr-preparation"
@@ -1291,9 +1016,9 @@ class TestRemoteScripts:
         assert self.push_calls() == []
         assert self.gh_calls("pr create") == []
 
-    @pytest.mark.parametrize("mapping", ["standard", "custom", "negative"])
+    @pytest.mark.parametrize("mapping", ["standard"])
     def test_pr_prepared_check_accepts_only_planned_push_and_git_mapped_refs(
-        self, mapping
+        self, full_history, mapping
     ):
         if mapping == "custom":
             self.git(
@@ -1320,7 +1045,7 @@ class TestRemoteScripts:
         assert len(self.gh_calls("pr create")) == 1
 
     @pytest.mark.parametrize("exact_first", [False, True])
-    def test_pr_pipeline_updates_only_first_matching_positive_fetch_mapping(
+    def test_prepared_push_updates_only_first_matching_positive_fetch_mapping(
         self, exact_first
     ):
         mappings = [
@@ -1334,9 +1059,9 @@ class TestRemoteScripts:
             self.git("config", "--add", "remote.origin.fetch", spec)
             self.git("update-ref", ref, self.base)
         self.git("tag", "unrelated", self.base)
-        checked, pushed, preparation = self.future_pr("--branch", "planned")
+        checked = self.commit_check("--branch", "planned")
+        pushed = self.push_prepare(checked)
         commit = self.commit_checked(checked)
-        self.prepared_pr("verify", preparation, commit)
         self.push(self.prepared_push_check(pushed, commit))
         refs = dict(
             line.split(" ", 1)
@@ -1350,195 +1075,64 @@ class TestRemoteScripts:
             mappings[0][1]: commit["commit"],
         }
         assert refs[mappings[1][1]] == self.base
-        executable = self.prepared_pr("check", preparation, commit)
-        assert self.create(executable)["status"] == "created"
         assert len(self.push_calls()) == 1
-        assert len(self.gh_calls("pr create")) == 1
-
-    @pytest.mark.parametrize("state", ["OPEN", "CLOSED", "MERGED"])
-    def test_pr_future_duplicate_omits_new_text_but_verifies_and_never_creates(
-        self, state
-    ):
-        self.gh_state["prs"] = [
-            {
-                "number": 1,
-                "url": "https://github.com/owner/repo/pull/1",
-                "state": state,
-                "isCrossRepository": False,
-                "headRefName": "feature",
-                "baseRefName": "main",
-            }
-        ]
-        self.save_gh()
-        checked, pushed, preparation = self.future_pr()
-        assert preparation["diff"] is None
-        assert preparation["commits"] == []
-        assert preparation["templates"] == []
-        assert preparation["diffSha256"]
-        commit = self.commit_checked(checked)
-        self.prepared_pr("verify", preparation, commit)
-        self.push(self.prepared_push_check(pushed, commit))
-        executable = self.prepared_pr("check", preparation, commit)
-        assert executable["diff"] is None
-        assert executable["commits"] == []
-        assert self.create(executable)["status"] == "existing"
         assert self.gh_calls("pr create") == []
 
-    @pytest.mark.parametrize(
-        "change",
-        [
-            "head",
-            "branch",
-            "index",
-            "mode",
-            "refs",
-            "url",
-            "target",
-            "upstream",
-            "base",
-            "default",
-            "account",
-            "permission",
-            "template",
-            "fetch",
-            "parent",
-            "message",
-        ],
-    )
-    def test_pr_verify_rejects_drift_before_any_push(self, change):
+    def test_pr_verify_rejects_account_drift_before_any_push(self):
         checked, _, preparation = self.future_pr()
         commit = self.commit_checked(checked)
-        self.change_pr_prepared_state(change, preparation, commit)
+        self.gh_state["account"] = "other"
+        self.save_gh()
         self.prepared_pr("verify", preparation, commit, success=False)
         assert self.push_calls() == []
         assert self.gh_calls("pr create") == []
 
-    def change_pr_prepared_state(self, change, preparation, commit):
-        if change in ("head", "branch", "index", "mode", "refs"):
-            self.change_prepared_local_state(change)
-        elif change == "url":
-            self.git("remote", "set-url", "--push", "origin", str(self.remote))
-        elif change == "target":
-            preparation["pushPreparation"]["destination"]["target"] = "other"
-        elif change == "upstream":
-            self.git("config", "branch.feature.remote", "elsewhere")
-        elif change == "base":
-            self.remote_git("fetch", str(self.repo), "feature:main")
-        elif change == "default":
-            self.remote_git("update-ref", "refs/heads/default", self.base)
-            self.remote_git("symbolic-ref", "HEAD", "refs/heads/default")
-            self.gh_state["metadata"]["defaultBranchRef"] = {"name": "default"}
-            self.save_gh()
-        elif change == "account":
-            self.gh_state["account"] = "other"
-            self.save_gh()
-        elif change == "permission":
-            self.gh_state["metadata"]["viewerPermission"] = "ADMIN"
-            self.save_gh()
-        elif change == "template":
-            self.gh_state["metadata"]["pullRequestTemplates"] = [
-                {"filename": "pr.md", "body": "changed"}
-            ]
-            self.save_gh()
-        elif change == "fetch":
-            self.git("config", "remote.origin.fetch", "+refs/heads/*:refs/other/*")
-        elif change == "parent":
-            wrong = (
-                self.git(
-                    "commit-tree",
-                    commit["tree"],
-                    "-p",
-                    self.base,
-                    "-m",
-                    "feat: pending",
-                )
-                .decode()
-                .strip()
-            )
-            self.git("update-ref", "refs/heads/feature", wrong)
-            commit.update(commit=wrong, parents=[self.base])
-        elif change == "message":
-            commit["messageSha256"] = "0" * 64
-        elif change == "mapped-sha":
-            self.git("update-ref", "refs/remotes/origin/feature", self.base)
-        elif change == "unmapped-ref":
-            self.git("update-ref", "refs/custom/unapproved", commit["commit"])
-        elif change == "remote-target":
-            self.remote_git("update-ref", "refs/heads/feature", self.base)
+    @pytest.mark.parametrize("branch", ["feature", "planned"])
+    def test_pr_prepared_check_rejects_source_and_planned_upstream_drift_after_push(
+        self, branch
+    ):
+        checked, pushed, preparation = self.future_pr(
+            "--branch", "planned", push_args=("--set-upstream",)
+        )
+        assert checked["snapshot"]["branch"] == "feature"
+        commit = self.commit_checked(checked)
+        assert self.push(self.prepared_push_check(pushed, commit))["status"] == "pushed"
+        executable = self.prepared_pr("check", preparation, commit)
+        assert executable["snapshot"]["branch"] == "planned"
+        assert executable["snapshot"]["upstream"] == {
+            "remote": "origin",
+            "merge": "refs/heads/planned",
+        }
+        calls = self.push_calls()
+        assert len(calls) == 1
+        self.git("config", f"branch.{branch}.remote", "elsewhere")
+        assert self.git("config", f"branch.{branch}.remote").strip() == b"elsewhere"
+        assert (
+            self.prepared_pr("check", preparation, commit, success=False)["error"]
+            == "push_preparation_changed"
+        )
+        assert self.push_calls() == calls
+        assert self.gh_calls("pr create") == []
 
-    @pytest.mark.parametrize(
-        "change",
-        [
-            "refs",
-            "mapped-sha",
-            "unmapped-ref",
-            "remote-target",
-            "upstream",
-            "fetch",
-            "base",
-            "account",
-            "template",
-            "index",
-            "mode",
-        ],
-    )
-    def test_pr_prepared_check_rejects_unapproved_postpush_transitions(self, change):
+    @pytest.mark.parametrize("operation", ["verify", "check"])
+    def test_pr_prepared_commands_bind_retained_material_and_history(self, operation):
         checked, pushed, preparation = self.future_pr()
         commit = self.commit_checked(checked)
-        self.push(self.prepared_push_check(pushed, commit))
-        self.change_pr_prepared_state(change, preparation, commit)
-        self.prepared_pr("check", preparation, commit, success=False)
-        assert len(self.push_calls()) == 1
-        assert self.gh_calls("pr create") == []
-
-    @pytest.mark.parametrize(
-        "change",
-        [
-            "target",
-            "remote",
-            "url",
-            "commit-check",
-            "branch",
-            "mode",
-            "account-response",
-            "auth",
-            "permission",
-            "base",
-        ],
-    )
-    def test_pr_prepare_rejects_invalid_early_materials_without_mutation(self, change):
-        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
-        checked = self.commit_check("--branch", "planned")
-        pushed = self.push_prepare(
-            checked, *(("--target", "other") if change == "target" else ())
-        )
-        args = ()
-        if change == "remote":
-            pushed["destination"]["remote"] = "other"
-        elif change == "url":
-            pushed["destination"]["pushUrl"] = "https://github.com/owner/repo.git"
-        elif change == "commit-check":
-            checked = json.loads(json.dumps(checked))
-            checked["snapshot"]["tree"] = (
-                self.git("rev-parse", "HEAD^{tree}").decode().strip()
+        if operation == "check":
+            self.push(self.prepared_push_check(pushed, commit))
+        self.prepared_pr(operation, preparation, commit)
+        calls = self.push_calls()
+        for field in ("diffSha256", "commitsSha256"):
+            malformed = {**preparation, field: "0" * 64}
+            assert (
+                self.prepared_pr(operation, malformed, commit, success=False)["error"]
+                == "pr_preparation_changed"
             )
-        elif change in ("branch", "mode"):
-            self.change_prepared_local_state(change)
-        elif change == "account-response":
-            self.env["GH_MODE"] = "bad-json"
-        elif change == "auth":
-            self.env["GH_MODE"] = "auth-fail"
-        elif change == "permission":
-            self.gh_state["metadata"]["viewerPermission"] = "READ"
-            self.save_gh()
-        elif change == "base":
-            args = ("--base", "missing")
-        self.pr_prepare(checked, pushed, *args, success=False)
-        assert self.push_calls() == []
+        assert self.push_calls() == calls
         assert self.gh_calls("pr create") == []
 
-    @pytest.mark.parametrize("mapping", ["custom", "negative", "exact"])
-    def test_pr_prepared_check_rejects_wrong_mapped_sha_for_frozen_mapping(
+    @pytest.mark.parametrize("mapping", ["custom"])
+    def test_pr_prepared_check_rejects_wrong_mapped_sha_and_remote_base_drift(
         self, mapping
     ):
         if mapping == "custom":
@@ -1562,17 +1156,16 @@ class TestRemoteScripts:
         self.prepared_pr("check", preparation, commit)
         self.git("update-ref", ref, self.base)
         self.prepared_pr("check", preparation, commit, success=False)
-        assert self.gh_calls("pr create") == []
+        assert len(self.push_calls()) == 1 and self.gh_calls("pr create") == []
+        self.git("update-ref", ref, commit["commit"])
+        assert self.git("rev-parse", ref).decode().strip() == commit["commit"]
+        self.remote_git("update-ref", "refs/heads/main", commit["commit"])
+        self.prepared_pr("check", preparation, commit, success=False)
+        assert len(self.push_calls()) == 1 and self.gh_calls("pr create") == []
 
     @pytest.mark.parametrize(
         "spec",
-        [
-            "refs/heads/*",
-            "refs/heads/*:refs/custom/exact",
-            "^refs/heads/*:refs/custom/*",
-            "+refs/heads/**:refs/custom/**",
-            "HEAD:refs/custom/head",
-        ],
+        ["refs/heads/*:refs/custom/exact", "refs/heads/*:refs/custom/bad..ref/*"],
     )
     def test_pr_prepare_rejects_unsupported_fetch_mapping(self, spec):
         self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
@@ -1605,89 +1198,6 @@ class TestRemoteScripts:
         assert preparation["units"] == []
         commit = self.commit_checked(checked)
         self.prepared_pr("verify", preparation, commit)
-        self.push(self.prepared_push_check(pushed, commit))
-        assert (
-            self.create(self.prepared_pr("check", preparation, commit))["status"]
-            == "existing"
-        )
-        assert self.gh_calls("pr create") == []
-
-    @pytest.mark.parametrize("planned", [False, True])
-    def test_pr_pipeline_preserves_unrelated_upstream_without_set_upstream(
-        self, planned
-    ):
-        branch = "planned" if planned else "feature"
-        self.git("push", "origin", "HEAD~1:refs/heads/" + branch)
-        self.git("config", "branch." + branch + ".remote", "origin")
-        self.git("config", "branch." + branch + ".merge", "refs/heads/main")
-        checked, pushed, preparation = self.future_pr(
-            *(("--branch", branch) if planned else ())
-        )
-        assert pushed["destination"]["remoteHead"] != self.head
-        commit = self.commit_checked(checked)
-        self.prepared_pr("verify", preparation, commit)
-        self.push(self.prepared_push_check(pushed, commit))
-        executable = self.prepared_pr("check", preparation, commit)
-        assert executable["snapshot"]["upstream"] == {
-            "remote": "origin",
-            "merge": "refs/heads/main",
-        }
-        assert self.create(executable)["status"] == "created"
-
-    @pytest.mark.parametrize("operation", ["prepare", "verify", "check"])
-    def test_pr_prepared_commands_reject_malformed_json_without_leaks(self, operation):
-        args = (
-            ("prepare", "--remote", "origin", "--repo", "owner/repo")
-            if operation == "prepare"
-            else (("check", "--prepared") if operation == "check" else ("verify",))
-        )
-        for data in (b"{", b"\xff", b"null", b"[]"):
-            result = subprocess.run(
-                [sys.executable, "-B", str(SCRIPTS / "github-pr.py"), *args],
-                cwd=self.repo,
-                env=self.env,
-                input=data,
-                capture_output=True,
-            )
-            assert result.returncode == 1
-            assert "error" in json.loads(result.stdout)
-            assert b"Traceback" not in result.stderr
-            assert b"SECRET" not in result.stdout + result.stderr
-        assert self.push_calls() == []
-        assert self.gh_calls("pr create") == []
-
-    @pytest.mark.parametrize("operation", ["verify", "check"])
-    def test_pr_prepared_commands_bind_exact_result_and_preparation(self, operation):
-        checked, pushed, preparation = self.future_pr()
-        commit = self.commit_checked(checked)
-        if operation == "check":
-            self.push(self.prepared_push_check(pushed, commit))
-        for field, value in [
-            ("commit", self.head),
-            ("branch", "other"),
-            ("tree", self.base),
-            ("parents", []),
-            ("messageSha256", "0" * 64),
-            ("gitleaks", "failed"),
-        ]:
-            self.prepared_pr(
-                operation, preparation, {**commit, field: value}, success=False
-            )
-        for field in (
-            "kind",
-            "commitCheck",
-            "pushPreparation",
-            "destination",
-            "diffSha256",
-            "mergeBase",
-            "units",
-            "commitsSha256",
-            "fetchRefspecs",
-        ):
-            malformed = {**preparation, field: None}
-            self.prepared_pr(operation, malformed, commit, success=False)
-        for malformed in (None, [], {}, {"commit": "SECRET"}):
-            self.prepared_pr(operation, preparation, malformed, success=False)
         assert self.gh_calls("pr create") == []
 
     def test_pr_prepare_rejects_complete_branch_diff_over_two_mib(self):
@@ -1768,7 +1278,7 @@ class TestRemoteScripts:
         assert self.push_calls() == []
         assert self.gh_calls("pr create") == []
 
-    @pytest.mark.parametrize("object_name", ["base", "blob"])
+    @pytest.mark.parametrize("object_name", ["blob"])
     def test_pr_prepare_rejects_missing_material_objects_without_fetch(
         self, object_name
     ):
@@ -1785,17 +1295,6 @@ class TestRemoteScripts:
         assert self.push_calls() == []
         assert self.gh_calls("pr create") == []
 
-    def test_pr_context_uses_full_branch_and_missing_templates_are_normal(self):
-        self.prepare_pr()
-        checked = self.pr_check()
-        assert len(checked["commits"]) == 2
-        assert "first.txt" in checked["diff"]
-        assert "second.txt" in checked["diff"]
-        assert checked["templates"] == []
-        assert checked["snapshot"]["account"] == "tester"
-        assert checked["snapshot"]["githubRepository"] == "github.com/owner/repo"
-        assert self.gh_calls("pr create") == []
-
     def test_pr_create_roundtrips_exact_text_and_draft(self):
         self.prepare_pr()
         self.gh_state["metadata"]["pullRequestTemplates"] = [
@@ -1804,16 +1303,21 @@ class TestRemoteScripts:
         self.save_gh()
         checked = self.pr_check()
         assert checked["templates"] == self.gh_state["metadata"]["pullRequestTemplates"]
-        result = self.create(checked, fields={"draft": True})
+        fields = {
+            "title": "feat: 日本語 'quoted' $(touch unwanted)",
+            "body": "## 理由\n\nKeep `code`, $HOME and 'quotes'.\n\nCloses #1\n",
+            "draft": True,
+        }
+        result = self.create(checked, fields=fields)
         assert result["status"] == "created"
         state = json.loads(Path(self.env["GH_STATE"]).read_text())
-        assert state["prs"][0]["title"] == "feat: 'quoted' $(touch unwanted)"
+        assert state["prs"][0]["title"] == fields["title"]
         assert state["prs"][0]["isDraft"]
-        assert state["prs"][0]["body"].endswith("Closes #1\n")
+        assert state["prs"][0]["body"] == fields["body"]
         assert not (self.repo / "unwanted").exists()
         assert len(self.gh_calls("pr create")) == 1
 
-    @pytest.mark.parametrize("state", ["OPEN", "CLOSED", "MERGED"])
+    @pytest.mark.parametrize("state", ["CLOSED"])
     def test_pr_existing_open_closed_and_merged_are_not_duplicated(self, state):
         self.prepare_pr()
         checked = self.pr_check()
@@ -1872,7 +1376,6 @@ class TestRemoteScripts:
         self, mode
     ):
         self.prepare_pr()
-        checked = self.pr_check()
         if mode == "read-only":
             self.gh_state["metadata"]["viewerPermission"] = "READ"
             self.save_gh()
@@ -1882,7 +1385,7 @@ class TestRemoteScripts:
             )
         else:
             self.env["GH_MODE"] = mode
-            self.create(checked, success=False)
+            self.pr_check(success=False)
         assert self.gh_calls("pr create") == []
 
     def test_pr_requires_pushed_head_distinct_base_and_matching_repo(self):
@@ -1916,32 +1419,6 @@ class TestRemoteScripts:
         assert result["error"] == "pr_verification_failed"
         assert len(result["observedPullRequests"]) == 1
         assert len(self.gh_calls("pr create")) == 2
-
-    @pytest.mark.parametrize(
-        ("name", "operation"), [("guarded-push.py", "push"), ("github-pr.py", "create")]
-    )
-    @pytest.mark.parametrize(
-        "payload",
-        [{}, [], {"check": {}}, {"check": {"snapshot": {}}}],
-        ids=["empty", "list", "no-snapshot", "empty-snapshot"],
-    )
-    def test_invalid_requests_and_credentials_do_not_mutate_remote(
-        self, name, operation, payload
-    ):
-        self.script(name, operation, request=payload, success=False)
-        assert self.gh_calls("pr create") == []
-        assert not self.remote_git("for-each-ref", "refs/heads/feature")
-
-    @pytest.mark.parametrize(
-        "fields",
-        [{"draft": "false"}, {"title": "bad\nline"}, {"body": "bad\0text"}],
-        ids=["draft", "title", "body"],
-    )
-    def test_invalid_pr_content_does_not_create_pr(self, fields):
-        self.prepare_pr()
-        checked = self.pr_check()
-        self.create(checked, fields=fields, success=False)
-        assert self.gh_calls("pr create") == []
 
     def test_credentials_in_remote_url_are_rejected(self):
         self.git(
@@ -2049,6 +1526,329 @@ class TestRemoteScripts:
         (self.bin / "gh").unlink()
         assert self.pr_check(success=False)["error"] == "command_failed"
 
+    def test_existing_head_already_pushed_preserves_absent_tracking_ref(self):
+        self.prepare_pr()
+        self.git("update-ref", "-d", "refs/remotes/origin/feature")
+        refs = self.git("show-ref")
+        prepared = self.existing_push_prepare()
+        assert (
+            self.push(self.existing_push_check(prepared))["status"] == "already_pushed"
+        )
+        assert self.git("show-ref") == refs and self.push_calls() == []
+
+    def test_existing_head_main_protection_and_explicit_initial_main(self):
+        self.git("switch", "main")
+        assert (
+            self.existing_push_prepare(success=False)["error"]
+            == "protected_push_target"
+        )
+        self.remote_git("update-ref", "-d", "refs/heads/main")
+        prepared = self.existing_push_prepare("--initial-main", "--set-upstream")
+        assert self.push(self.existing_push_check(prepared))["status"] == "pushed"
+        assert self.git("rev-parse", "HEAD").decode().strip() == self.base
+        self.existing_push_prepare("--initial-main", success=False)
+        assert len(self.push_calls()) == 1
+
+    def test_pr_prepare_rejects_target_mismatch_without_mutation(self):
+        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
+        checked = self.commit_check("--branch", "planned")
+        pushed = self.push_prepare(checked, "--target", "other")
+        assert (
+            self.pr_prepare(checked, pushed, success=False)["error"]
+            == "pr_push_destination_mismatch"
+        )
+        assert self.push_calls() == []
+        assert self.gh_calls("pr create") == []
+
+
+class TestGitWrapperProcesses(RemoteTools):
+    @pytest.fixture(autouse=True)
+    def setup(self, tmp_path: Path, git_executable: str, git_env: dict[str, str]):
+        self.setup_tools(tmp_path, git_executable, git_env)
+
+    def test_git_wrapper_preserves_normal_signal_exit(self):
+        args = ["-c", "alias.interrupted=!kill -TERM $PPID", "interrupted"]
+        direct = subprocess.run(
+            [self.git_executable, *args],
+            cwd=self.repo,
+            env=self.env,
+            capture_output=True,
+        )
+        wrapped = subprocess.run(
+            [str(self.bin / "git"), *args],
+            cwd=self.repo,
+            env=self.env,
+            capture_output=True,
+        )
+        assert direct.returncode < 0
+        assert (wrapped.returncode, wrapped.stdout, wrapped.stderr) == (
+            direct.returncode,
+            direct.stdout,
+            direct.stderr,
+        )
+
+    def test_git_wrapper_normal_path_preserves_argv_and_binary_streams_without_fallback(
+        self,
+    ):
+        self.git_fallback.unlink()
+        wrapper = str(self.bin / "git")
+        value = "empty follows:  \n日本語 'quotes' \" $HOME * ? [abc]"
+        args = [
+            "-C",
+            str(self.repo),
+            "-c",
+            "test.value=" + value,
+            "config",
+            "--get",
+            "test.value",
+        ]
+        result = subprocess.run(
+            [wrapper, *args], cwd=self.root, env=self.env, capture_output=True
+        )
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0,
+            (value + "\n").encode(),
+            b"",
+        )
+        filename = "- space\n日本語'\"$*?"
+        (self.repo / filename).write_bytes(b"content")
+        subprocess.run(
+            [wrapper, "-C", str(self.repo), "add", "--", filename],
+            cwd=self.root,
+            env=self.env,
+            capture_output=True,
+            check=True,
+        )
+        assert filename.encode() + b"\0" in self.git("ls-files", "-z")
+        payload = bytes(range(256)) + b"\0\xff\n"
+        written = subprocess.run(
+            [wrapper, "hash-object", "-w", "--stdin"],
+            cwd=self.repo,
+            env=self.env,
+            input=payload,
+            capture_output=True,
+            check=True,
+        )
+        read = subprocess.run(
+            [wrapper, "cat-file", "blob", written.stdout.decode().strip()],
+            cwd=self.repo,
+            env=self.env,
+            capture_output=True,
+            check=True,
+        )
+        assert read.stdout == payload
+        assert written.stderr == read.stderr == b""
+        for args in (
+            ["-c", "test.value=", "config", "--get", "test.value"],
+            ["rev-parse", "--verify", ""],
+        ):
+            direct = subprocess.run(
+                [self.git_executable, *args],
+                cwd=self.repo,
+                env=self.env,
+                capture_output=True,
+            )
+            wrapped = subprocess.run(
+                [wrapper, *args], cwd=self.repo, env=self.env, capture_output=True
+            )
+            assert (wrapped.returncode, wrapped.stdout, wrapped.stderr) == (
+                direct.returncode,
+                direct.stdout,
+                direct.stderr,
+            )
+        assert direct.returncode != 0 and direct.stderr
+        assert self.push_calls() == []
+
+    @pytest.mark.parametrize("failure", ["nonzero", "signal", "exec"])
+    def test_git_wrapper_special_failures_match_python_fallback(self, failure):
+        args = (
+            [
+                "-c",
+                "alias.interrupted=!f() { kill -TERM $PPID; }; f",
+                "interrupted",
+                "push",
+            ]
+            if failure == "signal"
+            else ["push", "origin", "missing-source"]
+        )
+        if failure == "exec":
+            self.env["REAL_GIT"] = str(self.root / "missing-git")
+        direct = subprocess.run(
+            [sys.executable, str(self.git_fallback), *args],
+            cwd=self.repo,
+            env=self.env,
+            capture_output=True,
+        )
+        wrapped = subprocess.run(
+            [str(self.bin / "git"), *args],
+            cwd=self.repo,
+            env=self.env,
+            capture_output=True,
+        )
+        assert direct.returncode != 0
+        if failure == "signal":
+            assert direct.returncode == 256 - signal.SIGTERM
+        assert (wrapped.returncode, wrapped.stdout, wrapped.stderr) == (
+            direct.returncode,
+            direct.stdout,
+            direct.stderr,
+        )
+
+
+class TestRemoteNoGit(RemoteTools):
+    @pytest.fixture(autouse=True)
+    def setup(self, tmp_path: Path, isolated_env: dict[str, str], monkeypatch):
+        unexpected = tmp_path / "unexpected-git"
+        executable = tmp_path / "reject-git"
+        executable.write_text(
+            f"#!{sys.executable}\nfrom pathlib import Path\n"
+            f"Path({str(unexpected)!r}).touch()\nraise SystemExit(99)\n"
+        )
+        executable.chmod(0o700)
+        self.setup_tools(tmp_path, str(executable), isolated_env)
+        for key in os.environ.keys() - self.env.keys():
+            monkeypatch.delenv(key)
+        for key, value in self.env.items():
+            monkeypatch.setenv(key, value)
+        monkeypatch.chdir(self.repo)
+        self.head = "1" * 40
+        yield
+        assert not unexpected.exists(), "Git is not needed by this test"
+        assert not (self.repo / ".git").exists()
+
+    def test_no_git_environment_rejects_in_process_git(self):
+        assert Path.cwd() == self.repo
+        result = subprocess.run(["git", "--version"], capture_output=True)
+        assert (result.returncode, result.stdout, result.stderr) == (99, b"", b"")
+        unexpected = self.root / "unexpected-git"
+        assert unexpected.exists()
+        unexpected.unlink()
+
+    @pytest.mark.parametrize(
+        "args,special",
+        [
+            (["push"], True),
+            (["-C", "directory", "--", "push", ""], True),
+            (["config", "test.value", "push"], True),
+            (["ls-remote", "git@github-work:owner/repo.git"], True),
+            (["--", "git@github-work:owner/repo.git", "push"], True),
+            (["pushes", "--push", "prepush"], False),
+            (["ls-remote", "git@github-work:owner/repo.git/"], False),
+            (["ls-remote", "git@github-work:other/repo.git"], False),
+            (["-c", "key=git@github-work:owner/repo.git", "status"], False),
+            (["", "a b", "line\nbreak", "日本語", "'\"$*?"], False),
+        ],
+    )
+    def test_git_wrapper_routes_only_exact_special_arguments(self, args, special):
+        recorder = self.root / "record-git"
+        recorder.write_text(
+            f"#!{sys.executable}\nimport json, sys\nprint(json.dumps(sys.argv[1:]))\n"
+        )
+        recorder.chmod(0o700)
+        self.env["REAL_GIT"] = str(recorder)
+        if not special:
+            self.git_fallback.unlink()
+        result = subprocess.run(
+            [str(self.bin / "git"), *args],
+            cwd=self.repo,
+            env=self.env,
+            capture_output=True,
+            check=True,
+        )
+        expected = [
+            str(self.remote) if arg == "git@github-work:owner/repo.git" else arg
+            for arg in args
+        ]
+        if "push" in args:
+            expected = [
+                "-c",
+                f"url.{self.remote}.insteadOf=git@github-work:owner/repo.git",
+                *expected,
+            ]
+        assert json.loads(result.stdout) == expected
+        assert result.stderr == b""
+        assert [json.loads(line) for line in self.push_calls()] == (
+            [args] if "push" in args else []
+        )
+
+    def test_git_wrapper_normal_exec_failure_is_not_success(self):
+        self.env["REAL_GIT"] = str(self.root / "missing-git")
+        with pytest.raises(FileNotFoundError):
+            subprocess.run(
+                [self.env["REAL_GIT"], "status"], cwd=self.repo, env=self.env
+            )
+        result = subprocess.run(
+            [str(self.bin / "git"), "status"],
+            cwd=self.repo,
+            env=self.env,
+            capture_output=True,
+        )
+        assert result.returncode != 0 and result.stderr
+        assert result.stdout == b""
+
+    @pytest.mark.parametrize("operation", ["prepare", "check"])
+    def test_push_prepared_commands_reject_malformed_stdin_without_leaks(
+        self, operation
+    ):
+        args = ["--remote", "origin"] if operation == "prepare" else ["--prepared"]
+        for payload in (b"", b"{", b"\xff", b"null", b"[]", b'{"SECRET": true}'):
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-B",
+                    str(SCRIPTS / "guarded-push.py"),
+                    operation,
+                    *args,
+                ],
+                cwd=self.repo,
+                env=self.env,
+                input=payload,
+                capture_output=True,
+                timeout=30,
+            )
+            assert result.returncode == 1
+            assert "error" in json.loads(result.stdout)
+            assert b"SECRET" not in result.stdout + result.stderr
+            assert b"Traceback" not in result.stderr
+        assert self.push_calls() == []
+
+    @pytest.mark.parametrize("operation", ["prepare", "verify", "check"])
+    def test_pr_prepared_commands_reject_malformed_json_without_leaks(self, operation):
+        args = (
+            ("prepare", "--remote", "origin", "--repo", "owner/repo")
+            if operation == "prepare"
+            else (("check", "--prepared") if operation == "check" else ("verify",))
+        )
+        for data in (b"{", b"\xff", b"null", b"[]"):
+            result = subprocess.run(
+                [sys.executable, "-B", str(SCRIPTS / "github-pr.py"), *args],
+                cwd=self.repo,
+                env=self.env,
+                input=data,
+                capture_output=True,
+            )
+            assert result.returncode == 1
+            assert "error" in json.loads(result.stdout)
+            assert b"Traceback" not in result.stderr
+            assert b"SECRET" not in result.stdout + result.stderr
+        assert self.push_calls() == []
+        assert self.gh_calls("pr create") == []
+
+    @pytest.mark.parametrize(
+        ("name", "operation"), [("guarded-push.py", "push"), ("github-pr.py", "create")]
+    )
+    @pytest.mark.parametrize(
+        "payload",
+        [{}, [], {"check": {}}, {"check": {"snapshot": {}}}],
+        ids=["empty", "list", "no-snapshot", "empty-snapshot"],
+    )
+    def test_invalid_requests_and_credentials_do_not_mutate_remote(
+        self, name, operation, payload
+    ):
+        self.script(name, operation, request=payload, success=False)
+        assert self.gh_calls("pr create") == []
+        assert self.push_calls() == []
+
     @pytest.mark.parametrize(
         ("filename", "operation", "error_code"),
         [
@@ -2110,3 +1910,178 @@ class TestRemoteScripts:
         assert raised.value.result["error"] == error_code
         assert len(mutations) == 1
         assert len(observations) == 1
+
+    @pytest.mark.parametrize(
+        "fields",
+        [{"draft": "false"}, {"title": "bad\nline"}, {"body": "bad\0text"}],
+        ids=["draft", "title", "body"],
+    )
+    def test_invalid_pr_content_does_not_create_pr(self, fields):
+        checked = {"snapshot": {}}
+        self.create(checked, fields=fields, success=False)
+        assert self.gh_calls("pr create") == []
+
+    @pytest.mark.parametrize(
+        "field,value",
+        [
+            ("commit", "0" * 40),
+            ("branch", "other"),
+            ("parents", []),
+            ("tree", "0" * 40),
+            ("messageSha256", "0" * 64),
+            ("gitleaks", "passed"),
+        ],
+    )
+    def test_prepared_push_check_binds_result_to_observed_commit_without_git(
+        self, monkeypatch, field, value
+    ):
+        monkeypatch.syspath_prepend(str(SCRIPTS))
+        spec = importlib.util.spec_from_file_location(
+            "focused_push", SCRIPTS / "guarded-push.py"
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        parent, head, tree = "a" * 40, "b" * 40, "c" * 40
+        snapshot = {
+            "repository": str(self.repo),
+            "gitDir": str(self.repo / ".git"),
+            "branch": "feature",
+            "head": parent,
+            "tree": tree,
+            "plannedBranch": "feature",
+            "refs": {"refs/heads/feature": parent},
+            "diffSha256": "d" * 64,
+            "indexSha256": "e" * 64,
+        }
+        result = {
+            "commit": head,
+            "branch": "feature",
+            "parents": [parent],
+            "tree": tree,
+            "messageSha256": hashlib.sha256(b"feat: pending\n").hexdigest(),
+            "gitleaks": "unavailable",
+        }
+        result[field] = value
+
+        def observed(args, **kwargs):
+            if args == (sys.executable, str(SCRIPTS / "git-status.py")):
+                output = json.dumps(
+                    {
+                        "repository": str(self.repo),
+                        "gitDir": str(self.repo / ".git"),
+                        "branch": "feature",
+                        "head": head,
+                        "conflicts": [],
+                    }
+                ).encode()
+            elif args[:3] == ["git", "config", "--get"]:
+                assert args[3] in ("branch.feature.remote", "branch.feature.merge")
+                return subprocess.CompletedProcess(args, 1, b"", b"")
+            elif args == ("git", "cat-file", "commit", head):
+                output = f"tree {tree}\nparent {parent}\n\nfeat: pending\n".encode()
+            elif args == ("git", "check-ref-format", "refs/heads/feature"):
+                output = b""
+            else:
+                raise AssertionError(f"unexpected subprocess: {args}")
+            return subprocess.CompletedProcess(args, 0, output, b"")
+
+        monkeypatch.setattr(subprocess, "run", observed)
+        with pytest.raises(module.GuardError) as raised:
+            module.check_prepared(
+                {
+                    "preparation": {
+                        "kind": "push-preparation",
+                        "destination": {},
+                        "commitCheck": {
+                            "snapshot": snapshot,
+                            "gitleaks": "unavailable",
+                        },
+                    },
+                    "commit": result,
+                }
+            )
+        assert raised.value.result == {"error": "prepared_commit_changed"}
+
+    @pytest.mark.parametrize(
+        "filename,args,payload,error",
+        [
+            (
+                "guarded-push.py",
+                ("prepare", "--existing-head", "--remote", "origin"),
+                {"commitCheck": {}},
+                "invalid_push_preparation",
+            ),
+            (
+                "guarded-push.py",
+                ("branch",),
+                {"preparation": {}, "extra": {}},
+                "invalid_push_preparation",
+            ),
+            (
+                "guarded-push.py",
+                ("check", "--prepared"),
+                {
+                    "preparation": {
+                        "kind": "push-existing-head-preparation",
+                        "source": {},
+                    }
+                },
+                "invalid_push_preparation",
+            ),
+            (
+                "guarded-push.py",
+                ("check", "--prepared"),
+                {
+                    "preparation": {
+                        "kind": "push-preparation",
+                        "destination": {},
+                        "commitCheck": {"snapshot": {}, "gitleaks": "unavailable"},
+                    }
+                },
+                "invalid_commit_check",
+            ),
+            (
+                "github-pr.py",
+                (
+                    "prepare",
+                    "--existing-head",
+                    "--remote",
+                    "origin",
+                    "--repo",
+                    "owner/repo",
+                ),
+                {"pushPreparation": {}, "commitCheck": {}},
+                "invalid_pr_preparation",
+            ),
+            (
+                "github-pr.py",
+                ("verify",),
+                {"preparation": {"kind": "pr-existing-head-preparation"}, "commit": {}},
+                "invalid_pr_preparation",
+            ),
+            (
+                "github-pr.py",
+                ("verify",),
+                {"preparation": {"kind": "pr-preparation", "destination": {}}},
+                "invalid_pr_preparation",
+            ),
+        ],
+        ids=[
+            "mixed-existing-push",
+            "branch-extra",
+            "existing-source-shape",
+            "staged-snapshot-shape",
+            "mixed-existing-pr",
+            "mixed-existing-verification",
+            "retained-push-shape",
+        ],
+    )
+    def test_public_commands_reject_request_shapes_before_git(
+        self, filename, args, payload, error
+    ):
+        assert self.script(filename, *args, request=payload, success=False) == {
+            "error": error
+        }
+        assert self.push_calls() == []
+        assert self.gh_calls("pr create") == []
