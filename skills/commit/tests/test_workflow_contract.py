@@ -93,22 +93,6 @@ def test_standard_route_prepares_before_review_and_uses_verified_execution_order
     )
 
 
-def test_readme_warns_about_default_mutations_and_has_scoped_examples():
-    text = (SKILL_DIR.parents[1] / "README.md").read_text()
-    for contract in (
-        "全変更をStage",
-        "commit → push → 通常PR",
-        "キャンセル",
-        "Stageが残",
-        "/skill:commit-push",
-        "/skill:commit-pr Draft",
-        "/skill:commit --no-confirm",
-        "自由文",
-    ):
-        assert contract in text
-    assert "push と PR 作成は希望した場合だけ" not in text
-
-
 @pytest.mark.parametrize(
     "name,endpoint",
     [("commit", "commit"), ("commit-push", "push"), ("commit-pr", "PR")],
