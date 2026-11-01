@@ -181,6 +181,475 @@ class TestRemoteScripts:
         path = Path(self.env["GIT_PUSH_LOG"])
         return path.read_text().splitlines() if path.exists() else []
 
+    def existing_push_prepare(self, *args, **kwargs):
+        return self.script(
+            "guarded-push.py",
+            "prepare",
+            "--existing-head",
+            "--remote",
+            "origin",
+            *args,
+            request={},
+            **kwargs,
+        )
+
+    def existing_push_check(self, preparation, **kwargs):
+        return self.script(
+            "guarded-push.py",
+            "check",
+            "--prepared",
+            request={"preparation": preparation},
+            **kwargs,
+        )
+
+    def test_existing_head_push_preparation_and_push_do_not_create_commit(self):
+        refs = self.git("show-ref")
+        preparation = self.existing_push_prepare(
+            "--target", "published", "--set-upstream"
+        )
+        assert preparation["kind"] == "push-existing-head-preparation"
+        assert "snapshot" not in preparation
+        assert "commitCheck" not in preparation
+        assert self.git("show-ref") == refs
+        assert self.push_calls() == []
+        checked = self.existing_push_check(preparation)
+        assert [x["message"].strip() for x in checked["commits"]] == ["first", "second"]
+        assert self.push(checked)["status"] == "pushed"
+        assert self.remote_git("rev-parse", "published").decode().strip() == self.head
+        assert self.git("rev-parse", "HEAD").decode().strip() == self.head
+        assert self.git("rev-list", "--count", "HEAD").strip() == b"3"
+        repeated = self.existing_push_prepare("--target", "published")
+        assert (
+            self.push(self.existing_push_check(repeated))["status"] == "already_pushed"
+        )
+        assert len(self.push_calls()) == 1
+
+    def test_existing_head_already_pushed_preserves_absent_tracking_ref(self):
+        self.prepare_pr()
+        self.git("update-ref", "-d", "refs/remotes/origin/feature")
+        refs = self.git("show-ref")
+        prepared = self.existing_push_prepare()
+        assert (
+            self.push(self.existing_push_check(prepared))["status"] == "already_pushed"
+        )
+        assert self.git("show-ref") == refs and self.push_calls() == []
+
+    def existing_pr_prepare(self, pushed, **kwargs):
+        return self.script(
+            "github-pr.py",
+            "prepare",
+            "--existing-head",
+            "--remote",
+            "origin",
+            "--repo",
+            "owner/repo",
+            request={"pushPreparation": pushed},
+            **kwargs,
+        )
+
+    def existing_pr_verify(self, preparation, *, after_push=False, **kwargs):
+        args = ("check", "--prepared") if after_push else ("verify",)
+        return self.script(
+            "github-pr.py", *args, request={"preparation": preparation}, **kwargs
+        )
+
+    def test_existing_head_main_branch_verify_push_pr_and_repeated_invocation(self):
+        self.git("branch", "-f", "main", self.head)
+        self.git("switch", "main")
+        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
+        refs = self.git("show-ref")
+        pushed = self.existing_push_prepare("--branch", "planned", "--set-upstream")
+        prepared = self.existing_pr_prepare(pushed)
+        assert prepared["kind"] == "pr-existing-head-preparation"
+        assert "snapshot" not in prepared
+        assert "first.txt" in prepared["diff"] and "second.txt" in prepared["diff"]
+        assert self.git("show-ref") == refs
+        assert self.push_calls() == [] and self.gh_calls("pr create") == []
+        result = self.script(
+            "guarded-push.py", "branch", request={"preparation": pushed}
+        )
+        assert result["sourceBranch"] == "main" and result["sourceHead"] == self.head
+        assert self.git("rev-parse", "main").decode().strip() == self.head
+        assert self.git("branch", "--show-current").strip() == b"planned"
+        self.existing_pr_verify(prepared)
+        self.push(self.existing_push_check(pushed))
+        executable = self.existing_pr_verify(prepared, after_push=True)
+        assert self.create(executable)["status"] == "created"
+        assert self.git("rev-list", "--count", "HEAD").strip() == b"3"
+        # A later call uses fresh ordinary pushed-HEAD checks, never an old approval.
+        assert self.push(self.push_check())["status"] == "already_pushed"
+        assert self.create(self.pr_check())["status"] == "existing"
+        assert len(self.push_calls()) == 1 and len(self.gh_calls("pr create")) == 1
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            "head",
+            "branch",
+            "index",
+            "mode",
+            "refs",
+            "upstream",
+            "url",
+            "target",
+            "default",
+            "fetch",
+        ],
+    )
+    def test_existing_head_push_check_rejects_preparation_drift(self, change):
+        prepared = self.existing_push_prepare()
+        self.change_existing_state(change)
+        self.existing_push_check(prepared, success=False)
+        assert self.push_calls() == []
+
+    def change_existing_state(self, change):
+        if change == "index":
+            (self.repo / "first.txt").write_text("unexpected")
+            self.git("add", "first.txt")
+        elif change == "mode":
+            self.git("update-index", "--chmod=+x", "first.txt")
+        elif change == "upstream":
+            self.git("config", "branch.feature.remote", "other")
+        elif change == "url":
+            self.git("config", "remote.origin.pushurl", str(self.remote) + "/")
+        elif change == "target":
+            self.remote_git("update-ref", "refs/heads/feature", self.base)
+        elif change == "default":
+            self.remote_git("fetch", str(self.repo), "feature:main")
+        elif change == "fetch":
+            self.git("config", "remote.origin.fetch", "+refs/heads/*:refs/custom/*")
+        else:
+            self.change_prepared_local_state(change)
+
+    @pytest.mark.parametrize("change", ["index", "refs"])
+    def test_existing_head_push_rechecks_between_check_and_mutation(self, change):
+        checked = self.existing_push_check(self.existing_push_prepare())
+        self.change_existing_state(change)
+        self.push(checked, success=False)
+        assert self.push_calls() == []
+
+    @pytest.mark.parametrize("change", ["index", "refs", "head", "branch", "upstream"])
+    def test_existing_head_branch_hook_drift_reports_partial_success_without_push(
+        self, change
+    ):
+        prepared = self.existing_push_prepare("--branch", "planned")
+        commands = {
+            "index": "git update-index --chmod=+x first.txt",
+            "refs": "git tag unexpected",
+            "head": "git commit --allow-empty -m unexpected",
+            "branch": "git symbolic-ref HEAD refs/heads/feature",
+            "upstream": "git config branch.feature.remote unexpected",
+        }
+        hook = self.repo / ".git" / "hooks" / "post-checkout"
+        hook.write_text("#!/bin/sh\n" + commands[change] + "\n")
+        hook.chmod(0o700)
+        result = self.script(
+            "guarded-push.py",
+            "branch",
+            request={"preparation": prepared},
+            success=False,
+        )
+        assert result["branchMayHaveChanged"] is True
+        assert result["observed"]["head"]
+        self.existing_push_check(prepared, success=False)
+        assert self.push_calls() == []
+
+    @pytest.mark.parametrize(
+        "change",
+        ["base", "account", "permission", "template", "fetch", "index", "refs"],
+    )
+    @pytest.mark.parametrize("after_push", [False, True])
+    def test_existing_head_pr_verification_rejects_drift_without_later_mutation(
+        self, change, after_push
+    ):
+        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
+        if change == "base":
+            self.remote_git("update-ref", "refs/heads/release", self.base)
+        pushed = self.existing_push_prepare()
+        args = ["--base", "release"] if change == "base" else []
+        prepared = self.script(
+            "github-pr.py",
+            "prepare",
+            "--existing-head",
+            "--remote",
+            "origin",
+            "--repo",
+            "owner/repo",
+            *args,
+            request={"pushPreparation": pushed},
+        )
+        if after_push:
+            self.push(self.existing_push_check(pushed))
+        calls = self.push_calls()
+        if change == "base":
+            self.remote_git("fetch", str(self.repo), "feature:release")
+        elif change == "account":
+            self.gh_state["account"] = "other"
+            self.save_gh()
+        elif change == "permission":
+            self.gh_state["metadata"]["viewerPermission"] = "READ"
+            self.save_gh()
+        elif change == "template":
+            self.gh_state["metadata"]["pullRequestTemplates"] = [
+                {"filename": "new.md", "body": "unexpected"}
+            ]
+            self.save_gh()
+        else:
+            self.change_existing_state(change)
+        self.existing_pr_verify(prepared, after_push=after_push, success=False)
+        assert self.push_calls() == calls and self.gh_calls("pr create") == []
+
+    def test_existing_head_create_does_not_requery_pr_list_after_success(self):
+        self.prepare_pr()
+        prepared = self.existing_pr_prepare(self.existing_push_prepare())
+        checked = self.existing_pr_verify(prepared, after_push=True)
+        assert self.create(checked)["status"] == "created"
+        calls = [
+            json.loads(line)
+            for line in Path(self.env["GH_LOG"]).read_text().splitlines()
+        ]
+        created = next(
+            i for i, args in enumerate(calls) if args[:2] == ["pr", "create"]
+        )
+        after_create = [args[:2] for args in calls[created + 1 :]]
+        assert ["pr", "view"] in after_create
+        assert ["repo", "view"] in after_create
+        assert ["pr", "list"] not in after_create
+        assert len(self.gh_calls("pr create")) == 1
+
+    @pytest.mark.parametrize("change", ["index", "refs"])
+    def test_existing_head_create_reports_postcreate_drift_without_retry(self, change):
+        self.prepare_pr()
+        prepared = self.existing_pr_prepare(self.existing_push_prepare())
+        checked = self.existing_pr_verify(prepared, after_push=True)
+        self.env["GH_MODE"] = "create-change-" + change
+        result = self.create(checked, success=False)
+        assert result["error"] == "pr_verification_failed"
+        assert result["operationMayHaveSucceeded"] is True
+        assert result["url"] == "https://github.com/owner/repo/pull/1"
+        assert result["observedPullRequests"] == [
+            {"number": 1, "url": result["url"], "state": "OPEN"}
+        ]
+        assert len(self.gh_calls("pr create")) == 1
+
+    @pytest.mark.parametrize("change", ["index", "refs"])
+    def test_existing_head_create_rechecks_after_execution_check(self, change):
+        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
+        pushed = self.existing_push_prepare()
+        prepared = self.existing_pr_prepare(pushed)
+        self.push(self.existing_push_check(pushed))
+        checked = self.existing_pr_verify(prepared, after_push=True)
+        self.change_existing_state(change)
+        self.create(checked, success=False)
+        assert self.gh_calls("pr create") == []
+
+    @pytest.mark.parametrize("state", ["OPEN", "CLOSED", "MERGED"])
+    def test_existing_head_pr_preparation_retains_guards_for_existing_pr(self, state):
+        self.prepare_pr()
+        self.create(self.pr_check())
+        data = json.loads(Path(self.env["GH_STATE"]).read_text())
+        data["prs"][0]["state"] = state
+        Path(self.env["GH_STATE"]).write_text(json.dumps(data))
+        prepared = self.existing_pr_prepare(self.existing_push_prepare())
+        assert (
+            prepared["diff"] is None
+            and prepared["commits"] == []
+            and prepared["templates"] == []
+        )
+        assert prepared["existingPullRequests"][0]["state"] == state
+        self.existing_pr_verify(prepared)
+        assert (
+            self.create(self.existing_pr_verify(prepared, after_push=True))["status"]
+            == "existing"
+        )
+        assert self.push_calls() == [] and len(self.gh_calls("pr create")) == 1
+
+    @pytest.mark.parametrize("change", ["index", "refs", "head"])
+    def test_existing_head_push_hook_change_stops_before_pr(self, change):
+        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
+        pushed = self.existing_push_prepare()
+        prepared = self.existing_pr_prepare(pushed)
+        hook = self.repo / ".git" / "hooks" / "pre-push"
+        command = {
+            "index": "git update-index --chmod=+x first.txt",
+            "refs": "git tag unexpected",
+            "head": "git commit --allow-empty -m unexpected",
+        }[change]
+        hook.write_text("#!/bin/sh\n" + command + "\n")
+        hook.chmod(0o700)
+        result = self.push(self.existing_push_check(pushed), success=False)
+        assert result["remoteMayHaveChanged"] is True
+        self.existing_pr_verify(prepared, after_push=True, success=False)
+        assert len(self.push_calls()) == 1 and self.gh_calls("pr create") == []
+        assert self.remote_git("rev-parse", "feature").decode().strip() == self.head
+
+    def test_existing_head_push_hook_drift_stops_before_upstream_update(self):
+        prepared = self.existing_push_prepare("--set-upstream")
+        hook = self.repo / ".git" / "hooks" / "pre-push"
+        hook.write_text("#!/bin/sh\ngit update-index --chmod=+x first.txt\n")
+        hook.chmod(0o700)
+        result = self.push(self.existing_push_check(prepared), success=False)
+        assert result["remoteMayHaveChanged"] is True
+        upstream = subprocess.run(
+            [self.git_executable, "config", "--get-regexp", r"^branch\.feature\."],
+            cwd=self.repo,
+            env=self.env,
+            capture_output=True,
+        )
+        assert upstream.returncode == 1 and upstream.stdout == b""
+
+    def test_existing_head_branch_collision_and_failure_never_push(self):
+        prepared = self.existing_push_prepare("--branch", "planned")
+        self.git("branch", "planned")
+        self.script(
+            "guarded-push.py",
+            "branch",
+            request={"preparation": prepared},
+            success=False,
+        )
+        assert self.git("branch", "--show-current").strip() == b"feature"
+        self.git("branch", "-D", "planned")
+        hook = self.repo / ".git" / "hooks" / "post-checkout"
+        hook.write_text("#!/bin/sh\nexit 1\n")
+        hook.chmod(0o700)
+        result = self.script(
+            "guarded-push.py",
+            "branch",
+            request={"preparation": prepared},
+            success=False,
+        )
+        assert (
+            result["branchMayHaveChanged"] is True
+            and result["observed"]["head"] == self.head
+        )
+        assert self.push_calls() == []
+
+    def test_existing_head_prepare_requires_head_and_clean_index(self):
+        (self.repo / "first.txt").write_text("unstaged stays out of transmission")
+        prepared = self.existing_push_prepare()
+        assert prepared["source"]["head"] == self.head
+        self.git("add", "first.txt")
+        self.existing_push_prepare(success=False)
+        self.repo = self.root / "unborn"
+        self.repo.mkdir()
+        self.git("init", "-b", "feature")
+        assert self.existing_push_prepare(success=False)["error"] == "unborn_head"
+        assert self.push_calls() == []
+
+    def test_existing_head_main_protection_and_explicit_initial_main(self):
+        self.git("switch", "main")
+        assert (
+            self.existing_push_prepare(success=False)["error"]
+            == "protected_push_target"
+        )
+        self.remote_git("update-ref", "-d", "refs/heads/main")
+        prepared = self.existing_push_prepare("--initial-main", "--set-upstream")
+        assert self.push(self.existing_push_check(prepared))["status"] == "pushed"
+        assert self.git("rev-parse", "HEAD").decode().strip() == self.base
+        self.existing_push_prepare("--initial-main", success=False)
+        assert len(self.push_calls()) == 1
+
+    @pytest.mark.parametrize("field", ["commit", "commitCheck", "extra"])
+    def test_existing_head_rejects_mixed_requests_and_preparation_direct_input(
+        self, field
+    ):
+        pushed = self.existing_push_prepare()
+        self.script(
+            "guarded-push.py",
+            "prepare",
+            "--existing-head",
+            "--remote",
+            "origin",
+            request={field: {}},
+            success=False,
+        )
+        self.script(
+            "guarded-push.py",
+            "check",
+            "--prepared",
+            request={"preparation": pushed, field: {}},
+            success=False,
+        )
+        self.script(
+            "guarded-push.py",
+            "branch",
+            request={"preparation": pushed, field: {}},
+            success=False,
+        )
+        self.push(pushed, success=False)
+        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
+        pushed = self.existing_push_prepare()
+        self.script(
+            "github-pr.py",
+            "prepare",
+            "--existing-head",
+            "--remote",
+            "origin",
+            "--repo",
+            "owner/repo",
+            request={"pushPreparation": pushed, field: {}},
+            success=False,
+        )
+        pr = self.existing_pr_prepare(pushed)
+        for args in [("verify",), ("check", "--prepared")]:
+            self.script(
+                "github-pr.py",
+                *args,
+                request={"preparation": pr, field: {}},
+                success=False,
+            )
+        self.create(pr, success=False)
+        self.create(self.existing_pr_verify(pr), success=False)
+        assert self.push_calls() == [] and self.gh_calls("pr create") == []
+
+    @pytest.mark.parametrize(
+        "field",
+        ["kind", "source", "destination", "commits", "fetchRefspecs", "commitCheck"],
+    )
+    def test_existing_head_rejects_malformed_retained_preparation(self, field):
+        prepared = self.existing_push_prepare()
+        prepared[field] = "push-preparation" if field == "kind" else {}
+        self.existing_push_check(prepared, success=False)
+        assert self.push_calls() == []
+
+    def test_existing_head_pr_requires_planned_branch_target_head_alignment(self):
+        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
+        pushed = self.existing_push_prepare("--target", "published")
+        assert (
+            self.existing_pr_prepare(pushed, success=False)["error"]
+            == "pr_push_destination_mismatch"
+        )
+        assert self.push_calls() == [] and self.gh_calls("pr create") == []
+
+    @pytest.mark.parametrize("failure", ["materials", "push", "create"])
+    def test_existing_head_network_failures_stop_without_retry_or_later_mutation(
+        self, failure
+    ):
+        self.git("remote", "set-url", "origin", "git@github-work:owner/repo.git")
+        pushed = self.existing_push_prepare()
+        if failure == "materials":
+            self.env["GH_MODE"] = "list-fail"
+            self.existing_pr_prepare(pushed, success=False)
+            assert self.push_calls() == []
+        else:
+            prepared = self.existing_pr_prepare(pushed)
+            if failure == "push":
+                hook = self.repo / ".git" / "hooks" / "pre-push"
+                hook.write_text("#!/bin/sh\nexit 1\n")
+                hook.chmod(0o700)
+                self.push(self.existing_push_check(pushed), success=False)
+                assert len(self.push_calls()) == 1
+            else:
+                self.push(self.existing_push_check(pushed))
+                self.env["GH_MODE"] = "create-fail"
+                self.create(
+                    self.existing_pr_verify(prepared, after_push=True), success=False
+                )
+                assert len(self.gh_calls("pr create")) == 1
+        assert self.git("rev-parse", "HEAD").decode().strip() == self.head
+        if failure != "create":
+            assert self.gh_calls("pr create") == []
+
     def test_push_prepare_collects_destination_and_history_without_mutation(self):
         checked = self.commit_check("--branch", "planned")
         refs = self.git("show-ref")

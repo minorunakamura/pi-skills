@@ -1,6 +1,8 @@
 # 差分の段階的な確認と一時ファイル
 
-標準・互換経路の両方で使う。SKILL.mdの手順2から読み、commit前にStagedと予定PR全体を並行準備する。commitメッセージに必要な内容確認と、完全な差分の機械的な同一性判定を分ける。要約だけで未確認の変更を理解したことにしない。
+標準・互換経路の両方で使う。[workflow.md](workflow.md)の手順2から読み、新commit時はcommit前にStagedと予定PR全体を並行準備する。対象差分なしの既存HEAD時はStaged検査を行わず、必要なPR全体（唯一のmerge-base(base, HEAD)→HEAD tree）と既存履歴を確認する。commitのみ／pushのみでは不要なPR材料を取得しない。commitメッセージに必要な内容確認と、完全な差分の機械的な同一性判定を分ける。要約だけで未確認の変更を理解したことにしない。
+
+呼出し間で以前の理解・承認を無条件に引き継がない。今回確認した完全diffと一致する理解だけを、この実行中に再利用する。既存HEADの準備・verify／checkはcommit結果を使わず、固定HEADのdiff／履歴／index・refsを照合する。
 
 ## 1. 全体像から必要箇所へ
 
@@ -56,7 +58,7 @@ cmp -s -- "$1" "$2"
 
 ### 並行準備の完全digestと変更単位
 
-進行範囲にPRがあればcommit前に準備する。commit用Stagedの理解をPR全体へ無条件に広げず、同一と機械的に確認した単位だけを再利用する。
+到達点がPRなら新commit／push前に準備する。既存HEADでもPR全体と履歴を今回改めて確認し、今回commitを作らないのにStaged diffやcommit文章を作らない。commit用Stagedの理解をPR全体へ無条件に広げず、同一と機械的に確認した単位だけを再利用する。
 
 - `github-pr.py prepare`は、唯一の`merge-base(baseHead, 親HEAD)`から保持したindex treeまでの予定PR全体を返す。`diffSha256`は`--no-ext-diff --no-textconv --binary --no-color --no-renames --ignore-submodules=none`による**完全bytes**のSHA-256、`mergeBase`はその起点。`commits`は既存branch履歴だけで、今回予定するcommitのSHAや本文と混同しない。既存PRでは新規文章用の`diff`はnullだが、照合用digest・unitsは保持される。
 - `units`の各要素は`{path, oldMode, newMode, oldOid, newOid}`。`git diff --raw -z --no-abbrev --no-renames`相当のpath・mode・完全OIDによる変更単位であり、パスを空白・改行で分割しない。Staged側も保持した親HEAD／index treeに対応する同じraw形式で比較できる。Stagedの完全diff digestは引き続き`COMMIT_CHECK.snapshot.diffSha256`を使う。

@@ -28,6 +28,7 @@ from git_guard import (
     required_text,
     run,
     validate_commit_check,
+    validate_existing_push,
     validate_prepared_commit,
     validate_push_preparation,
 )
@@ -336,6 +337,137 @@ def prepare(request, remote, repo, base=None):
     }
 
 
+def prepare_existing(request, remote, repo, base=None):
+    if not isinstance(request, dict) or set(request) != {"pushPreparation"}:
+        raise GuardError("invalid_pr_preparation")
+    pushed = request["pushPreparation"]
+    state = validate_existing_push(pushed, before_branch=True)
+    before = pushed["destination"]
+    if (
+        before["remote"] != remote
+        or before["target"] != state["branch"]
+        or before["initialMain"]
+    ):
+        raise GuardError("pr_push_destination_mismatch")
+    destination, templates = metadata(state, remote, repo, base)
+    existing = existing_prs(destination)
+    materials, diff = planned_materials(
+        state["repository"],
+        destination["baseHead"],
+        state["head"],
+        pushed["source"]["tree"],
+    )
+    if not diff and not existing:
+        raise GuardError("empty_pr_diff")
+    commits = commit_log(state["repository"], state["head"], destination["baseHead"])
+    after, _ = metadata(state, remote, repo, destination["base"])
+    if (
+        after != destination
+        or validate_existing_push(pushed, before_branch=True) != state
+    ):
+        raise GuardError("state_changed_during_preparation")
+    return {
+        "kind": "pr-existing-head-preparation",
+        "pushPreparation": pushed,
+        "destination": destination,
+        **materials,
+        "commitsSha256": history_digest(commits),
+        "diff": None if existing else diff,
+        "commits": [] if existing else commits,
+        "templates": [] if existing else templates,
+        "existingPullRequests": existing,
+    }
+
+
+def verify_existing(request, *, after_push=False):
+    if set(request) != {"preparation"}:
+        raise GuardError("invalid_pr_preparation")
+    preparation = request["preparation"]
+    if set(preparation) != {
+        "kind",
+        "pushPreparation",
+        "destination",
+        "mergeBase",
+        "diffSha256",
+        "units",
+        "commitsSha256",
+        "diff",
+        "commits",
+        "templates",
+        "existingPullRequests",
+    } or not isinstance(preparation.get("destination"), dict):
+        raise GuardError("invalid_pr_preparation")
+    pushed = preparation["pushPreparation"]
+    state = validate_existing_push(pushed, after_push=after_push)
+    before, destination = pushed["destination"], preparation["destination"]
+    if (
+        before["target"] != state["branch"]
+        or before["initialMain"]
+        or any(
+            destination.get(key) != before.get(key)
+            for key in (
+                "repository",
+                "gitDir",
+                "branch",
+                "head",
+                "upstream",
+                "remote",
+                "pushUrl",
+                "defaultBranch",
+            )
+        )
+    ):
+        raise GuardError("pr_push_destination_mismatch")
+    current, _ = metadata(
+        state,
+        destination.get("remote"),
+        destination.get("githubRepository"),
+        destination.get("base"),
+        require_pushed=after_push,
+    )
+    materials, _ = planned_materials(
+        state["repository"],
+        current["baseHead"],
+        state["head"],
+        pushed["source"]["tree"],
+    )
+    commits = commit_log(state["repository"], state["head"], current["baseHead"])
+    if (
+        current != {**destination, "upstream": state["upstream"]}
+        or any(preparation.get(key) != value for key, value in materials.items())
+        or history_digest(commits) != preparation.get("commitsSha256")
+    ):
+        raise GuardError("pr_preparation_changed")
+    after, _ = metadata(
+        state,
+        current["remote"],
+        current["githubRepository"],
+        current["base"],
+        require_pushed=after_push,
+    )
+    if (
+        after != current
+        or validate_existing_push(pushed, after_push=after_push) != state
+    ):
+        raise GuardError("pr_preparation_changed")
+    if after_push:
+        executable = check(
+            current["remote"], current["githubRepository"], current["base"]
+        )
+        if (
+            executable["snapshot"] != current
+            or validate_existing_push(pushed, after_push=True) != state
+        ):
+            raise GuardError("pr_preparation_changed")
+        return {**executable, "existingHeadPreparation": preparation}
+    return {
+        "kind": "pr-verification",
+        "commit": state["head"],
+        "branch": state["branch"],
+        "diffSha256": materials["diffSha256"],
+    }
+
+
 def history_digest(commits):
     return hashlib.sha256(json.dumps(commits, sort_keys=True).encode()).hexdigest()
 
@@ -419,6 +551,8 @@ def verify_prepared(request, *, after_push=False):
     ):
         raise GuardError("invalid_pr_preparation")
     preparation = request["preparation"]
+    if preparation.get("kind") == "pr-existing-head-preparation":
+        return verify_existing(request, after_push=after_push)
     if preparation.get("kind") != "pr-preparation" or not isinstance(
         preparation.get("destination"), dict
     ):
@@ -501,6 +635,11 @@ def create(request):
         or not isinstance(draft, bool)
     ):
         raise GuardError("invalid_pr_request")
+    preparation = request["check"].get("existingHeadPreparation")
+    if preparation is not None:
+        executable = verify_prepared({"preparation": preparation}, after_push=True)
+        if executable["snapshot"] != checked:
+            raise GuardError("invalid_pr_request")
     current, _ = facts(
         checked.get("remote"), checked.get("githubRepository"), checked.get("base")
     )
@@ -572,6 +711,8 @@ def create(request):
         )
         if after != current:
             raise GuardError("state_changed_after_pr")
+        if preparation is not None:
+            validate_existing_push(preparation["pushPreparation"], after_push=True)
     except (
         GuardError,
         OSError,
@@ -608,6 +749,8 @@ def main():
             help="[HOST/]OWNER/REPO; same-repository PRs only",
         )
         checking.add_argument("--base")
+        if operation == "prepare":
+            checking.add_argument("--existing-head", action="store_true")
         if operation == "check":
             checking.add_argument("--prepared", action="store_true")
     sub.add_parser("verify")
@@ -626,6 +769,10 @@ def main():
         if args.remote is None or args.repo is None:
             raise GuardError("invalid_input")
         if args.operation == "prepare":
+            if args.existing_head:
+                return prepare_existing(
+                    json.load(sys.stdin.buffer), args.remote, args.repo, args.base
+                )
             return prepare(
                 json.load(sys.stdin.buffer), args.remote, args.repo, args.base
             )

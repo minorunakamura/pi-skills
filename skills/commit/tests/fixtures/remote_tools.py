@@ -104,6 +104,14 @@ elif args[:2] == ["pr", "create"]:
     }
     state["prs"].append(pr)
     state_path.write_text(json.dumps(state))
+    if mode == "create-change-index":
+        subprocess.run(
+            [real_git, "update-index", "--chmod=+x", "first.txt"], check=True
+        )
+    elif mode == "create-change-refs":
+        subprocess.run(
+            [real_git, "update-ref", "refs/tags/after-pr-create", "HEAD"], check=True
+        )
     if mode == "create-error-after-write":
         fail()
     print(pr["url"])
