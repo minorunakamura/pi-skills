@@ -11,7 +11,7 @@ Cursor の `cursor/plugins` repository、revision `c742dd61706fbacc1b95f1a20b7b9
 
 ## 転用・改変範囲
 
-実物の直接確認、再実行できる手順と必要な helper、Feature Map、Create の少なくとも一機能の実操作確認、証拠の保持、安全な cleanup の原則を転用し、日本語の Pi 向け手順に改変した。Maintain の全 Map 点検と、検証資産の劣化・製品不具合・前提不足を区別する考え方も参照したが、共通 Maintain Skill はこの配布では未提供。
+実物の直接確認、再実行できる手順と必要な helper、Feature Map、Create の少なくとも一機能の実操作確認、Maintain の全 Map 点検と検証資産の劣化・製品不具合・前提不足の区別、証拠の保持、安全な cleanup の原則を転用し、日本語の Pi 向け Create / Maintain Skill に改変した。
 
 配置は Pi の project Skill に合わせ、既存の規約・検証資産を優先する。固定件数のない単一 Markdown の Map と、run ごとの観測記録を分離する。通常の関連変更では必要箇所だけ更新・再実行する。証拠の保存には対象 repository の既存ルールを優先し、なければ `.pi/verification-evidence/<run>/` を使い、機密性・最小取得・Git 管理対象外の方針を加えた。通常テスト・承認・最終受入判断は置き換えない。
 
