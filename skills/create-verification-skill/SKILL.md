@@ -88,7 +88,7 @@ Map は再利用する手順と期待結果を保持する。今回の観測結�
 - Pi を対象 repository で起動する。標準の project Skill 探索で `.pi/skills/` を利用し、project trust を確認する。追加・更新後は新セッション起動または `/reload` を行う。
 - `/skill:verify-project <今回の対象機能など>`（別名ならその名前）で明示呼び出しするか、生成した `SKILL.md` の実ファイルを明示的に読み込む。自動選択されること自体は保証しない。
 - 通常の関連変更では、今回関係する機能を選んで検証し、変わった手順・helper・Map の関連部分だけ更新して再実行する。そのために無関係な全 Map 実行や Maintain を要求しない。
-- 全 Map の点検を担う Maintain は別用途で、ユーザーの明示実行に限定し、Taskflow から自動実行しない。共通 `maintain-verification-skill` は後続 Issue 対象で、この配布では未提供。今回の Create や通常の再実行に必要としない。
+- 全 Map の点検を担う [Maintain Verification Skill](../maintain-verification-skill/SKILL.md) は別用途で、ユーザーの明示実行に限定し、Taskflow から自動実行しない。`/skill:maintain-verification-skill <既存の検証 Skill のパスなど>` で利用できるが、今回の Create や通常の再実行に必要としない。
 
 ## 3. 生成した手順を実行して確かめる
 

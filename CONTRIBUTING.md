@@ -89,7 +89,7 @@ pytestでは`tmp_path`・共通fixture・`parametrize`・`monkeypatch`を使い�
 
 ### 検証 Skill の形式検査と直接確認
 
-[create-verification-skill](skills/create-verification-skill/SKILL.md) の形式・参照は `tests/verification-skills.test.js` で限定して検査します。frontmatter の名前・英語 description・明示呼び出し設定・license と、今回追加した Markdown 相対参照の解決を Node.js 標準 test runner で確認します。既存の `tests/*.test.js` 収集に含まれ、新依存や汎用 Markdown validator は不要です。
+[create-verification-skill](skills/create-verification-skill/SKILL.md) と [maintain-verification-skill](skills/maintain-verification-skill/SKILL.md) の形式・参照は `tests/verification-skills.test.js` で限定して検査します。frontmatter の名前・英語 description・明示呼び出し設定・license と、今回追加した Markdown 相対参照の解決を Node.js 標準 test runner で確認します。既存の `tests/*.test.js` 収集に含まれ、新依存や汎用 Markdown validator は不要です。
 
 ```bash
 node --test tests/verification-skills.test.js
@@ -97,17 +97,19 @@ pnpm exec biome lint tests/verification-skills.test.js
 pnpm exec biome format tests/verification-skills.test.js
 ```
 
-この検査は Agent の実動作、安全性、検証結果の正しさを保証しません。本文の契約も確認し、最終差分で上記の正式4チェックと `npm pack --dry-run --json --ignore-scripts` を実行して、Create の `SKILL.md` と `references/pstack.md` の同梱を確認します。今回の Markdown・形式検査に TDD は採用しませんが、必要な検査・直接確認は省きません。
+この検査は Agent の実動作、安全性、検証結果の正しさを保証しません。本文の契約も確認し、最終差分で上記の正式4チェックと `npm pack --dry-run --json --ignore-scripts` を実行して、両 Skill の `SKILL.md` と共有する `skills/create-verification-skill/references/pstack.md` の同梱を確認します。今回の Markdown・形式検査に TDD は採用しませんが、必要な検査・直接確認は省きません。
 
 直接確認には、ネットワークや利用者の実データが不要な扱いやすい既存 local CLI の隔離コピーを優先します。適切な対象がなければ、既存 runtime だけで動く二つの利用者向け操作を持つ最小の disposable fixture を使います。恒久 fixture や新しい runner は追加しません。
 
-1. 対象の Pi 版を記録し、共通 Create の検出と明示呼び出しを確認します。実際に Create を実行し、初期対象・対象外、生成先、通知、少なくとも一機能の実操作・観測・証拠を確認します。全 Map 実行を初回の成立条件にしません。
+1. 対象の Pi 版を記録し、共通 Create / Maintain の検出と明示呼び出しを確認します。実際に Create を実行し、初期対象・対象外、生成先、通知、少なくとも一機能の実操作・観測・証拠を確認します。全 Map 実行を初回の成立条件にしません。
 2. fresh Pi session に生成資産の場所と今回選ぶ機能だけを渡し、会話履歴・前回の一時絶対パス・生存 process なしで再実行します。project trust と標準探索または明示読み込みを使い、新しい証拠を確認します。自動選択の確率評価はしません。
 3. 隔離対象の一機能の入口を変え、関連する手順・helper・Map だけを更新して再実行します。無関係な全 Map 実行や Maintain を要求しないことを確認します。
+4. 同じ隔離対象に限定的な古い手順を残し、ユーザーの明示呼び出しで Maintain を実行します。全 Map の対応 source と利用者の入口からの実操作を確認し、劣化した検証資産だけを修正して再実行することを確かめます。
+5. 同じ隔離対象に製品不具合と前提不足を順に与えます。Maintain が実際に経路を試して機能ごとの失敗・未確認と理由を区別し、製品を直さず期待値を緩めずに証拠を報告することを確認します。失敗後の cleanup と証拠保持も確かめます。
 
 成功・失敗のいずれでも、自分が作った instance と状態だけを後始末し、証拠は残します。各段階で後始末後にも実行記録とリンク先が読めることを確認し、移動する場合は移動後も参照を解決できるようにします。記録には source 版・dirty 状態、前提、操作、期待と観測、成否・未確認範囲、必要なログへの参照を残します。取得前の機密性確認と対象 repository の証拠・ignore 方針を守り、秘密情報や不要な raw log を保存しません。最終受入れは Root が操作結果・source 差分・記録を照合して判断します。直接確認できなければ理由を報告し、文書生成だけを成功としません。
 
-実証は選んだ CLI / Pi 環境と代表シナリオに限ります。browser、TUI、長寿命 service、共有 instance、全 OS、実 Taskflow 結合、秘密情報全般の自動検出は同等に実証したと扱いません。`maintain-verification-skill` の実装と、全 Map 点検・製品不具合・前提不足を与える直接確認は後続 Issue の対象で、現在は未提供です。
+実証は選んだ CLI / Pi 環境と代表シナリオに限ります。browser、TUI、長寿命 service、共有 instance、全 OS、実 Taskflow 結合、製品不具合一般の分類精度、秘密情報全般の自動検出は同等に実証したと扱いません。Maintain はユーザーの明示実行だけを対象とし、Taskflow から自動実行しません。
 
 ## CI
 
