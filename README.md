@@ -1,6 +1,6 @@
 # pi-skills
 
-[Pi](https://pi.dev/) で使うスキル集です。設計の議論、技術文書の執筆・推敲、Git の変更確認・コミットを支援します。
+[Pi](https://pi.dev/) で使うスキル集です。設計の議論、技術文書の執筆・推敲、再利用できる実動作確認手順の作成、Git の変更確認・コミットを支援します。
 
 ## スキル一覧
 
@@ -11,6 +11,7 @@
 | [commit-pr](skills/commit-pr/SKILL.md) | 必要なら commit・push し、PR 作成まで行います。 |
 | [design-discussion](skills/design-discussion/SKILL.md) | アイデアや課題を議論し、基本設計・概要設計にまとめます。実装には進みません。 |
 | [technical-writing](skills/technical-writing/SKILL.md) | 仕様書・設計書・Plan などを、意味を保ちながら読みやすい日本語に整えます。 |
+| [create-verification-skill](skills/create-verification-skill/SKILL.md) | プロジェクト専用の検証 Skill と Feature Map を作り、少なくとも一機能を実操作して確かめます。 |
 
 ## インストール
 
@@ -33,7 +34,7 @@ git clone https://github.com/minorunakamura/pi-skills.git
 pi install ./pi-skills
 ```
 
-全5 Skill と表示 extension がまとめてインストールされます。導入後は Pi を起動し直すか、起動中のセッションで `/reload` を実行してください。
+全6 Skill と表示 extension がまとめてインストールされます。導入後は Pi を起動し直すか、起動中のセッションで `/reload` を実行してください。
 
 ## 使い方
 
@@ -90,6 +91,40 @@ production code の変更、実装計画の承認、チケットの公開、実�
 ```
 
 読み手が理解できる説明を組み立て、条件・例外・判断の状態を保ちながら簡潔にします。仕様の不足は推測で埋めません。相談やレビューだけではファイルを書き換えません。
+
+### 再利用できる検証 Skill を作る
+
+作業対象の repository で、対象機能や範囲を自由文で指定します。
+
+```text
+/skill:create-verification-skill CLIの設定保存と読み込みを、隔離したデータで確認したい
+```
+
+既存の規約・適切な検証資産・起動方法・harness を優先し、不足分だけを作ります。既定の生成先は次のとおりです。helper は手順だけでは不足する場合に限ります。
+
+```text
+.pi/skills/verify-project/
+  SKILL.md
+  references/feature-map.md
+  references/pstack.md
+  scripts/                  # 必要な場合のみ
+```
+
+Feature Map は初期対象・対象外と再利用する手順・期待結果を保持し、run ごとの観測結果・成否とは分けます。Create は文書生成だけで完了せず、生成手順で起動・使用可能状態と対象 instance の確認・少なくとも一機能の実操作・証拠取得・cleanup・後始末後の証拠参照確認まで実行します。全 Map 実行は初回の成立条件ではありません。実施範囲、未実行の入口、不足・失敗を区別して報告します。
+
+生成した Skill は Pi 標準の project Skill 探索で利用できます。project trust を確認し、追加・更新後は新セッションを起動するか `/reload` を実行してください。生成 Skill は自動選択を禁止しませんが、自動選択されること自体は保証しません。明示呼び出し、または生成した `SKILL.md` の実ファイルの明示読み込みでも使えます。
+
+```text
+/skill:verify-project 今回変更した設定保存だけを確認
+```
+
+通常の関連変更では、今回関係する機能を選び、変わった手順・helper・Map の関連部分だけ更新して再実行します。無関係な全 Map の実行や Maintain の呼び出しは不要です。`maintain-verification-skill` は全 Map の source・実動作を点検する別用途の Skill として後続 Issue で扱い、現在は未提供です。提供後もユーザーの明示実行に限定し、Taskflow から自動実行しません。
+
+証拠の保存先は対象プロジェクトの既存ルールを優先し、なければ `.pi/verification-evidence/<run>/` を使います。証拠は既定で Git 管理対象外とし、必要なら証拠ディレクトリだけを最小限 ignore に追加します。既に tracked の証拠や方針の衝突は確認し、勝手に削除・untrack・公開しません。取得前に必要情報と機密性を確認し、秘密・未加工の個人情報・不要な raw log は保存しません。ignore は秘密保護の境界ではありません。後始末は自分が作った隔離 instance と状態だけに限定し、証拠は削除しません。
+
+Taskflow は利用者です。Planning は既存資産の確認と必要な Create の範囲決定、Implementation は Approved Plan 内での Create の利用と直接確認を担当します。他の Skill は Create を明示的に読み込んで利用できますが、通常のテスト・正式チェック・承認・Review・Root の最終受入判断は置き換えません。Create は製品修正や commit・PR を自動的に開始しません。
+
+Create は pstack の原則を Pi 向けに改変した MIT の Skill です。出典と MIT 全文を同梱し、生成物の `references/pstack.md` にも同じ通知を自己完結して残します。repository 全体の ISC 表記は変更しません。
 
 ## 補足
 
