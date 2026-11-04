@@ -107,7 +107,6 @@ production code の変更、実装計画の承認、チケットの公開、実�
 .pi/skills/verify-project/
   SKILL.md
   references/feature-map.md
-  references/pstack.md
   scripts/                  # 必要な場合のみ
 ```
 
@@ -133,7 +132,7 @@ Feature Map は初期対象・対象外と再利用する手順・期待結果�
 
 Taskflow は利用者です。Planning は既存資産の確認と必要な Create の範囲決定、Implementation は Approved Plan 内での Create の利用と直接確認を担当します。他の Skill は Create を明示的に読み込んで利用できますが、通常のテスト・正式チェック・承認・Review・Root の最終受入判断は置き換えません。Create / Maintain は製品修正や commit・PR を自動的に開始しません。
 
-Create / Maintain は pstack の原則を Pi 向けに改変した MIT の Skill です。出典と MIT 全文を同梱し、生成物の `references/pstack.md` にも同じ通知を自己完結して残します。repository 全体の ISC 表記は変更しません。
+共通 Create / Maintain 自身は pstack の原則を Pi 向けに改変した MIT の Skill で、出典と MIT 全文を同梱します。生成先へ通知や生成元の MIT License を一律に持ち込まず、対象プロジェクトの規約に従います。必要な通知と既存通知の保護は [Create の生成方針](skills/create-verification-skill/SKILL.md)を参照してください。repository 全体の ISC 表記は変更しません。
 
 ## 補足
 
