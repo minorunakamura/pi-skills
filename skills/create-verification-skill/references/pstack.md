@@ -17,7 +17,7 @@ Cursor の `cursor/plugins` repository、revision `c742dd61706fbacc1b95f1a20b7b9
 
 Cursor 固有配置、固定3–5機能、強制並列 source readers、branch / PR 自動化は転用しない。subagent package、独自 runner・registry、隣接 checkout を実行要件にしない。
 
-この通知と以下の MIT License 全文は、生成した検証 Skill の `references/pstack.md` にも同梱する。生成 Skill から相対参照し、配布元や会話履歴がなくても出典・通知が読める状態を保つ。既存の通知を削除しない。転用 Skill の license は MIT とし、`pi-skills` repository 全体の ISC 表記は変更しない。
+この通知と以下の MIT License 全文は、転用・改変した共通 Create / Maintain 自身の通知として保持する。両共通 Skill の license は MIT とし、`pi-skills` repository 全体の ISC 表記は変更しない。共通 Skill を利用しただけで、生成先へ `references/pstack.md` やそれを前提としたリンクを一律に追加しない。生成 Skill の License は対象プロジェクトの規約に従い、生成元が MIT であることだけを理由に `license: MIT` を付けない。実際に第三者の文章・コードをコピーする場合に必要な通知は保持し、既存資産の通知・License は削除しない。
 
 ## MIT License
 

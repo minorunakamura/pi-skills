@@ -20,7 +20,7 @@ license: MIT
 - 他の Skill からは、このファイルを明示的に読み込んで利用できる。Taskflow の Planning は既存資産の確認と必要な Create の範囲決定、Implementation は Approved Plan 内での Create の利用と直接確認を担当する。
 - 通常の自動テスト、正式チェック、承認・Review・Root の最終受入判断を代行しない。既存テストを検証資産へ移したり、必要なチェックを省いたりしない。
 - 製品修正、公開 API・テスト専用 API の追加、CI・独自 runner・registry・復旧 workflow の追加、commit・push・PR 作成は行わない。subagent や追加 package を必須にしない。
-- 同梱参照はこの Skill の配置から相対解決する。[pstack の出典・改変方針と MIT 通知](references/pstack.md)を読み、生成物にも同じ通知を自己完結して同梱する。
+- 同梱参照はこの Skill の配置から相対解決する。[pstack の出典・改変方針と MIT 通知](references/pstack.md)を読む。これは共通 Create / Maintain 自身の通知であり、利用しただけで生成先へ同じ通知やそれを前提としたリンクを一律に追加しない。
 
 ## 1. repository を調べて初期対象を定める
 
@@ -42,7 +42,6 @@ license: MIT
 .pi/skills/verify-project/
   SKILL.md
   references/feature-map.md
-  references/pstack.md
   scripts/                  # 手順だけでは不足する場合のみ
 ```
 
@@ -54,7 +53,8 @@ license: MIT
 - 実際の利用者の入口からの操作、期待結果、観測方法を具体化する。表示だけでなく、必要なファイル・データなどの副作用も確認する。異常時には対象 instance と使用可能状態を再確認してから操作する。
 - 証拠取得・保存と、自分が作った環境の後始末を記す。次節の証拠・安全性の規則を、後続セッションにも適用できるよう本文に含める。
 - helper は既存手段と手順だけでは不足する場合に限る。必要な引数・runtime と実行コマンドを本文に示し、その方法で実際に動かす。直接実行する helper には実行権限を付ける。試行錯誤の全ファイルや共通テンプレート基盤は保存しない。
-- Feature Map と通知へ、生成 Skill からの相対参照を置く。この共通 Skill の `references/pstack.md` を通知全文ごと生成先の `references/pstack.md` に同梱する。既存の通知は消さない。配布元の絶対パスや隣接 checkout を要求しない。
+- Feature Map へ、生成 Skill からの相対参照を置く。配布元の絶対パスや隣接 checkout を要求しない。
+- 生成 Skill の License は対象プロジェクトの規約に従い、生成元が MIT であることだけを理由に `license: MIT` を付けない。実際に第三者の文章・コードをコピーする場合は、その License が求める通知を保持する。既存資産の通知・License は削除しない。
 - cwd 基準の起動と Skill 配置基準の同梱参照を区別する。前セッションの会話、一時絶対パス、稼働 process に依存せず、新しい隔離状態で再実行できる内容にする。
 
 ### Feature Map
@@ -104,7 +104,7 @@ Map は再利用する手順と期待結果を保持する。今回の観測結�
 
 ## 4. 実施範囲と参照先を報告する
 
-- 再利用・作成・更新した Skill、Feature Map、必要な helper、通知のパス。
+- 再利用・作成・更新した Skill、Feature Map、必要な helper のパス。通知がある場合はそのパス。
 - 実際に起動・操作・観測した機能と入口、期待との照合結果。
 - 実行しなかった機能・入口、保証対象外、不足・失敗・未確認範囲。
 - source の版・dirty 状態と、実行記録・証拠の参照先。
