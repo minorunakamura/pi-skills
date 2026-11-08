@@ -103,7 +103,7 @@ try:
                         assert event["success"], event
                         if event.get("id") == "commands":
                             assert any(
-                                c["name"] == "skill:commit"
+                                c["name"] == f"skill:{args.skill.resolve().parent.name}"
                                 for c in event["data"]["commands"]
                             )
                             record = event

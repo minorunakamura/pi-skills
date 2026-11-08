@@ -6,7 +6,8 @@
 
 | スキル | 説明 |
 | --- | --- |
-| [commit](skills/commit/SKILL.md) | 変更を確認し、ローカル commit まで行います。 |
+| [commit](skills/commit/SKILL.md) | 変更を確認し、作業 branch でローカル commit します。default 相当上なら新しい作業 branch を作ります。 |
+| [commit-main](skills/commit-main/SKILL.md) | default 相当の現在 branch に直接ローカル commit します。branch 作成・切替はしません。 |
 | [commit-push](skills/commit-push/SKILL.md) | 必要なら commit し、push まで行います。 |
 | [commit-pr](skills/commit-pr/SKILL.md) | 必要なら commit・push し、PR 作成まで行います。 |
 | [design-discussion](skills/design-discussion/SKILL.md) | アイデアや課題を議論し、基本設計・概要設計にまとめます。実装には進みません。 |
@@ -35,7 +36,7 @@ git clone https://github.com/minorunakamura/pi-skills.git
 pi install ./pi-skills
 ```
 
-全7 Skill と表示 extension がまとめてインストールされます。導入後は Pi を起動し直すか、起動中のセッションで `/reload` を実行してください。
+全8 Skill と表示 extension がまとめてインストールされます。導入後は Pi を起動し直すか、起動中のセッションで `/reload` を実行してください。
 
 ## 使い方
 
@@ -45,15 +46,16 @@ Pi を作業対象のプロジェクトで起動し、`/skill:<スキル名>` �
 
 ```text
 /skill:commit
+/skill:commit-main
 /skill:commit-push
 /skill:commit-pr
 ```
 
-コマンド名で終了地点が決まります。`commit` はローカル commit、`commit-push` は push、`commit-pr` は PR 作成まで進みます。変更がなければ空 commit は作らず、必要な残りの操作だけを行います。
+コマンド名で終了地点が決まります。`commit` と `commit-main` はローカル commit、`commit-push` は push、`commit-pr` は PR 作成まで進みます。変更がなければ空 commit は作らず、必要な残りの操作だけを行います。
 
 `commit`はローカルdefault相当上なら、diffの主目的から未存在の作業branchを1件計画し、一括承認後のcommit時に作成します。作業branch上ならそのままcommitします。local remote HEADとremote／fetch設定から判別できたdefault（master・develop等も含む）を優先し、情報なしの場合だけmain／masterをdefault相当として扱います。判定の通信・設定補修はせず、ローカル情報は古い可能性があります。候補競合・壊れたref・不明mappingはGit変更前に確認し、未解決なら停止します。詳細は[ローカルdefaultとbranch方針](CONTRIBUTING.md#ローカルdefaultとbranch方針)を参照してください。
 
-defaultへの直接commit指定でこの方針を迂回できません。直接ローカルcommit用の`/skill:commit-main`は後続Work Itemで提供予定で、現在は未導入です。
+defaultへの直接commitは`/skill:commit-main`を選びます。同じ共通判定でmain／master／その他のdefault相当と確認できた現在branchだけにcommitし、作業branch上や新branch作成・切替・push／PRの矛盾指示ではStageを含むGit変更前に停止します。defaultへ自動切替せず、未commit変更も持ち運びません。両ローカル入口ともremote準備・通信は追加せず、対象差分がなければbranch・commitを作りません。`--no-confirm`でもbranch条件は維持します。
 
 対象や文章への要望も指定できます。
 

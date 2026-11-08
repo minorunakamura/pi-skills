@@ -7,11 +7,12 @@
 
 ```text
 /skill:commit
+/skill:commit-main
 /skill:commit-push
 /skill:commit-pr
 ```
 
-**到達点はSkill名で固定です。** `/skill:commit`はcommit、`/skill:commit-push`はpush、`/skill:commit-pr`はcommit → push → 通常PRまで進めます。無指定ではrepository全体の全変更をStageします。 Untracked、既存Staged、部分Stageの残りも対象です（通常のignoreは維持）。従来の`commit`はPRまで進みましたが、現在はローカルcommitで止まります。Stageは最終確認より先に実行するため、**キャンセル・失敗でもStageが残り得ます**。勝手にreset／unstageしません。
+**到達点はSkill名で固定です。** `/skill:commit`と`/skill:commit-main`はcommit、`/skill:commit-push`はpush、`/skill:commit-pr`はcommit → push → 通常PRまで進めます。無指定ではrepository全体の全変更をStageします。 Untracked、既存Staged、部分Stageの残りも対象です（通常のignoreは維持）。従来の`commit`はPRまで進みましたが、現在はローカルcommitで止まります。Stageは最終確認より先に実行するため、**キャンセル・失敗でもStageが残り得ます**。勝手にreset／unstageしません。
 
 引数は固定タイトルではなく、対象・branch／宛先・文章・言語・Draftへの要望などの自由文です。明確な指定を聞き直さず反映します。「このタイトルをそのまま使う」と明示すれば、その文章を維持します。到達点と矛盾する自由文（例：`/skill:commit pushまで`）はGit変更前に停止し、対応Skillを案内します。同じ到達点を重ねても矛盾ではありません。
 
@@ -30,15 +31,15 @@
 /skill:commit-pr
 ```
 
-Stage後の対象差分がなければ新commit・空commit・amendは作りません。commitは操作せず終了し、push／PRは既存HEADから残りへ進みます。HEADも対象差分もなければ送信なし。同SHAの重複push、OPEN/CLOSED/MERGEDの既存PRの重複作成・自動編集はしません。呼出し間に新たな対象変更があれば新commitを作ります。対象外の未Stage変更を勝手に送信へ取り込まず、既存HEADで送信する場合はbranchの既存履歴全体が対象だと示します。
+Stage後の対象差分がなければ新commit・空commit・amendは作りません。commitとcommit-mainは実行可能なbranchであれば操作せず終了し、push／PRは既存HEADから残りへ進みます。HEADも対象差分もなければ送信なし。同SHAの重複push、OPEN/CLOSED/MERGEDの既存PRの重複作成・自動編集はしません。呼出し間に新たな対象変更があれば新commitを作ります。対象外の未Stage変更を勝手に送信へ取り込まず、既存HEADで送信する場合はbranchの既存履歴全体が対象だと示します。
 
 - 必要な項目だけ通常は完成形commitメッセージ、ブランチ全体を対象にしたPR title/body、対象範囲、branch作成、remote／実push URL／target、送信する既存commit＋今回のcommit、upstream、base/head、通常／Draft、Closes/Refsを**一回の確認**で提示します。「提示内容で実行／commitのみ修正／PR・実行設定を修正／キャンセル」と自由入力を使い、片方だけの文章修正では他方を保持して最終一式を再確認します。作成しないcommit／PRの文章や存在しない項目の修正選択肢は出さず、全操作完了済みなら通常承認も求めません。
 - `--no-confirm`は通常の内容確認・実行承認だけを省略します。予定内容・結果の報告、Gitleaks、照合、疑義の確認、異常時の停止は省略しません。scriptに承認省略フラグを渡すものではありません。
 - pushを伴いmain／remote default上なら、新しい作業branchを1件計画して一括確認に含めます。`--no-confirm`ではその予定branchを自動作成します。不正名・衝突では停止し、既存branchへ勝手に切り替えません。main上の既存commitも同HEADから作業branchへ載せられますが、元mainを巻き戻さずローカルmainにもcommitが残ると報告します。初回main push例外はcommit-pushだけで、明示指示・リモート全体が空・送信元／宛先mainが必要で、`--no-confirm`だけでは許可しません。
-- `commit`はremote準備なし、`commit-push`はPR準備なし。PRまでの指定でgh・認証・remote／base等の準備に失敗したら**新commit／push前に停止**し、無断で範囲を縮小しません。限定範囲外のStagedがあれば勝手にunstageせず停止・確認します。submodule内部の変更も親から自動commitせず停止します。
+- `commit`と`commit-main`はremote準備なし、`commit-push`はPR準備なし。PRまでの指定でgh・認証・remote／base等の準備に失敗したら**新commit／push前に停止**し、無断で範囲を縮小しません。限定範囲外のStagedがあれば勝手にunstageせず停止・確認します。submodule内部の変更も親から自動commitせず停止します。
 - Python 3.14以上がPiから使える場合は同梱scriptを優先し、開始時probeで未導入・3.13以下と分かった場合だけ[Python不要の互換経路](skills/commit/references/compatibility.md)を使います。両経路の範囲・一括確認・許容遷移・停止条件は同じですが、互換経路はLLMの手順遵守に依存し、scriptと同等の機械的ガードは保証しません。特殊名等を安全に処理できなければ停止します。
 - 経路選択はGit変更前の開始時だけです。Python起動失敗・不正応答は停止し、script実行後の検査失敗・状態不一致・認証／通信エラー・timeout等から互換経路へ切り替えません。Pythonや別runtimeの自動install・PATH変更はしません。追加Python packageも不要です。
-- 3入口は[共有workflow](skills/commit/references/workflow.md)を全文読みます。scriptは入口でなく`skills/commit/`基準で、対象repositoryをcwdのまま実行します。標準経路は`git-status.py`、`staged-commit.py`、`guarded-push.py`、`github-pr.py`を使います。Stage後にcheck、必要なpush／PR prepareをcommit前に取得し、最終確認後にcommit → PR verify → push check／push → PR check／createと照合します。既存HEADは`prepare --existing-head`→承認→予定branch作成（必要時だけ）→verify／checkへ進み、commitCheckやcommit結果と混在させません。push済みからPRだけなら通常PR checkを使います。準備JSONは実行用checkやユーザー承認ではなく、手書き更新・永続承認DBは使いません。
+- 4入口は[共有workflow](skills/commit/references/workflow.md)を全文読み、到達点とbranch方針を引き継ぎます。branch方針未確定なら停止し、commit到達点だけで直接commitを推測しません。scriptは入口でなく`skills/commit/`基準で、対象repositoryをcwdのまま実行します。標準経路は`git-status.py`、`staged-commit.py`、`guarded-push.py`、`github-pr.py`を使います。Stage後にcheck、必要なpush／PR prepareをcommit前に取得し、最終確認後にcommit → PR verify → push check／push → PR check／createと照合します。既存HEADは`prepare --existing-head`→承認→予定branch作成（必要時だけ）→verify／checkへ進み、commitCheckやcommit結果と混在させません。push済みからPRだけなら通常PR checkを使います。準備JSONは実行用checkやユーザー承認ではなく、手書き更新・永続承認DBは使いません。
 - diffは概要から必要箇所へ読み、commitと予定PRで全5フィールドが一致する変更単位の理解を再利用します。完全bytesのdigestは機械的に照合し、同じ本文を再読しません。一時diffはrepository外のprivate directory（`0700`）内に`0600`で保存し、不要になったら**どの質問よりも前に**削除成功を確認します。
 - Gitleaksがあれば全Staged差分を検査し、未導入なら未検査と報告します。検査失敗やbranch／parent／tree／raw本文／indexの不一致ではpushせず停止します。秘密値・scannerの生出力は表示しません。
 - PRはブランチ全体の差分・履歴・テンプレート・確認できたissueを根拠にし、実行したテスト結果だけを記載します。認証済み`gh`が必要で、同一repository内のみ対応します。SSH host aliasはOpenSSHで解決し、fork間PR・独自SSH commandは扱いません。既存PRはOPEN/CLOSED/MERGEDとも重複作成・自動編集しません。
@@ -47,7 +48,9 @@ Stage後の対象差分がなければ新commit・空commit・amendは作りま�
 
 ### ローカルdefaultとbranch方針
 
-`/skill:commit`はdefault相当上なら、Stage後のdiffの主目的から未存在の作業branchを1件計画し、通常の一括承認後のcommit時だけ作成します。作業branch上では現在branchを使い、明示新branch指定は維持します。不正名・衝突は停止し、既存branchへの自動切替・上書きはしません。対象diffなしではbranch・commitとも作らず終了し、初回commit前にも同じ方針を適用します。defaultへの直接commit指示ではGit変更前に停止し、branch作成を迂回しません。直接ローカルcommit用の`/skill:commit-main`は後続Work Itemで提供予定で、現在は未導入です。入口は引き続き3つ、配布Skillは7つです。
+`/skill:commit`はdefault相当上なら、Stage後のdiffの主目的から未存在の作業branchを1件計画し、通常の一括承認後のcommit時だけ作成します。作業branch上では現在branchを使い、明示新branch指定は維持します。不正名・衝突は停止し、既存branchへの自動切替・上書きはしません。対象diffなしではbranch・commitとも作らず終了し、初回commit前にも同じ方針を適用します。defaultへの直接commit指示ではGit変更前に停止し、branch作成を迂回しません。直接ローカルcommitには`/skill:commit-main`を案内します。
+
+`/skill:commit-main`は同じ判定でdefault相当と確認できた現在branchへの直接ローカルcommitに固定します。mainという固定名ではなく、判別済みdefaultがmaster／developならそのbranchで許可します。作業branch上、または新branch作成・別branchへの切替・push／PRなど矛盾する明示指示では、Stageを含むGit変更前に停止して4入口の対応Skillを案内します。defaultへ自動切替せず、未commit変更を持ち運びません。`--no-confirm`でもbranch条件・検査・停止は省略しません。対象diffなしでは実行可能なbranchならbranch・commitなしで終了します。入口は4つ、配布Skillは8つです。
 
 判定の詳細は[共有手順のローカルdefault判定](skills/commit/references/workflow.md#ローカルdefault判定)に一箇所で定義し、Python不要の互換経路も参照します。
 
@@ -56,13 +59,13 @@ Stage後の対象差分がなければ新commit・空commit・amendは作りま�
 - 候補の競合、壊れたref、対応不明・安全に解釈できないmappingは情報なしと混同せず、理由を示して確認し、未解決ならStageを含むGit変更前に停止します。origin名だけで選ばず、`--no-confirm`も疑義解消を省略しません。
 - 判定の通信・設定補修はしません。今回の根拠を保持しStage前と操作直前に再取得・照合して、変化なら停止します。判定根拠とローカル情報の古さを予定内容に示します。remoteの最新defaultは保証しません。これはAgentの手順であり、新しいscriptガードではありません。永続stateは作りません。
 
-標準経路は既存の`staged-commit.py check --branch NEW`とcommit APIを使います。checkではbranchを作らず、承認後のcommit時だけ`--no-track`で作成します。元defaultの既存refを進めず、upstreamも暗黙継承しません。既存Stage・ignore・対象・Gitleaks・diff・状態照合・detached／競合／submodule停止、失敗後の経路切替・自動再試行・rollback禁止は両経路で維持します。Stageはキャンセル時にも残り得ます。branch作成とcommitは非atomicで、失敗時にbranchだけ残る場合もあります。push／PRのremote default確認・直接push禁止・初回main push例外・既存HEAD処理は変更しません。
+標準経路で新branchを作るcommitは既存の`staged-commit.py check --branch NEW`とcommit APIを使います。commit-mainと新branch不要のcommitは`staged-commit.py check`（`--branch`なし）と同じcommit APIを使い、新policy引数は追加しません。新branchを計画した場合はcheckではbranchを作らず、承認後のcommit時だけ`--no-track`で作成し、元defaultの既存refを進めず、upstreamも暗黙継承しません。commit-mainでは現在defaultのrefだけを進めます。既存Stage・ignore・対象・Gitleaks・diff・状態照合・detached／競合／submodule停止、失敗後の経路切替・自動再試行・rollback禁止は両経路で維持します。Stageはキャンセル時にも残り得ます。branch作成とcommitは非atomicで、失敗時にbranchだけ残る場合もあります。push／PRのremote default確認・直接push禁止・初回main push例外・既存HEAD処理は変更しません。
 
 #### branch判断の直接確認
 
-[プロジェクト検証Skill](.pi/skills/verify-project/SKILL.md)と[Feature Map](.pi/skills/verify-project/references/feature-map.md)に今回のbranch判断だけの再実行手順を置きます。Piの新セッションまたは`/reload`とproject trustを確認し、`/skill:verify-project commitのbranch判断`、または実ファイルの明示読み込みで使います。隔離repository／HOME／Git設定と架空identityを使い、変更後の実Skill入口から実行します。文言assertやscript単体実行をAgent判断の実証にしません。標準経路のmain／master fallback、local remote HEAD master／develop、作業branch、判別済みdefault優先、候補競合、空diff、一括承認／cancel／no-confirmと、開始時Python不足での互換経路master fallbackを代表確認します。before／afterのbranch・HEAD・refs・index・親・treeと最小tool操作記録を照合し、remote通信追加なしを確認します。
+[プロジェクト検証Skill](.pi/skills/verify-project/SKILL.md)と[Feature Map](.pi/skills/verify-project/references/feature-map.md)に今回のbranch判断だけの再実行手順を置きます。Piの新セッションまたは`/reload`とproject trustを確認し、`/skill:verify-project commitとcommit-mainのbranch判断`、または実ファイルの明示読み込みで使います。隔離repository／HOME／Git設定と架空identityを使い、変更後の実Skill入口から実行します。文言assertやscript単体実行をAgent判断の実証にしません。標準経路のmain／master fallback、local remote HEAD master／develop、作業branch、判別済みdefault優先、候補競合・壊れた情報、commit-mainの作業branch／矛盾指示でのStage前停止、空diff、初回commit、限定対象・既存Staged、一括承認／cancel／no-confirmと、開始時Python不足での互換経路master fallbackを代表確認します。before／afterのbranch・HEAD・refs・index・親・treeと最小tool操作記録を照合し、remote通信追加なしを確認します。
 
-証拠とrun記録は既存ignore対象の`docs/verification/28/`等へ保存し、Mapの手順と分けます。秘密情報・不要なraw logは保存せず、認証は正常なPiの方法だけを使います。利用者設定は変更せず、作成した一時環境だけcleanupし、その後も証拠参照を確認します。既存script統合テストと正式チェック、Rootの独立再実行・受入判断を代替しません。
+証拠とrun記録は既存ignore対象の`docs/verification/<issue-number>/`（今回は`29/`）等へ保存し、Mapの手順と分けます。秘密情報・不要なraw logは保存せず、認証は正常なPiの方法だけを使います。利用者設定は変更せず、作成した一時環境だけcleanupし、その後も証拠参照を確認します。既存script統合テストと正式チェック、Rootの独立再実行・受入判断を代替しません。
 
 #### 状態一覧の色付き表示
 

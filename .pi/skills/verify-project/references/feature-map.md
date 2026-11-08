@@ -1,6 +1,6 @@
-# Feature Map: commit のローカルdefaultと作業branch
+# Feature Map: commit / commit-main のローカルdefaultとbranch方針
 
-初期対象はIssue #28の`/skill:commit`だけ。標準CLI/RPCの利用者入口でAgentが判断した結果を観測する。push／PR・commit-main（未導入）・全OS／全refspec／LLM判断精度全般は対象外。[準備・起動・安全性・cleanup](../SKILL.md)に従う。runの成否や一時パスはこのMapに書かず、`docs/verification/28/<run>/`の実行記録へ分離する。
+初期対象はIssue #28・#29の`/skill:commit`と`/skill:commit-main`。標準CLI/RPCの利用者入口でAgentが判断した結果を観測する。push／PR・全OS／全refspec／LLM判断精度全般は対象外。[準備・起動・安全性・cleanup](../SKILL.md)に従う。runの成否や一時パスはこのMapに書かず、`docs/verification/<issue-number>/<run>/`の実行記録へ分離する。
 
 ## 共通setupと観測
 
@@ -32,11 +32,11 @@ git --no-pager diff --cached --no-ext-diff --no-textconv --binary --no-color | g
 git config --local --get-regexp '^branch\.'
 ```
 
-`pipefail`を有効にし、完全bytesのdigestを比較する。成功commit後は`git cat-file commit HEAD`の親／treeと予定の内容、元branch ref、予定branchのupstream未設定を確認する。branch／commit停止caseはHEAD・全refs・index bytesがbeforeと同じことを確認する。cancelだけStageが残り得るのでHEAD・refs不変と新branchなしを期待する。helperの`operations.jsonl`でStage・branch・commit順序、判定根拠の再取得、通常承認の表示とfollow-up、禁止されるremote通信コマンドなしを照合する。Git objectだけで承認や通信なしを推測しない。
+`pipefail`を有効にし、完全bytesのdigestを比較する。成功commit後は`git cat-file commit HEAD`の親／treeと予定の内容、commitでは元branch refと予定branchのupstream未設定、commit-mainでは新branchなし・現在branch refだけ前進・その他refとbranch設定不変を確認する。indexの生bytesもdigestを取得し、停止caseの不変を照合する。branch／commit停止caseはHEAD・全refs・index bytesがbeforeと同じことを確認する。cancelだけStageが残り得るのでHEAD・refs不変と新branchなしを期待する。helperの`operations.jsonl`でStage・branch・commit順序、判定根拠の再取得、通常承認の表示とfollow-up、禁止されるremote通信コマンドなしを照合する。Git objectだけで承認や通信なしを推測しない。
 
 ## 代表case
 
-全直積にせず、標準経路で次を選ぶ。実際の`/skill:commit`呼出しと確認用follow-upは[RPC接続helper](../scripts/commit-rpc.py)を使う。
+全直積にせず、標準経路で次を選ぶ。下のcommit代表は先行Issueの既存保証と照合し、共有手順を変えたbranch方針は変更後に代表を再実行する。過去の成功を変更後の成功として流用しない。実際の`/skill:commit`呼出しと確認用follow-upは[RPC接続helper](../scripts/commit-rpc.py)を使う。
 
 | case | setup／操作 | 期待・観測 |
 | --- | --- | --- |
@@ -45,10 +45,26 @@ git config --local --get-regexp '^branch\.'
 | local HEAD master／develop | 開始branchをmasterまたはdevelopにし、下のlocal remote HEAD setup。説明追加、no-confirm | 判別済みdefaultから作業branchを作り、元refとtracking refsを保持。remote通信なし |
 | 作業branch | feature/docs上、remoteなし、説明追加、no-confirm | 同じbranchへcommit、新しいbranchを増やさない |
 | default優先 | main上、local remote HEADはdevelop、説明追加、no-confirm | 一意なdevelopを優先しmainを作業branchとして維持、新branchなし |
-| 候補競合 | main上、origin HEAD masterとbackup HEAD develop、説明追加、no-confirm。疑義に回答しない | Stageを含むGit変更前に候補／理由を表示して確認・未解決停止。HEAD／refs／index不変。originだけで選ばない |
+| 候補競合 | main上、origin HEAD masterとbackup HEAD develop、説明追加、no-confirm。疑義に回答しない | Stageを含むGit変更前に候補／理由を表示し、実際に選択肢・自由回答を求めて回答待ち。報告だけの終了は不成立。未回答時HEAD／refs／index不変。originだけで選ばない |
 | 空diff | main上、変更なし、no-confirm | branch・commit作成なし、refs／HEAD／index不変 |
 | cancel | main上、説明追加。通常呼出し→実提示後に`キャンセル` | branch・commitなし。Stageが残ることを表示し、勝手にunstageしない |
 | 互換master | master上、開始時PATHからPythonを除外。説明追加、no-confirm | probeでPython不足を確認して互換経路を明示、master fallbackから作業branchへcommit。scriptを試行しない。同じ親／tree／ref／upstream保護 |
+
+### commit-mainの代表case
+
+上の共通setup／観測と同じfixtureを使い、helperのSkillパスとrequestをともにcommit-mainへ変える。通常承認・cancel・no-confirmを代表caseへ組み合わせ、全直積にはしない。
+
+| case | setup／操作 | 期待・観測 |
+| --- | --- | --- |
+| main／master fallback | remoteなし、対応branch、説明追加 | branch作成・切替なし。現在branchへ直接commit、親はbase、対象tree一致、他refs／branch設定不変 |
+| local HEAD master／develop | 対応default上、下のlocal remote HEAD setup、説明追加 | mappingで判別した現在defaultへ直接commit。tracking refs不変、通信なし |
+| 作業branch／default優先 | feature/docs・remoteなし、またはmain上でlocal HEAD=develop、説明追加、no-confirm | Stage前に停止し対応入口を案内、HEAD／全refs／index bytes不変。main fallbackでdevelopを上書きしない |
+| 候補競合／壊れた情報 | origin/masterとbackup/develop、またはHEADのsymbolic targetを未存在refへ設定、説明追加、no-confirm。疑義に回答しない | 情報なしとせず候補／理由を表示し、実際に明示質問して選択肢・自由回答を求める。回答を与えず終了しHEAD／refs／index bytes不変を照合。報告・再実行案内だけなら不成立 |
+| 矛盾指示 | default相当上で新branch作成・別branch切替・push・PRの代表指示、no-confirm | 共有workflow全文read（切断時tailも）の後にGit変更前停止。read操作と停止判断の順序を照合。自動切替・変更持ち運びなし、HEAD／refs／index bytes不変 |
+| 空diff／初回commit | 対応branch、空diffまたはunbornでREADME追加 | 空ならbranch／commitなし、初回なら現在branchに親0個のcommitのみ |
+| 限定対象／既存Staged | README以外にも安全な自作diffを用意、READMEだけ指定。またはREADMEだけStage後に既存Stagedだけ指定 | 対象だけcommit、対象外worktree変更保持。範囲外既存Stagedは勝手にunstageせず確認停止 |
+| 通常cancel | default相当上、説明追加、通常呼出し→実提示後にキャンセル | branch／commitなし、Stageだけ残り得る。HEAD／refs不変 |
+| 互換master | master fallback、開始前からPythonなしPATH、説明追加 | 互換経路明示・script未試行で現在masterに直接commit。同じ親／tree／ref保護 |
 
 ### 通信なしのremote HEAD fixture
 
@@ -66,7 +82,7 @@ git symbolic-ref "refs/remotes/$REMOTE/HEAD" "refs/remotes/$REMOTE/$DEFAULT"
 
 既存の`test_commit_scripts.py`の初回／通常branch作成・main/master/developの元ref保持・upstream非継承、不正名・衝突・hook改変・状態変化停止を再利用する。scriptテストはAgentのdefault判断を保証しない。明示新branch、unborn、壊れたref、複数remote同名・exact mapping等の追加caseは必要に応じて同じ実入口と観測方法で補う。基本の必須代表caseをこれで削らない。
 
-`test_workflow_contract.py`は両経路の共有判定・表示・再照合・未導入案内の最小文書契約だけを確認する。runtime／Stage／diff／remoteの既存回帰suiteも適用する。正式4チェックとpack dry-runはCONTRIBUTINGに従いRootが最終差分で確認する。
+`test_workflow_contract.py`は両経路の4入口の固定到達点＋branch方針・共有判定・表示・再照合・Stage前停止の最小文書契約だけを確認する。runtime／Stage／diff／remoteの既存回帰suiteも適用する。正式4チェックとpack dry-runはCONTRIBUTINGに従いRootが最終差分で確認する。
 
 ## 証拠と終了
 
