@@ -1,16 +1,16 @@
 ---
 name: verify-project
-description: Verify pi-skills commit branch decisions through the installed Pi CLI in disposable Git repositories. Use for changes to local default detection and work-branch planning, not push or PR verification.
+description: Verify pi-skills commit branch decisions through the installed Pi CLI in disposable Git repositories. Use for changes to local default detection, work-branch planning, and direct default commits, not push or PR verification.
 ---
 
 # pi-skills の commit branch 判断を確認する
 
-今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。初期対象はIssue #28の`/skill:commit`のbranch判断のみ。script単体テスト・文言assert・Pi起動成功をAgentの判断成功としない。push／PR、未導入のcommit-main、全runtime／refspec／OSの網羅は対象外。製品修正・本repositoryのcommit・独自runner・installはしない。正式チェックとRootの受入判断を代替しない。
+今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。初期対象はIssue #28・#29の`/skill:commit`と`/skill:commit-main`のbranch判断。script単体テスト・文言assert・Pi起動成功をAgentの判断成功としない。push／PR、全runtime／refspec／OSの網羅は対象外。製品修正・本repositoryのcommit・独自runner・installはしない。正式チェックとRootの受入判断を代替しない。
 
 ## 前提と分離
 
 - repositoryルートをcwdにし、Git、Python 3.14、導入済みPiを確認する。Pi 1.4.0の公開RPCを使う。現在のhelperはmacOSの`/usr/bin/sandbox-exec`が必要。他OSやsandbox不成立なら無制限実行へ逃げず不足を報告する。
-- `skills/commit/tests/conftest.py`、`CONTRIBUTING.md`、変更後の`skills/commit/SKILL.md`と共有手順を読む。既存fixtureと同様、専用一時repository・HOME・Git設定・架空identityを使う。read/bashはcwdやHOMEだけでは隔離されない。
+- `skills/commit/tests/conftest.py`、`CONTRIBUTING.md`、変更後の`skills/commit/SKILL.md`・`skills/commit-main/SKILL.md`と共有手順を読む。既存fixtureと同様、専用一時repository・HOME・Git設定・架空identityを使う。read/bashはcwdやHOMEだけでは隔離されない。
 - Pi認証は利用者が許可した既存の正常な認証経路だけで利用する。authの独自読取・表示・複製・証拠保存は禁止。ambient extensions／MCP／context／自動installを無効化する。既存設定を変更しない。通常のOAuth refreshと設定読取のための一時lock以外のagentDir書込は許可しない。所有不明lockを削除しない。
 - helperのread/bashはPiと同じ権限で、正常認証用authにアクセスできる限界がある。自作の安全なfixtureだけを使い、source・既存設定の書込禁止とowned領域への書込をOS sandboxで確認する。秘密値・利用者の実データ・実remoteをfixtureに使わない。
 
@@ -75,22 +75,22 @@ sandbox内でownedへの書込成功とsource／既存設定への書込拒否�
 
 ## 操作・観測・証拠
 
-Mapのsetupで新しいrepoを作る。Git identityは`Test User <test@example.invalid>`、署名なしとし、実remote通信はしない。証拠は既存ignore対象の`docs/verification/28/<一意なrun>/<case>/`を使う。sandboxはsource書込禁止なのでhelperの出力先は一時owned内、終了後に呼出し元が必要最小限を証拠先へコピーする。helperは標準RPCの接続・観測のみで、branch判断やGit操作を代行しない。
+Mapのsetupで新しいrepoを作る。Git identityは`Test User <test@example.invalid>`、署名なしとし、実remote通信はしない。証拠は既存ignore対象の`docs/verification/<issue-number>/<一意なrun>/<case>/`（今回は`29/`）を使う。sandboxはsource書込禁止なのでhelperの出力先は一時owned内、終了後に呼出し元が必要最小限を証拠先へコピーする。helperは標準RPCの接続・観測のみで、branch判断やGit操作を代行しない。
 
 ```bash
 "$PYTHON" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.py" \
-  "$OWNED/repo" "$SOURCE/skills/commit/SKILL.md" "$OWNED/evidence" \
-  --request '/skill:commit --no-confirm'
+  "$OWNED/repo" "$SOURCE/skills/commit-main/SKILL.md" "$OWNED/evidence" \
+  --request '/skill:commit-main --no-confirm'
 ```
 
-通常承認では`--request '/skill:commit' --answer '提示内容で実行'`、cancelでは`--answer 'キャンセル'`を使う。初回settledの実際の提示・承認待ちを記録で確認する。helperは`ask_user_question`を偽装しない。read/bashだけのPiなのでSkillの通常テキストによる確認と、同じRPC sessionへの実follow-up回答を使う。候補競合で確認待ちなら回答を与えず停止状態を観測する。`--answer`は疑義への承認ではないので、想定外の質問ならそのrunを成功にしない。
+commitの確認ではSkillパスとrequestの両方をcommitへ変える。通常承認では`--request '/skill:commit-main' --answer '提示内容で実行'`、cancelでは`--answer 'キャンセル'`を使う。初回settledの実際の提示・承認待ちを記録で確認する。helperは`ask_user_question`を偽装しない。read/bashだけのPiなのでSkillの通常テキストによる確認と、同じRPC sessionへの実follow-up回答を使う。候補競合・壊れたHEADでは`--no-confirm`でも候補／理由の表示後に実際の質問と選択肢・自由回答の要求があることを確認し、回答を与えず待機／停止状態を観測する。「確認が必要」という報告や再実行案内だけなら確認対話は不成立とする。矛盾指示も共有workflow全文read（切断時のtailを含む）の後に停止判断したことをread操作と照合する。`--answer`は疑義への承認ではないので、想定外の質問ならそのrunを成功にしない。
 
-helperは`get_commands`でcommit検出、prompt応答成功、assistantのerror／abortなし、settled、process終了0をself-checkする。ただしこれだけでは機能成功ではない。Mapの期待結果を実Gitで別途照合する。必要なら新しいcaseでやり直し、失敗runを成功として置き換えない。
+helperは`get_commands`で指定Skillの名前を検出、prompt応答成功、assistantのerror／abortなし、settled、process終了0をself-checkする。ただしこれだけでは機能成功ではない。Mapの期待結果を実Gitで別途照合する。必要なら新しいcaseでやり直し、失敗runを成功として置き換えない。
 
-before／afterに現在branch、HEAD（unbornはなし）、全refsとsymbolic target、index bytes digest／tree、実commitの親／tree、元branch ref、upstreamを取得する。操作記録のtool引数／結果と照合し、branch作成が承認後のcommit時だけ、元default ref不変、upstream非継承、対象tree一致、remote通信追加なしを確認する。diff本文や利用者情報の不要なraw logは残さない。失敗・未確認・部分成功を分ける。
+before／afterに現在branch、HEAD（unbornはなし）、全refsとsymbolic target、index bytes digest／tree、実commitの親／tree、元branch ref、upstreamを取得する。操作記録のtool引数／結果と照合し、branch作成が承認後のcommit時だけ、commitでは元default ref不変・upstream非継承、commit-mainでは新branchなし・現在branch refだけ前進、対象tree一致、remote通信追加なしを確認する。diff本文や利用者情報の不要なraw logは残さない。失敗・未確認・部分成功を分ける。
 
 ## 後始末と再利用
 
 所有するPi processはhelperがstdin close／終了待ちし、失敗時もそのPIDのみterminateする。自分が作った`OWNED`だけをcleanupする。証拠は削除しない。通常認証lockの残存有無を確認し、残ったら勝手に削らず報告する。run記録にsource版・dirty状態、前提、入口、操作、期待と観測、成功／失敗／未確認、証拠への相対参照、cleanup結果を残す。Mapにrun履歴を混ぜない。cleanup後にも記録と全証拠参照が読めることを確認する。ignoreは秘密保護の境界ではない。
 
-Piをこのrepositoryで起動しproject trustを確認する。追加・更新後は新セッションか`/reload`を使い、`/skill:verify-project commitのbranch判断`、またはこの実ファイルの明示読み込みで再利用する。自動選択自体は保証しない。通常変更では関連するMapと手順だけ更新・再実行し、無関係な全MapやMaintainを要求しない。
+Piをこのrepositoryで起動しproject trustを確認する。追加・更新後は新セッションか`/reload`を使い、`/skill:verify-project commitとcommit-mainのbranch判断`、またはこの実ファイルの明示読み込みで再利用する。自動選択自体は保証しない。通常変更では関連するMapと手順だけ更新・再実行し、無関係な全MapやMaintainを要求しない。

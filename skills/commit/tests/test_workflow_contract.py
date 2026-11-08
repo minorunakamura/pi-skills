@@ -95,12 +95,21 @@ def test_standard_route_prepares_before_review_and_uses_verified_execution_order
 
 @pytest.mark.parametrize(
     "name,endpoint",
-    [("commit", "commit"), ("commit-push", "push"), ("commit-pr", "PR")],
+    [
+        ("commit", "commit"),
+        ("commit-main", "commit"),
+        ("commit-push", "push"),
+        ("commit-pr", "PR"),
+    ],
 )
-def test_three_explicit_entries_pin_endpoint_and_load_shared_workflow(name, endpoint):
+def test_four_explicit_entries_pin_endpoint_and_branch_policy_and_load_shared_workflow(
+    name, endpoint
+):
     path = SKILL_DIR.parent / name / "SKILL.md"
     text = path.read_text()
     assert f"name: {name}\n" in text
+    description = text.split("description: ", 1)[1].split("\n", 1)[0]
+    assert description.isascii()
     assert "disable-model-invocation: true" in text
     assert f"到達点は **{endpoint}**" in text
     relative = (
@@ -114,6 +123,9 @@ def test_three_explicit_entries_pin_endpoint_and_load_shared_workflow(name, endp
     ).resolve() == SKILL_DIR / "references" / "workflow.md"
     assert (path.parent / relative).is_file()
     assert "矛盾" in text and "Git変更前" in text
+    assert "到達点とbranch方針を確定して共有手順へ引き継" in text
+    for entry in ("commit", "commit-main", "commit-push", "commit-pr"):
+        assert f"`/skill:{entry}`" in text
     assert "### Stage実行" not in text
 
 
@@ -143,7 +155,7 @@ def test_shared_workflow_documents_existing_head_without_reusing_prior_approval(
     assert "(diff-review.md)" in text
 
 
-def test_commit_entry_pins_work_branch_policy_without_adding_commit_main():
+def test_commit_entry_pins_work_branch_policy_and_guides_direct_commit_to_commit_main():
     text = (SKILL_DIR / "SKILL.md").read_text()
     for contract in (
         "branch方針",
@@ -153,10 +165,54 @@ def test_commit_entry_pins_work_branch_policy_without_adding_commit_main():
         "明示新branch指定",
         "対象差分がなければbranch・commitを作らず",
         "直接commit指示でbranch作成を迂回しない",
-        "現在は未導入",
+        "直接ローカルcommitには`/skill:commit-main`を案内",
     ):
         assert contract in text
-    assert not (SKILL_DIR.parent / "commit-main").exists()
+
+
+def test_commit_main_entry_pins_direct_default_commit_without_branch_switching():
+    text = (SKILL_DIR.parent / "commit-main" / "SKILL.md").read_text()
+    for contract in (
+        "default相当と確認できた現在branch",
+        "情報なしの場合だけmain／master",
+        "branchは作成しない",
+        "対象差分がなければbranch・commitを作らず",
+        "新branch作成・別branchへの切替・push／PR",
+        "Stageを含むGit変更前に停止",
+        "defaultへ自動切替せず",
+        "未commit変更を持ち運ばない",
+        "branch条件・検査・疑義解消・停止条件は維持",
+    ):
+        assert contract in text
+    assert "切断された場合は残りのtailも読む" in text
+    assert "矛盾による終了を含む停止判断は全文read後" in text
+    assert text.index("[共有手順]") < text.index("作業branch上、")
+
+
+@pytest.mark.parametrize("route", ["workflow.md", "compatibility.md"])
+def test_default_uncertainty_requires_a_question_before_stage_even_without_confirmation(
+    route,
+):
+    text = (SKILL_DIR / "references" / route).read_text()
+    stage = text.split("## 1.", 1)[1].split("## 2.", 1)[0]
+    assert "確定した作業branch上" in stage
+    assert "default判定不能" in stage
+    assert "明示質問を行" in stage and "回答を待" in stage
+    policy = (
+        text.split("## ローカルdefault判定", 1)[1].split("## 1.", 1)[0]
+        if route == "workflow.md"
+        else stage
+    )
+    for contract in (
+        "候補／理由を表示",
+        "ask_user_question",
+        "通常テキストで候補の選択肢とbranch名の自由回答を求める",
+        "`--no-confirm`でもこの質問は省略しない",
+        "再実行案内だけで済ませ",
+        "未回答・未解決",
+        "回答後も作業branchと判定されればcommit-mainは拒否",
+    ):
+        assert contract in policy
 
 
 def test_local_default_policy_is_shared_and_rechecked_outside_script_snapshot():
@@ -186,5 +242,17 @@ def test_local_default_policy_is_shared_and_rechecked_outside_script_snapshot():
     assert "(workflow.md#ローカルdefault判定)" in compatibility
     for text in (workflow, compatibility):
         assert "作業branch上なら現在branchを使" in text
-        assert "現在は未導入" in text
+        assert "branch方針未確定なら停止" in text
+        assert "新branch作成・別branchへの切替・push／PR" in text
+        assert "Stageを含むGit変更前に停止" in text
+        assert "対象diffが空ならbranch" in text
+        assert "現在は未導入" not in text
+    check = workflow.split("## 3.", 1)[1].split("## 4.", 1)[0]
+    assert "commit入口の場合" in check
+    assert "commit-mainはStage前に確認済み" in check
+    assert "`staged-commit.py check`（`--branch`なし）" in check
+    assert "policy引数は追加しない" in check
+    for text in (workflow, compatibility):
+        assert "初回main" in text
+        assert "送信元・宛先ともmain" in text or "送信元／宛先ともmain" in text
         assert "commitのみならmain" not in text
