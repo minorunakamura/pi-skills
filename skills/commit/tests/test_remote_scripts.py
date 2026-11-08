@@ -593,29 +593,16 @@ class TestRemoteScripts(RemoteTools):
         self.prepared_push_check(preparation, commit, success=False)
         assert self.push_calls() == []
 
-    @pytest.mark.parametrize(
-        "field,value",
-        [
-            ("tree", "0000000000000000000000000000000000000000"),
-            (
-                "messageSha256",
-                "0000000000000000000000000000000000000000000000000000000000000000",
-            ),
-        ],
-    )
-    def test_prepared_push_check_binds_result_to_real_tree_and_message(
-        self, field, value
-    ):
+    def test_prepared_push_check_binds_result_to_real_tree_and_message(self):
         checked = self.commit_check()
         preparation = self.push_prepare(checked)
         commit = self.commit_checked(checked)
-        if field == "gitleaks":
-            value = "unavailable" if commit[field] == "passed" else "passed"
-        commit[field] = value
-        assert (
-            self.prepared_push_check(preparation, commit, success=False)["error"]
-            == "prepared_commit_changed"
-        )
+        for field, value in (("tree", "0" * 40), ("messageSha256", "0" * 64)):
+            malformed = {**commit, field: value}
+            assert (
+                self.prepared_push_check(preparation, malformed, success=False)["error"]
+                == "prepared_commit_changed"
+            )
         assert self.push_calls() == []
 
     def test_push_prepare_revalidates_commit_check_after_remote_material_collection(
@@ -1120,7 +1107,6 @@ class TestRemoteScripts(RemoteTools):
         commit = self.commit_checked(checked)
         if operation == "check":
             self.push(self.prepared_push_check(pushed, commit))
-        self.prepared_pr(operation, preparation, commit)
         calls = self.push_calls()
         for field in ("diffSha256", "commitsSha256"):
             malformed = {**preparation, field: "0" * 64}
