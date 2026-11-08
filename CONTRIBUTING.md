@@ -109,6 +109,31 @@ pnpm test
 
 pytestでは`tmp_path`・共通fixture・`parametrize`・`monkeypatch`を使い、一時Gitリポジトリとbare remoteでstatus解析、部分Stage、Gitleaks検査、状態変化時のcommit/push拒否、main保護と初回登録の例外、PRの本文・Draft・重複防止、認証・通信エラーとtimeout時の再試行禁止などを検証します。Gitleaks・gh・SSHはテスト用の実行ファイルで再現するため、実行時には不要です。実remoteやGitHubには接続しません。回帰テストはGitとPOSIX環境を対象とします。表示extensionのNode.jsテストはPi提供moduleの境界だけをstubにし、色の割当て、部分Stage・rename・競合、制御文字のescape、不正JSONの拒否、TUI以外の表示を確認します。Pi本体の追加installや外部接続は不要です。Pi提供moduleはoptionalなpeer dependencyとして宣言し、`pnpm-workspace.yaml`でpeerの自動installを無効化して、開発時にもSDKを二重導入しません。
 
+### 変更対象から検証を選ぶ
+
+件数ではなく、変更した保証・具体的な回帰リスク → 公開seam → 必要最小限の前提 → 実操作と観測の順に選びます。既存テストを優先し、対象と無関係なhistory・remote・後続操作を準備しません。ただし対象の接続・状態遷移は実際に通し、内部setterや成功固定のmockで実Git取得・操作を代用しません。負例は正常例との差分が拒否対象だけであることと期待errorを照合します。
+
+| 変更箇所・理由 | Workerの対象例と直接確認 |
+| --- | --- |
+| commit/index・branch作成・raw message照合 | `test_commit_scripts.py`の変更した契約と正常/拒否代表。親・tree・raw message、元ref・index bytes/mode・upstreamを実Gitで照合。Agentのdefault判断・確認対話を変えた時だけ既存branch Mapの関係caseも実Skill入口で確認 |
+| push/PRのprepare・照合・状態遷移 | `test_remote_scripts.py`の変更した群＋同じ公開経路の正常/拒否代表。staged経路なら`test_pr_prepared_check_accepts_only_planned_push_and_git_mapped_refs[standard]`、push前verifyの区別なら`test_pr_verify_accepts_actual_commit_before_push_but_is_not_create_check`。existing-headや通常push/check・PR/checkの変更にはそれぞれの既存代表を選び、stagedだけで代用しない |
+| remoteの宛先・fetch mapping・drift・失敗処理 | 変更したガードの既存正常/拒否node IDを選ぶ。SHA固定・main/default保護・余分なrefs非送信、Git自身のmapping/実object、各hook/check前後の安全時点、失敗後の非retry/非rollbackなど異なる保証を同じ判定として削らない。実2MiB等が対象なら実物の限界を確認 |
+| 共通fixture/接続wrapper | 実callersを検索し、影響する`test_remote_scripts.py`、`test_commit_scripts.py`、`test_diff_review.py`、`test_stage_workflow.py`等へ広げる。共有状態や巨大fakeへ移さない。fixture未変更なら無関係な群へ一律に広げない |
+| workflow/文書契約・runtime/Stage/diff・表示extension | 関係する既存`test_workflow_contract.py`、`test_runtime_selection.py`、`test_stage_workflow.py`、`test_diff_review.py`、Nodeテスト等を選ぶ。文言/形式検査はAgent動作や実操作の証拠とは分ける |
+| 検証Skill/Map/手順 | 変更した参照・構文/assertと、その手順で選んだ機能の実操作・証拠・cleanup/readback。公開script接続は[staged → local bare push → fixture PR](.pi/skills/verify-project/references/staged-push-pr.md)。branch判断MapとRPC helperは別入口として保持し、script結果をAgent判断成功と呼ばない |
+
+例えば公開scriptの再実行手順だけの変更なら、その新しい隔離経路と関係する正常/拒否代表を選び、全remoteや全branchのPi sessionは起動しません。共通fixtureを変えた場合だけその実callersへ対象を広げます。選んだnode ID/経路と理由、維持する保証、未確認範囲をrun記録に残してください。通常の関連更新に全Map実行やMaintainは不要です。
+
+### Worker / Root / Reviewer の分担
+
+- **Worker**: 変更したテスト群・実callers・対応する実Git正常/拒否代表を実行します。変更対象、選択理由、コマンド/exit、期待と観測、未確認、証拠・owned環境のcleanupを報告します。全remote・広い非remote回帰・正式全suite・全Mapを無条件には要求しません。非自明なhelperには最小assert self-checkと実手順の実行を残します。文書整理・既存テスト再構成にはTDDを一律要求しませんが、検証不要にはしません。
+- **Root**: 各Work Itemの最終差分で`pnpm lint`、`pnpm typecheck`、`pnpm format:check`、全収集の`pnpm test`を自ら実行します。配布文書/参照変更では`npm pack --dry-run --json --ignore-scripts`も確認します。正式testの件数・pass/fail/skip・pytest時間・外側wall timeを記録します。Workerとは新しい隔離状態で変更に対応する公開CLI/実状態を独立に直接確認し、全完了条件を受け入れます。手順変更ではWorker実行後、履歴・前回の一時path・稼働processなしで手順だけから再実行します。Workerの全操作や過去の全シナリオの丸ごと反復は不要で、一つの直接実行で複数条件を満たして構いません。
+- **Reviewer**: sourceと変更前後の保証対応、期待error、負例の成立、隔離と証拠を点検し、疑義のある対象だけ追加実行します。Reviewごとの全suite/全Mapは不要です。**独立ReviewとCode Reviewの明示承認は省略しません**。最終受入れはRootが行います。
+
+source再変更後は該当検証と最終チェックを更新し、以前の結果/Approveを流用しません。同じ最終差分の性能確認だけを理由に全suiteを2回実行せず、固定の短縮率や秒数を合否条件にしません。旧Plan・CLOSED Issue・既存証拠は保持し、昔のwrapper性能比較や過去の全代表を無条件の再実行義務にしません。
+
+証拠は既存ignore対象の`docs/verification/<issue-number>/<一意なrun>/`へsource版/dirty状態・環境・入口・操作・期待と観測・未確認・cleanupを最小限保存し、記録から全証拠へ解決可能な参照を置きます。専用HOME/PATH/Git設定、架空identity、無秘密の入力と独立repositoryを使い、ambient credentials・利用者設定・実remote/実GitHubから隔離します。成功失敗とも所有した一時環境/PIDだけcleanupし、証拠を残して全参照を実readします。無断install、既存設定変更、証拠の自動公開はしません。全体のremoteテスト軽量化・性能比較はこの手順整備と別の成果であり、手順追加だけで実施済みとしません。
+
 ### 検証 Skill の形式検査と直接確認
 
 [create-verification-skill](skills/create-verification-skill/SKILL.md) と [maintain-verification-skill](skills/maintain-verification-skill/SKILL.md) の形式・参照は `tests/verification-skills.test.js` で限定して検査します。frontmatter の名前・英語 description・明示呼び出し設定・license と、今回追加した Markdown 相対参照の解決を Node.js 標準 test runner で確認します。既存の `tests/*.test.js` 収集に含まれ、新依存や汎用 Markdown validator は不要です。
