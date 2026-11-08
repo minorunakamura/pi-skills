@@ -1,6 +1,14 @@
-# Feature Map: commit / commit-main のローカルdefaultとbranch方針
+# Feature Map: commit のbranch判断と公開script接続
 
-初期対象はIssue #28・#29の`/skill:commit`と`/skill:commit-main`。標準CLI/RPCの利用者入口でAgentが判断した結果を観測する。push／PR・全OS／全refspec／LLM判断精度全般は対象外。[準備・起動・安全性・cleanup](../SKILL.md)に従う。runの成否や一時パスはこのMapに書かず、`docs/verification/<issue-number>/<run>/`の実行記録へ分離する。
+今回の変更に関係する入口だけを選ぶ。全OS／全refspec／LLM判断精度全般は対象外。[準備・起動・安全性・cleanup](../SKILL.md)に従う。runの成否や一時パスはこのMapに書かず、`docs/verification/<issue-number>/<run>/`の実行記録へ分離する。
+
+## 公開script: staged → local bare push → fixture PR
+
+Issue #31の初期対象は[この一経路の再実行手順](staged-push-pr.md)。既存fixtureのsetup/実Gitを再利用し、実際の`staged-commit.py check/commit`、`guarded-push.py prepare/check/push`、`github-pr.py prepare/verify/check/create`へ到達する。専用HOME/PATH/Git設定と架空identityを使い、prepare非変更、commit時だけ予定branch作成、push前PR check拒否、予定SHAのbare送信とfixture PR本文/状態、回数・禁止操作なしを各時点で照合する。証拠・失敗時も含むcleanup/readbackまで手順内で実行する。実GitHub・Agent branch判断/承認は対象外であり、下のPi caseをこのscript結果で代用しない。
+
+## Agent branch判断（既存の対象）
+
+Issue #28・#29の`/skill:commit`と`/skill:commit-main`は以下の標準CLI/RPCの利用者入口でAgentが判断した結果を観測する。この入口ではpush／PRは対象外。
 
 ## 共通setupと観測
 

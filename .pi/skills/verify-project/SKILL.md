@@ -1,13 +1,19 @@
 ---
 name: verify-project
-description: Verify pi-skills commit branch decisions through the installed Pi CLI in disposable Git repositories. Use for changes to local default detection, work-branch planning, and direct default commits, not push or PR verification.
+description: Verify pi-skills commit branch decisions through Pi or the public staged-to-push-to-PR scripts in disposable Git repositories. Select the relevant feature for local default policy or isolated Git and fixture PR integration.
 ---
 
-# pi-skills の commit branch 判断を確認する
+# pi-skills の対象機能を直接確認する
 
-今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。初期対象はIssue #28・#29の`/skill:commit`と`/skill:commit-main`のbranch判断。script単体テスト・文言assert・Pi起動成功をAgentの判断成功としない。push／PR、全runtime／refspec／OSの網羅は対象外。製品修正・本repositoryのcommit・独自runner・installはしない。正式チェックとRootの受入判断を代替しない。
+今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。Issue #28・#29の`/skill:commit`と`/skill:commit-main`のAgent branch判断と、Issue #31の公開scriptによるstaged → local bare push → fixture PRを別の入口として扱う。script単体テスト・文言assert・Pi起動成功をAgentの判断成功としない。全runtime／refspec／OSの網羅は対象外。製品修正・本repositoryのcommit・独自runner・installはしない。正式チェックとRootの受入判断を代替しない。
 
-## 前提と分離
+## 公開scriptの接続を選んだ場合
+
+[staged → push → fixture PRの手順](references/staged-push-pr.md)だけを使う。正確なrunコマンド、既存fixtureによるfresh setup、公開CLI、時点ごとの期待と観測、証拠、成功失敗時のowned環境/PIDのcleanupと参照readbackを含む。Pi起動・認証・sandbox/RPC helperと以下のbranch判断専用setupは不要。実GitHubやAgentの判断成功は保証しない。証拠は既存ignore対象の`docs/verification/<issue-number>/<run>/`へ無秘密の最小記録を保存する。通常の変更では対象だけ更新・再実行し、全MapやMaintainを要求しない。
+
+Piで利用する場合はrepositoryをcwdにproject trustを確認し、新セッションまたは`/reload`後、`/skill:verify-project 公開scriptのstagedからfixture PRまで`、またはこの実ファイルの明示読み込みで選ぶ。自動選択自体は保証しない。実行分担・対象テストは[CONTRIBUTING](../../../CONTRIBUTING.md)に従う。
+
+## Agent branch判断: 前提と分離
 
 - repositoryルートをcwdにし、Git、Python 3.14、導入済みPiを確認する。Pi 1.4.0の公開RPCを使う。現在のhelperはmacOSの`/usr/bin/sandbox-exec`が必要。他OSやsandbox不成立なら無制限実行へ逃げず不足を報告する。
 - `skills/commit/tests/conftest.py`、`CONTRIBUTING.md`、変更後の`skills/commit/SKILL.md`・`skills/commit-main/SKILL.md`と共有手順を読む。既存fixtureと同様、専用一時repository・HOME・Git設定・架空identityを使う。read/bashはcwdやHOMEだけでは隔離されない。
