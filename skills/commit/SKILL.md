@@ -7,7 +7,9 @@ compatibility: Requires Git and shell access. Python 3.14+ enables shared commit
 
 # commit
 
-到達点は **commit** に固定する。対象変更があればStageして新commitを作る。対象差分がなければ操作せず終了する。remote準備はしない。
+到達点は **commit** に固定する。branch方針は、ローカルdefault相当上では未存在の作業branchを1件計画し、一括承認後のcommit時だけ作成する。作業branch上では現在branchを使う。明示新branch指定は維持する。対象差分がなければbranch・commitを作らず終了する。remote準備はしない。
+
+default相当への直接commit指示でbranch作成を迂回しない。矛盾する指示はStageを含むGit変更前に停止する。直接ローカルcommit用の`/skill:commit-main`は後続Work Itemで提供予定で、現在は未導入。自動切替・代替の直接commitはしない。
 
 自由文の対象・文章・言語・明示タイトル・branch・宛先・Draft指定を保持するが、到達点は上書きしない。到達点と矛盾する明示指示は**Git変更前**に止め、対応する`/skill:commit`（commitのみ）、`/skill:commit-push`（pushまで）、`/skill:commit-pr`（PRまで）を案内する。同じ到達点の再指定は矛盾ではない。
 

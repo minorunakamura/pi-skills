@@ -87,11 +87,22 @@ remote／PRは下記の準備APIから使う。`REMOTE`や`HOST/OWNER/REPO`は�
 - 文章・予定内容・結果の報告にtool結果の成功枠を使わず、通常のassistantメッセージ／Markdownを使う。表示のためにbash等のstdoutへ文章を出力したり、状態専用の`commit_status_display`を文章表示に転用しない。
 - `--no-confirm`はSkill呼出し時の制御指定として本文から分離する。scriptの省略フラグは作らない。通常の一括確認だけを省略し、予定内容・結果は報告する。曖昧さ・疑わしい対象・異常・状態不一致は同じく確認／停止し、既定値で押し切らない。
 
+## ローカルdefault判定
+
+`/skill:commit`は標準・互換経路ともこの判定を使う。push／PR到達点には適用せず、通信を伴うremote default確認・直接push禁止・commit-pushだけの初回main push例外・既存HEAD経路は従来どおり。この判定は**Agentの手順**であり、scriptの新しい機械的ガードではない。
+
+- Stageを含むGit変更前に、現在repositoryのlocalに保存された全remote HEADのsymbolic refと、対応するremote／fetch設定をread-onlyで調べる。設定済みremoteだけでなく、設定との対応が失われたremote HEADも見落とさない。symbolic refのtarget文字列と参照先の実在・commitへの解決を確認する。例：`refs/remotes/origin/HEAD -> refs/remotes/origin/master`。ref一覧に出ない壊れたsymbolic refも「情報なし」にしない。
+- targetをfetch refspecの**宛先側から送信元側へ逆解決**し、remote側の`refs/heads/…`のbranch名を求める。tracking refの末尾だけで推定しない。対応remote設定の存在、exact／wildcardの対応と除外指定を確認し、安全に一意に解釈できないmappingは確認／停止する。複数remoteが同じbranch名なら利用できる。候補の競合、非symbolic／壊れたHEAD、対応不明・複数解釈・非対応mappingは候補／理由を示してユーザーへ確認し、未解決なら**Stageを含むGit変更前に停止**する。originという名前だけで選ばず、`--no-confirm`でも押し切らない。
+- 一意に判別できたdefaultを優先し、現在branchが同名ならdefault相当、それ以外なら作業branch。defaultがdevelopならmain／masterは名前だけでdefault扱いしない。remote HEAD情報が存在しない場合だけ、main／masterをdefault相当、それ以外を作業branchとする（remote未設定・初回commit前も同じ）。現在branchのupstream、存在するbranch、`init.defaultBranch`、古い会話は根拠にしない。
+- 判定のための通信（ls-remote・fetch・gh等）やremote HEADの自動設定・ref／設定の補修をしない。今回の呼出し内で、repository／gitDir・現在branch、観測したHEADの有無／symbolic target／解決先OID、対応remote／順序付きfetch設定、候補・判定理由、疑義への回答を保持する。永続stateは作らない。URLに資格情報が含まれ得るので設定の生出力を表示しない。
+- **Stage前と操作直前**に同じ根拠を再取得・照合し、増減・変更・観測失敗なら停止する。新しい値で古い判定・承認を上書きしない。既存snapshot照合にremote／fetch設定やsymbolic target文字列の照合は含まれないので、Agent側で省略しない。予定内容に判定根拠と「ローカル情報は古い可能性があり、最新のremote defaultは保証しない」を明示する。
+- default相当への直接commit指示でbranch作成を迂回しない。矛盾はGit変更前に停止する。直接ローカルcommit用の`/skill:commit-main`は後続Work Itemで提供予定で、現在は未導入。代替の直接commitや自動branch切替はしない。
+
 ## 1. 入力・Git状態とStage
 
 1. 入口の固定到達点を確認し、自由文から対象・branch／宛先・文章の要望を読む。無指定は全変更をStageする。到達点と矛盾する「commitのみ」「pushまで」「PR作成」等はGit変更前に止め、対応する`/skill:commit`・`/skill:commit-push`・`/skill:commit-pr`を案内する。到達点と整合する「このパスだけ」「既存Stagedだけ」、Draft、明示タイトル等はそのまま反映し、追加の通常質問をしない。引数全体を固定タイトルとみなさず、「このタイトルをそのまま使う」という明示指定だけを一字一句維持する。
 2. 選択経路でGit状態を取得する。標準経路は`scripts/git-status.py`のJSON、互換経路は参照文書の「状態取得とStage」。パスの空白・改行・特殊文字を保持し、制御文字は無加工表示しない。repository／gitDir、branch、親HEAD、競合を確認し、detached HEAD・競合は操作前に停止する。この時点で変更なしを一律終了条件にしない。Stage後のcommit対象差分で新commitの有無を判断する。
-3. 次の共通Stage手順で範囲を取り込む。既存Stagedがあるだけで対象を狭めない。Stage後の対象差分もHEADもなければ、remote準備をせず送信するcommitがないと報告して終了する。
+3. commit到達点では上の「ローカルdefault判定」を行い、矛盾・未解決の疑義はGit変更前に停止する。Stage直前にも判定根拠を照合してから、次の共通Stage手順で範囲を取り込む。既存Stagedがあるだけで対象を狭めない。Stage後の対象差分もHEADもなければ、remote準備をせず送信するcommitがないと報告して終了する。
 4. pushを伴う場合だけ必要なremote・実push URL・default branchを調べる。明示先を優先し、曖昧なら確認する。PRを伴う場合は同一repository内、予定branch＝push target＝PR headが必要。不一致の明示指示はcommit前に停止・確認する。単独pushでは既存target指定機能を維持する。初回ローカルcommitは可能だが、PR baseや必要objectがない経路を無理に成立させない。
 
 ### 状態一覧の表示
@@ -188,7 +199,7 @@ fi
 
 ## 3. 予定branchとStaged検査
 
-- 元branchはまだ変更しない。明示的な初回main例外（手順4）を除き、pushを伴い現在branchがmain／remote defaultなら、diffの主目的から未存在の作業branch名を**1件**決め、一括確認に含める。明示branch指定を優先する。`--no-confirm`でもこの確定した予定branchを作成して進め、通常のbranch選択質問はしない。commitのみならmain上のローカルcommitを許可する。
+- 元branchはまだ変更しない。明示的な初回main例外（手順4）を除き、pushを伴い現在branchがmain／remote defaultなら、diffの主目的から未存在の作業branch名を**1件**決め、一括確認に含める。明示branch指定を優先する。`--no-confirm`でもこの確定した予定branchを作成して進め、通常のbranch選択質問はしない。commitのみの場合は上の「ローカルdefault判定」に従い、default相当上なら同様にdiffの主目的から未存在の作業branchを1件計画する。作業branch上なら現在branchを使い、明示新branch指定がある場合だけ新branchを計画する。対象diffが空ならbranchの計画・作成もしない。初回commitにも同じ方針を適用する。
 - 新branchは形式と未存在条件を検証する。不正名・衝突なら停止し、既存branchへの自動切替・上書きはしない。標準経路は`staged-commit.py check --branch NEW`で固定し、作成はcommit実行時のみ。新branch不要なら`staged-commit.py check`。互換経路は参照手順で同じ観測値を保持する。
 - `COMMIT_CHECK`を改変せず保持し、確認した完全なStaged diffのSHA-256と`snapshot.diffSha256`を照合する。不一致は停止。親HEAD、index digest、予定tree、予定branchとrefsを固定し、Gitleaks検査の前後・commit直前の一致を必要とする。
 - Gitleaksは今回のStaged差分だけを`stdin`／`--redact`で検査する。`unavailable`なら「このコミットはGitleaksで検査していない」と明示して続行し、自動installしない。導入済みで非対応、取得失敗、検出、検査失敗ならcommitしない。終了コード1だけで検出と断定しない。
@@ -244,7 +255,7 @@ ASD-STE100の考え方は参考にするが、厳密には適用しない。身�
 
 以下を`ask_user_question`より前に、通常のassistantメッセージ／Markdownでまとめて提示する（範囲にない項目は不要）。緑色の成功枠を含むtool結果には表示しない。
 
-- 対象範囲・Stage済み件数、作成する予定branch（または作成なし）、親／予定tree。
+- 対象範囲・Stage済み件数、作成する予定branch（または作成なし）、親／予定tree。commitのみの場合は保持したローカルdefault判定の根拠・結果と、ローカル情報が古い可能性も示す。
 - **完成形commitメッセージを1つのコードブロック**で表示。
 - remote／実push URL／target、既存の送信commit履歴と今回追加するcommit、upstream設定の有無。
 - PR base/head、通常／Draft、**完成形title/body**、Closes/Refs。既存PRなら新規文章の代わりにURL・状態。
@@ -256,6 +267,8 @@ ASD-STE100の考え方は参考にするが、厳密には適用しない。身�
 ## 9. 予定branch・commitと事後照合
 
 既存HEAD経路は、予定新branchがある場合だけ`guarded-push.py branch`へ`{"preparation": PUSH_PREPARATION}`を渡して同HEADで作成する。元branch refを保持し、事後照合失敗ならpushへ進まない。新branch不要ならここは操作なし。以下の`staged-commit.py commit`は新commitを作る場合だけ。
+
+commit到達点では操作直前に保持したローカルdefault判定の根拠を再取得・照合し、変化なら停止する（scriptのsnapshot照合とは別）。
 
 標準経路は`staged-commit.py commit`へ`{"check": COMMIT_CHECK, "message": "確定した本文"}`をstdin JSONで渡す。shell文字列へ本文を連結しない。元checkを手書き更新しない。予定新branchはこの時点でのみ作成する。`--no-confirm`でも同じ予定branch・本文と検査を使う。
 

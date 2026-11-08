@@ -141,3 +141,50 @@ def test_shared_workflow_documents_existing_head_without_reusing_prior_approval(
         assert contract in text
     assert "(references/diff-review.md)" not in text
     assert "(diff-review.md)" in text
+
+
+def test_commit_entry_pins_work_branch_policy_without_adding_commit_main():
+    text = (SKILL_DIR / "SKILL.md").read_text()
+    for contract in (
+        "branch方針",
+        "ローカルdefault相当",
+        "未存在の作業branchを1件",
+        "一括承認後のcommit時だけ",
+        "明示新branch指定",
+        "対象差分がなければbranch・commitを作らず",
+        "直接commit指示でbranch作成を迂回しない",
+        "現在は未導入",
+    ):
+        assert contract in text
+    assert not (SKILL_DIR.parent / "commit-main").exists()
+
+
+def test_local_default_policy_is_shared_and_rechecked_outside_script_snapshot():
+    workflow = (SKILL_DIR / "references" / "workflow.md").read_text()
+    policy = workflow.split("## ローカルdefault判定", 1)[1].split("## 1.", 1)[0]
+    for contract in (
+        "標準・互換経路ともこの判定",
+        "宛先側から送信元側へ逆解決",
+        "複数remoteが同じbranch名",
+        "情報が存在しない場合だけ",
+        "main／master",
+        "壊れたsymbolic ref",
+        "originという名前だけで選ばず",
+        "init.defaultBranch",
+        "Stage前と操作直前",
+        "最新のremote defaultは保証しない",
+        "scriptの新しい機械的ガードではない",
+    ):
+        assert contract in policy
+    stage = workflow.split("## 1.", 1)[1].split("## 2.", 1)[0]
+    assert "ローカルdefault判定" in stage
+    review = workflow.split("## 8.", 1)[1].split("## 9.", 1)[0]
+    assert "ローカルdefault判定の根拠" in review
+    operation = workflow.split("## 9.", 1)[1].split("## 10.", 1)[0]
+    assert "ローカルdefault判定の根拠を再取得・照合" in operation
+    compatibility = (SKILL_DIR / "references" / "compatibility.md").read_text()
+    assert "(workflow.md#ローカルdefault判定)" in compatibility
+    for text in (workflow, compatibility):
+        assert "作業branch上なら現在branchを使" in text
+        assert "現在は未導入" in text
+        assert "commitのみならmain" not in text
