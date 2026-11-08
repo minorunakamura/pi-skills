@@ -101,6 +101,32 @@ def test_probe_does_not_load_python_startup_code(tmp_path: Path):
     assert not marker.exists()
 
 
+def test_bundled_scripts_use_probed_python_with_startup_flags():
+    text = SKILL.read_text()
+    scripts = text.split("## 同梱script（標準経路）", 1)[1].split("## 質問と承認", 1)[0]
+    for name in (
+        "git-status.py",
+        "staged-commit.py",
+        "guarded-push.py",
+        "github-pr.py",
+    ):
+        assert f"`{name}`" in scripts
+    for contract in (
+        "開始時に確認したPython実体",
+        "必ず`-E -S`を付ける",
+        "全サブコマンド",
+        "隣接helperのimportを壊す",
+        "`-I`／`-P`へ独自に置換・追加しない",
+        'python3 -E -S "<skill-dir>/scripts/git-status.py"',
+        'python3 -E -S "<skill-dir>/scripts/staged-commit.py" check',
+    ):
+        assert contract in scripts
+    assert 'python3 "<skill-dir>/scripts/' not in text
+    diff = (SKILL.parent / "diff-review.md").read_text()
+    assert "python3 -I -S -c" in diff
+    assert "同梱scriptへ流用しない" in diff
+
+
 def test_skill_selects_route_before_scripts_and_links_compatibility_instructions():
     text = SKILL.read_text()
     assert "Python 3.14以上" in text

@@ -117,7 +117,7 @@ def test_cli_rejects_invalid_utf8_or_json_without_traceback_or_secret_echo(
     tmp_path: Path, script: str, arguments: tuple, encoding: str, payload: bytes
 ):
     result = subprocess.run(
-        [sys.executable, "-B", str(SCRIPTS / script), *arguments],
+        [sys.executable, "-E", "-S", "-B", str(SCRIPTS / script), *arguments],
         env=dict(os.environ, PYTHONIOENCODING=encoding),
         cwd=tmp_path,
         input=payload,

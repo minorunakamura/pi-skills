@@ -36,11 +36,11 @@ fi
 
 ## 同梱script（標準経路）
 
-標準経路ではGit状態の解析、Staged差分の検査、commit・push・PR作成直前の照合に、毎回コードを生成せず同梱scriptを使う。Python 3.14以上とGitが必要。対象リポジトリをcwdにしたまま、scriptのパスはcommitディレクトリから解決する。以下の`python3`は開始時に確認した実行ファイルを使う。scriptは標準ライブラリだけを使い、依存の自動installはしない。
+標準経路ではGit状態の解析、Staged差分の検査、commit・push・PR作成直前の照合に、毎回コードを生成せず同梱scriptを使う。Python 3.14以上とGitが必要。対象リポジトリをcwdにしたまま、scriptのパスはcommitディレクトリから解決する。以下の`python3`は開始時に確認したPython実体に置き換え、必ず`-E -S`を付ける。この規則は`git-status.py`、`staged-commit.py`、`guarded-push.py`、`github-pr.py`の全サブコマンド（以下の省略表記を含む）に適用する。`-E`は`PYTHON*`環境変数の解釈、`-S`は`site`の自動読込みを抑える。隣接helperのimportを壊すため、`-I`／`-P`へ独自に置換・追加しない。diffのハッシュ計算専用の`-I -S -c`を同梱scriptへ流用しない。scriptは標準ライブラリだけを使い、依存の自動installはしない。
 
 ```bash
-python3 "<skill-dir>/scripts/git-status.py"
-python3 "<skill-dir>/scripts/staged-commit.py" check
+python3 -E -S "<skill-dir>/scripts/git-status.py"
+python3 -E -S "<skill-dir>/scripts/staged-commit.py" check
 ```
 
 remote／PRは下記の準備APIから使う。`REMOTE`や`HOST/OWNER/REPO`は例で、対象を調べて明示し、shell文字列へ未検証の値を連結しない。既存の引数付きcheckは公開APIとして維持するが、このフローではcommit前の準備に代用しない。
@@ -64,7 +64,7 @@ remote／PRは下記の準備APIから使う。`REMOTE`や`HOST/OWNER/REPO`は�
 
 進行範囲に応じて、最終確認より前に以下で準備する。`COMMIT_CHECK`・`COMMIT_RESULT`は上記scriptが返したJSONオブジェクトそのもの、`PUSH_PREPARATION`・`PR_PREPARATION`も以下の成功stdoutを改変せず保持したものを指す（文字列ではない）。stdinはUTF-8 JSON、成功stdoutはJSON・終了コード0。
 
-| CLI（`python3 "<skill-dir>/scripts/…"`） | stdin | 成功stdout |
+| CLI（`python3 -E -S "<skill-dir>/scripts/…"`） | stdin | 成功stdout |
 | --- | --- | --- |
 | `guarded-push.py prepare --remote REMOTE [--target TARGET] [--initial-main] [--set-upstream]` | `{"commitCheck": COMMIT_CHECK}` | `PUSH_PREPARATION`: `kind: "push-preparation"`、元の`commitCheck`、`sourceUpstream`、`destination`、既存送信対象の`commits` |
 | `github-pr.py prepare --remote REMOTE --repo [HOST/]OWNER/REPO [--base BASE]` | `{"commitCheck": COMMIT_CHECK, "pushPreparation": PUSH_PREPARATION}` | `PR_PREPARATION`: `kind: "pr-preparation"`、元の両入力、`destination`、`mergeBase`、`diffSha256`、`units`、`fetchRefspecs`、`commitsSha256`、`diff`、`commits`、`templates`、`existingPullRequests` |
@@ -182,7 +182,7 @@ fi
 - 未pushなら次の既存HEAD APIでpush準備→必要ならPR準備を済ませ、必要な文章だけ作って手順8の一括確認へ。PR材料失敗は新commit／push前に停止する。呼出し間で承認を持ち越さない。
 - push済みSHAは再送しない。pushだけでupstream設定も不要なら完了を報告し、不要な通常承認を求めない。PRだけ残る場合は通常の`github-pr.py check`で今回のpush済みHEAD全体を確認してから、必要なPR文章だけ一括確認し通常のcreateを使える。不要なpush準備やmutationを増やさない。既存PRがあり残りの操作もなければURL・状態だけ報告する。
 
-| CLI（commitディレクトリのscripts） | stdin | 成功stdout |
+| CLI（`python3 -E -S "<skill-dir>/scripts/…"`） | stdin | 成功stdout |
 | --- | --- | --- |
 | `guarded-push.py prepare --existing-head --remote REMOTE [--target TARGET] [--branch NEW] [--initial-main] [--set-upstream]` | `{}` | `kind: push-existing-head-preparation`。`source`に実HEAD・tree・index digest・repository/gitDir・元／予定branch・refs・両upstream、`destination`に宛先／remote/default SHA・upstream方針、`commits`に送信履歴、`fetchRefspecs`に順序付き設定 |
 | `github-pr.py prepare --existing-head --remote REMOTE --repo HOST/OWNER/REPO [--base BASE]` | `{"pushPreparation": PUSH_PREPARATION}` | `kind: pr-existing-head-preparation`。元push準備、base/base SHA・merge-base・全体diff digest／units・履歴digest・account／permission・template digestと必要な文章材料 |

@@ -38,6 +38,20 @@ def isolated_env(tmp_path: Path) -> dict[str, str]:
 
 
 @pytest.fixture
+def python_startup_marker(tmp_path: Path, git_env: dict[str, str]) -> Path:
+    startup = tmp_path / "startup"
+    startup.mkdir()
+    marker = tmp_path / "git-status-startup"
+    (startup / "sitecustomize.py").write_text(
+        "import sys\nfrom pathlib import Path\n"
+        "if Path(sys.argv[0]).name == 'git-status.py':\n"
+        f"    Path({str(marker)!r}).touch()\n"
+    )
+    git_env["PYTHONPATH"] = str(startup)
+    return marker
+
+
+@pytest.fixture
 def git_env(
     tmp_path: Path, git_executable: str, isolated_env: dict[str, str]
 ) -> dict[str, str]:

@@ -2,10 +2,13 @@
 
 [Feature Map](feature-map.md)のscript接続用の一経路。repositoryルートをcwdにし、以下のBashブロック全体を実行する。前回の環境・Pi session・一時pathは不要。既存のPython 3.14以上・Git・開発用pytest（`.venv`）が必要。installしない。`uv --no-sync`が失敗したら不足を報告し、認証や安全条件を迂回しない。
 
+Issue #34では全製品CLIを確認したPython実体と`-E -S`で起動し、人工`PYTHONPATH/sitecustomize.py`が子`git-status.py`で実行されないことも限定確認する。外部hook／Git／gh等の環境は保護対象ではない。
+
 これは実Gitと既存`RemoteTools.setup_tools`のgit/gh/ssh fixtureを使う。fixture源を複製せず、内部handlerや判定用setterは呼ばない。実行する製品入口は`staged-commit.py`、`guarded-push.py`、`github-pr.py`の公開CLIだけ。fixtureの架空URLはlocal bareへ割り当てられ、実GitHub・実remoteへ接続しない。Agentのbranch判断・ユーザー承認、実GitHubの認証/権限/通信は未確認。
 
 ## 期待結果と観測時点
 
+- 人工起動コードは`sys.argv[0]`が`git-status.py`の時だけ無秘密markerを作る。無保護の対照で実行を確認してmarkerを削除し、以後の全製品CLIでmarkerなしを照合する。fixture自身のPython起動は混同しない。
 - 安全な自作ファイル2件の既存履歴（base → first）とpendingのStageだけを準備する。remoteはbaseだけのmain、ローカルはfeature。無関係なhistoryや後続操作を準備しない。
 - `check --branch planned` → push prepare → PR prepareの各時点でHEAD・全refs/symref・index bytes/tree・branch設定・bare refs・fixture PR不変。push/createは0回。
 - commit時だけplannedを作り、実commitの親=first、tree=Stage、raw message=`feat: pending\n`。feature/mainは保持し、upstreamは未継承。indexの表現はcommitで変わり得るがtreeは同じ。
@@ -24,7 +27,7 @@ set -euo pipefail
 umask 077
 RUN="worker-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 UV_OFFLINE=1 mise exec -- uv run --no-sync --locked --python python python -B - \
-  "docs/verification/31/$RUN" "$(command -v git)" <<'PY'
+  "docs/verification/34/$RUN" "$(command -v git)" <<'PY'
 import hashlib
 import importlib.util
 import json
@@ -38,7 +41,7 @@ from pathlib import Path
 
 source = Path.cwd().resolve()
 evidence = (source / sys.argv[1]).resolve()
-assert evidence.parent == source / 'docs/verification/31'
+assert evidence.parent == source / 'docs/verification/34'
 evidence.mkdir(parents=True, exist_ok=False)
 real_git = str(Path(sys.argv[2]).resolve())
 assert sys.version_info >= (3, 14)
@@ -64,7 +67,9 @@ save('source.json', {'head': source_git('rev-parse', 'HEAD'),
                       '.pi/skills/verify-project/references/feature-map.md',
                       '.pi/skills/verify-project/references/staged-push-pr.md',
                       'skills/commit/tests/test_remote_scripts.py',
-                      'skills/commit/tests/fixtures/remote_tools.py']}})
+                      'skills/commit/tests/fixtures/remote_tools.py',
+                      'skills/commit/scripts/staged-commit.py',
+                      'skills/commit/scripts/git_guard.py']}})
 spec = importlib.util.spec_from_file_location(
     'remote_tests', source / 'skills/commit/tests/test_remote_scripts.py')
 assert spec is not None and spec.loader is not None
@@ -99,6 +104,23 @@ try:
     g('add', '--', 'pending.txt')
     staged_tree = g('write-tree').decode().strip()
 
+    startup = owned / 'startup'
+    startup.mkdir()
+    marker = owned / 'git-status-startup'
+    (startup / 'sitecustomize.py').write_text(
+        'import sys\nfrom pathlib import Path\n' +
+        "if Path(sys.argv[0]).name == 'git-status.py':\n" +
+        f'    Path({str(marker)!r}).touch()\n')
+    env['PYTHONPATH'] = str(startup)
+    # Positive control: only the owned git-status startup probe may create the marker.
+    control = subprocess.run([sys.executable, '-B',
+        str(source / 'skills/commit/scripts/git-status.py')],
+        cwd=tools.repo, env=env, capture_output=True, timeout=30)
+    assert control.returncode == 0 and marker.exists()
+    marker.unlink()
+    save('startup.json', {'unprotectedControlExit': control.returncode,
+                         'unprotectedControlMarker': True, 'productMarker': False})
+
     # Observe every product Git invocation, outside the unchanged fixture wrapper.
     wrapper = tools.bin / 'git'
     wrapper.rename(tools.bin / 'fixture-git')
@@ -130,7 +152,7 @@ try:
         return state
 
     def cli(name, *args, request=None, success=True):
-        command = [sys.executable, '-B', str(source / 'skills/commit/scripts' / name), *args]
+        command = [sys.executable, '-E', '-S', '-B', str(source / 'skills/commit/scripts' / name), *args]
         # A separate owned process group allows cleanup even on timeout/failure.
         process = subprocess.Popen(command, cwd=tools.repo, env=env,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -146,9 +168,12 @@ try:
                 pass
             process.wait()
         response = json.loads(out)
-        operations.append({'script': name, 'args': list(args), 'exit': process.returncode,
+        operations.append({'script': name, 'argv': command, 'args': list(args), 'exit': process.returncode,
                            'error': response.get('error')})
         save('operations.json', operations)
+        save('startup.json', {'unprotectedControlExit': control.returncode,
+                             'unprotectedControlMarker': True, 'productMarker': marker.exists()})
+        assert not marker.exists(), 'Bundled git-status loaded Python startup code'
         assert (process.returncode == 0) == success
         assert b'Traceback' not in err and b'SECRET' not in out + err
         return response
@@ -261,7 +286,7 @@ print(evidence.relative_to(source), result['status'], 'cleanup/readback passed')
 PY
 ```
 
-期待exitは0、末尾は`docs/verification/31/<run> passed cleanup/readback passed`。失敗時も`result.json`と最後までの操作/状態を読み、未到達の段階を成功にしない。setup/CLI以外の恒久processは起動せず、各CLIは専用process groupを終了・waitし、成功失敗とも自分で作った一時directoryだけを削除する。`cleanup`失敗なら残存対象を報告し、他のPID/環境を削除しない。
+期待exitは0、末尾は`docs/verification/34/<run> passed cleanup/readback passed`。失敗時も`result.json`と最後までの操作/状態を読み、未到達の段階を成功にしない。setup/CLI以外の恒久processは起動せず、各CLIは専用process groupを終了・waitし、成功失敗とも自分で作った一時directoryだけを削除する。`cleanup`失敗なら残存対象を報告し、他のPID/環境を削除しない。
 
 ## 記録の仕上げと独立確認
 

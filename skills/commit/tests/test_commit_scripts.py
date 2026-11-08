@@ -40,7 +40,7 @@ class TestCommitScripts:
 
     def script(self, name, *args, request=None, cwd=None, success=True):
         result = subprocess.run(
-            [sys.executable, "-B", str(SCRIPTS / name), *args],
+            [sys.executable, "-E", "-S", "-B", str(SCRIPTS / name), *args],
             cwd=cwd or self.repo,
             env=self.env,
             capture_output=True,
@@ -104,6 +104,20 @@ print("[]")
             request={"check": checked, "message": message},
             **kwargs,
         )
+
+    def test_check_does_not_load_python_startup_code(self, python_startup_marker):
+        parent = self.initial_commit()
+        self.stage()
+        refs = self.git("for-each-ref", "--format=%(refname) %(objectname)")
+        tree = self.git("write-tree").decode().strip()
+        index = (self.repo / ".git/index").read_bytes()
+        checked = self.check()
+        assert checked["snapshot"]["head"] == parent
+        assert checked["snapshot"]["tree"] == tree
+        assert checked["gitleaks"] == "passed"
+        assert self.git("for-each-ref", "--format=%(refname) %(objectname)") == refs
+        assert (self.repo / ".git/index").read_bytes() == index
+        assert not python_startup_marker.exists()
 
     def test_status_unborn_special_paths_without_contents(self):
         names = ["space name.txt", "line\nname.txt", "日本語.txt", "-dash", ":(glob)*"]
@@ -460,7 +474,14 @@ print("[]")
         self.stage()
         checked = self.script("staged-commit.py", "check", "--branch", "planned")
         result = subprocess.run(
-            [sys.executable, "-B", str(SCRIPTS / "staged-commit.py"), "commit"],
+            [
+                sys.executable,
+                "-E",
+                "-S",
+                "-B",
+                str(SCRIPTS / "staged-commit.py"),
+                "commit",
+            ],
             cwd=self.repo,
             env=self.env,
             input=json.dumps({"check": checked, "message": "bad\ud800"}).encode(
@@ -640,7 +661,9 @@ print("[]")
         assert (self.root / "scan.count").read_text() == "scan\n"
 
     @pytest.mark.parametrize("branch", [None, "planned"])
-    def test_failed_commit_hook_is_not_retried_or_rolled_back(self, branch):
+    def test_failed_commit_hook_is_not_retried_or_rolled_back(
+        self, branch, python_startup_marker
+    ):
         self.stage()
         checked = (
             self.check()
@@ -648,8 +671,15 @@ print("[]")
             else self.script("staged-commit.py", "check", "--branch", branch)
         )
         hook = self.repo / ".git" / "hooks" / "pre-commit"
-        hook.write_text(f"#!{sys.executable}\nimport sys\nsys.exit(1)\n")
+        calls = self.root / "hook.calls"
+        hook.write_text(
+            f"#!{sys.executable}\nimport sys\nfrom pathlib import Path\n"
+            f"with Path({str(calls)!r}).open('a') as log:\n"
+            "    log.write('commit\\n')\n"
+            "sys.exit(1)\n"
+        )
         hook.chmod(0o700)
+        index = (self.repo / ".git/index").read_bytes()
         result = self.commit(checked, success=False)
         assert result["error"] == "git_commit_failed"
         assert result["exitCode"] == 1
@@ -659,6 +689,10 @@ print("[]")
         state = self.script("git-status.py")
         assert state["head"] is None
         assert state["changes"][0]["staged"]
+        assert self.git("for-each-ref") == b""
+        assert (self.repo / ".git/index").read_bytes() == index
+        assert calls.read_text() == "commit\n"
+        assert not python_startup_marker.exists()
 
     @pytest.mark.parametrize("failure", ["commit-exit", "observation"])
     def test_partial_success_or_unknown_state_reports_observed_sha_without_retry(

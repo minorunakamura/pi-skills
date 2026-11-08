@@ -69,7 +69,7 @@ def config(root, key):
 
 def local_state(*, allow_unborn=False):
     helper = Path(__file__).with_name("git-status.py")
-    state = json.loads(run(sys.executable, str(helper)))
+    state = json.loads(run(sys.executable, "-E", "-S", str(helper)))
     if state["branch"] is None:
         raise GuardError("detached_head")
     if state["head"] is None and not allow_unborn:
