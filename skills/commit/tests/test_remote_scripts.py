@@ -90,7 +90,7 @@ class RemoteTools:
 
     def script(self, name, *args, request=None, success=True, cwd=None):
         result = subprocess.run(
-            [sys.executable, "-B", str(SCRIPTS / name), *args],
+            [sys.executable, "-E", "-S", "-B", str(SCRIPTS / name), *args],
             cwd=cwd or self.repo,
             env=self.env,
             capture_output=True,
@@ -274,6 +274,26 @@ class TestRemoteScripts(RemoteTools):
     def full_history(self, setup):
         self.add_commit("second.txt", "second")
         self.head = self.git("rev-parse", "HEAD").decode().strip()
+
+    def test_push_prepare_does_not_load_python_startup_code(
+        self, python_startup_marker
+    ):
+        checked = self.commit_check()
+        refs = self.git("for-each-ref", "--format=%(refname) %(objectname)")
+        remote_refs = self.remote_git("for-each-ref")
+        index = (self.repo / ".git/index").read_bytes()
+        prepared = self.push_prepare(checked)
+        assert prepared["kind"] == "push-preparation"
+        assert prepared["commitCheck"] == checked
+        assert prepared["destination"]["head"] == self.head
+        assert prepared["destination"]["target"] == "feature"
+        assert [commit["sha"] for commit in prepared["commits"]] == [self.head]
+        assert self.git("for-each-ref", "--format=%(refname) %(objectname)") == refs
+        assert self.remote_git("for-each-ref") == remote_refs
+        assert (self.repo / ".git/index").read_bytes() == index
+        assert self.push_calls() == []
+        assert self.gh_calls("pr create") == []
+        assert not python_startup_marker.exists()
 
     def change_existing_state(self, change):
         if change == "index":
@@ -1781,6 +1801,8 @@ class TestRemoteNoGit(RemoteTools):
             result = subprocess.run(
                 [
                     sys.executable,
+                    "-E",
+                    "-S",
                     "-B",
                     str(SCRIPTS / "guarded-push.py"),
                     operation,
@@ -1807,7 +1829,14 @@ class TestRemoteNoGit(RemoteTools):
         )
         for data in (b"{", b"\xff", b"null", b"[]"):
             result = subprocess.run(
-                [sys.executable, "-B", str(SCRIPTS / "github-pr.py"), *args],
+                [
+                    sys.executable,
+                    "-E",
+                    "-S",
+                    "-B",
+                    str(SCRIPTS / "github-pr.py"),
+                    *args,
+                ],
                 cwd=self.repo,
                 env=self.env,
                 input=data,
@@ -1951,7 +1980,7 @@ class TestRemoteNoGit(RemoteTools):
         result[field] = value
 
         def observed(args, **kwargs):
-            if args == (sys.executable, str(SCRIPTS / "git-status.py")):
+            if args == (sys.executable, "-E", "-S", str(SCRIPTS / "git-status.py")):
                 output = json.dumps(
                     {
                         "repository": str(self.repo),

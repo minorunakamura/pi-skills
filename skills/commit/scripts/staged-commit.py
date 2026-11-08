@@ -26,7 +26,7 @@ def refs(root):
 
 def snapshot():
     helper = Path(__file__).with_name("git-status.py")
-    state = json.loads(run(sys.executable, str(helper)))
+    state = json.loads(run(sys.executable, "-E", "-S", str(helper)))
     if state["branch"] is None:
         raise GuardError("detached_head")
     if state["conflicts"]:
@@ -145,7 +145,7 @@ def observe(root, branch):
     body = None
     try:
         helper = Path(__file__).with_name("git-status.py")
-        state = json.loads(run(sys.executable, str(helper), cwd=root))
+        state = json.loads(run(sys.executable, "-E", "-S", str(helper), cwd=root))
         observed.update(
             {key: state[key] for key in ("repository", "gitDir", "branch", "head")}
         )

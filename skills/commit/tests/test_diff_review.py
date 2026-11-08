@@ -67,6 +67,8 @@ def test_capture_is_private_unique_and_matches_checked_staged_bytes(
     checked = subprocess.run(
         [
             sys.executable,
+            "-E",
+            "-S",
             "-B",
             str(SKILL_DIR / "scripts" / "staged-commit.py"),
             "check",
@@ -109,6 +111,8 @@ def test_capture_is_private_unique_and_matches_checked_staged_bytes(
     committed = subprocess.run(
         [
             sys.executable,
+            "-E",
+            "-S",
             "-B",
             str(SKILL_DIR / "scripts" / "staged-commit.py"),
             "commit",
@@ -341,6 +345,8 @@ def test_same_path_and_new_blob_are_not_reusable_when_old_blob_differs(
     checked = subprocess.run(
         [
             sys.executable,
+            "-E",
+            "-S",
             "-B",
             str(SKILL_DIR / "scripts" / "staged-commit.py"),
             "check",

@@ -5,7 +5,7 @@ description: Verify pi-skills commit branch decisions through Pi or the public s
 
 # pi-skills の対象機能を直接確認する
 
-今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。Issue #28・#29の`/skill:commit`と`/skill:commit-main`のAgent branch判断と、Issue #31の公開scriptによるstaged → local bare push → fixture PRを別の入口として扱う。script単体テスト・文言assert・Pi起動成功をAgentの判断成功としない。全runtime／refspec／OSの網羅は対象外。製品修正・本repositoryのcommit・独自runner・installはしない。正式チェックとRootの受入判断を代替しない。
+今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。Issue #28・#29の`/skill:commit`と`/skill:commit-main`のAgent branch判断と、Issue #31の公開scriptによるstaged → local bare push → fixture PRを別の入口として扱う。Issue #34のPython起動保護はMapの限定確認を選び、公開script接続とfresh Piの作業branch代表を照合する。script単体テスト・文言assert・Pi起動成功をAgentの判断成功としない。全runtime／refspec／OSの網羅は対象外。製品修正・本repositoryのcommit・独自runner・installはしない。正式チェックとRootの受入判断を代替しない。
 
 ## 公開scriptの接続を選んだ場合
 

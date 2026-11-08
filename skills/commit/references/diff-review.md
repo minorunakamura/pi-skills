@@ -39,7 +39,7 @@ printf '%s\n' "$review_dir"
 
 ## 3. 同一性判定と再利用
 
-- 標準経路では、確認したcanonical Staged diffの**生のバイト列全体**のSHA-256を計算し、`staged-commit.py check`の`snapshot.diffSha256`と照合する。次の例は第1引数をdiffのパスとし、`python3`は開始時に選択した実行ファイルに置き換える。`-I -S`でrepositoryや環境変数由来のPythonコードを読み込ませず、ファイル全体をLLMへ返さない。
+- 標準経路では、確認したcanonical Staged diffの**生のバイト列全体**のSHA-256を計算し、`staged-commit.py check`の`snapshot.diffSha256`と照合する。次の例は第1引数をdiffのパスとし、`python3`は開始時に選択した実行ファイルに置き換える。`-I -S`でrepositoryや環境変数由来のPythonコードを読み込ませず、ファイル全体をLLMへ返さない。この`-I -S -c`はハッシュ計算例だけの指定であり、同梱scriptへ流用しない。同梱scriptは[workflowの起動規則](workflow.md#同梱script標準経路)に従い`-E -S`で起動する。
 
 ```sh
 python3 -I -S -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$1"

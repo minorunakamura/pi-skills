@@ -6,6 +6,12 @@
 
 Issue #31の初期対象は[この一経路の再実行手順](staged-push-pr.md)。既存fixtureのsetup/実Gitを再利用し、実際の`staged-commit.py check/commit`、`guarded-push.py prepare/check/push`、`github-pr.py prepare/verify/check/create`へ到達する。専用HOME/PATH/Git設定と架空identityを使い、prepare非変更、commit時だけ予定branch作成、push前PR check拒否、予定SHAのbare送信とfixture PR本文/状態、回数・禁止操作なしを各時点で照合する。証拠・失敗時も含むcleanup/readbackまで手順内で実行する。実GitHub・Agent branch判断/承認は対象外であり、下のPi caseをこのscript結果で代用しない。
 
+## Issue #34: Python起動保護の限定確認
+
+[公開script手順](staged-push-pr.md)をIssue #34としてfresh実行する。確認したPython実体の`-E -S`、隣接helper import成功、人工`PYTHONPATH/sitecustomize.py`のhelper限定marker不生成を、既存のGit／push／PR期待と併せて照合する。failed-hookの観測経路は`test_failed_commit_hook_is_not_retried_or_rolled_back`の公開CLI回帰テストで確認する。外部プログラム全体のsandbox保証ではない。
+
+Agent側は下の「作業branch」代表だけをfresh Pi RPCで実行する。setupの`git init -b main`を`git init -b feature/docs`に変え、remoteなし・README説明追記で`/skill:commit --no-confirm`を呼ぶ。実Skill／共有workflowからcommitまで到達し、`operations.jsonl`の各同梱script起動が開始時確認Python実体と`-E -S`を使い、`-I`／`-P`を使わないことを実Gitの親／tree／raw本文・ref・indexと照合する。ハッシュ専用`-I -S -c`は許可する。失敗・未到達は分け、全branch Mapや将来のAgent遵守保証とは扱わない。証拠は`docs/verification/34/<run>/`へ置く。隔離・RPC・cleanupは[既存Skill手順](../SKILL.md)のまま使う。
+
 ## Agent branch判断（既存の対象）
 
 Issue #28・#29の`/skill:commit`と`/skill:commit-main`は以下の標準CLI/RPCの利用者入口でAgentが判断した結果を観測する。この入口ではpush／PRは対象外。
