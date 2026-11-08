@@ -1,0 +1,96 @@
+---
+name: verify-project
+description: Verify pi-skills commit branch decisions through the installed Pi CLI in disposable Git repositories. Use for changes to local default detection and work-branch planning, not push or PR verification.
+---
+
+# pi-skills の commit branch 判断を確認する
+
+今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。初期対象はIssue #28の`/skill:commit`のbranch判断のみ。script単体テスト・文言assert・Pi起動成功をAgentの判断成功としない。push／PR、未導入のcommit-main、全runtime／refspec／OSの網羅は対象外。製品修正・本repositoryのcommit・独自runner・installはしない。正式チェックとRootの受入判断を代替しない。
+
+## 前提と分離
+
+- repositoryルートをcwdにし、Git、Python 3.14、導入済みPiを確認する。Pi 1.4.0の公開RPCを使う。現在のhelperはmacOSの`/usr/bin/sandbox-exec`が必要。他OSやsandbox不成立なら無制限実行へ逃げず不足を報告する。
+- `skills/commit/tests/conftest.py`、`CONTRIBUTING.md`、変更後の`skills/commit/SKILL.md`と共有手順を読む。既存fixtureと同様、専用一時repository・HOME・Git設定・架空identityを使う。read/bashはcwdやHOMEだけでは隔離されない。
+- Pi認証は利用者が許可した既存の正常な認証経路だけで利用する。authの独自読取・表示・複製・証拠保存は禁止。ambient extensions／MCP／context／自動installを無効化する。既存設定を変更しない。通常のOAuth refreshと設定読取のための一時lock以外のagentDir書込は許可しない。所有不明lockを削除しない。
+- helperのread/bashはPiと同じ権限で、正常認証用authにアクセスできる限界がある。自作の安全なfixtureだけを使い、source・既存設定の書込禁止とowned領域への書込をOS sandboxで確認する。秘密値・利用者の実データ・実remoteをfixtureに使わない。
+
+## 隔離環境の準備
+
+以下はBash。`SOURCE`はこのcheckout、`VERIFY_PI`は導入済みPi実体、`PYTHON`は確認したPython 3.14実体、`AGENT_DIR`は通常認証を利用する既存Pi agentDirの実パスを明示する。会話履歴や前回の一時パスを使わない。作成前にそのsource版・dirty状態とPi/Git/Python版をrun記録に残す。
+
+```bash
+umask 077
+SOURCE=$(pwd -P)
+VERIFY_PI=$(command -v pi)
+PYTHON=$(command -v python3)
+GIT=$(command -v git)
+AGENT_DIR="$HOME/.pi/agent"
+"$VERIFY_PI" --version
+"$PYTHON" -E -S -c 'import sys; print(sys.executable, sys.version); assert sys.version_info[:2] >= (3, 14)'
+"$GIT" --version
+OWNED=$(mktemp -d /private/tmp/pi-commit-verify.XXXXXXXX)
+OWNED=$(cd "$OWNED" && pwd -P)
+mkdir "$OWNED/home" "$OWNED/tmp" "$OWNED/bin"
+export VERIFY_PI
+export VERIFY_SANDBOX="$OWNED/sandbox.sb"
+cat > "$VERIFY_SANDBOX" <<EOF
+(version 1)
+(allow default)
+(deny file-write*)
+(allow file-write* (subpath "$OWNED") (literal "/dev/null")
+ (literal "$AGENT_DIR/auth.json") (subpath "$AGENT_DIR/auth.json.lock")
+ (subpath "$AGENT_DIR/settings.json.lock"))
+(deny file-read* (subpath "$HOME/.ssh") (subpath "$HOME/.aws")
+ (subpath "$HOME/.gnupg") (subpath "$HOME/.config"))
+EOF
+for variable in $(compgen -e); do
+  case "$variable" in
+    GIT_*|GITLEAKS_*|GH_*|GITHUB_*|SSH_*|*_API_KEY|*_TOKEN) unset "$variable" ;;
+  esac
+done
+export PATH="$(dirname "$PYTHON"):$(dirname "$GIT"):/usr/bin:/bin"
+export HOME="$OWNED/home" TMPDIR="$OWNED/tmp"
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+export PI_CODING_AGENT_DIR="$AGENT_DIR" PI_OFFLINE=1 PI_SKIP_VERSION_CHECK=1 PI_TELEMETRY=0
+```
+
+上の実行ファイルがmise等のshimなら、先に導入済みの実体を指定する。ambient変数に別のcredentialがある場合も引き継がず、値を表示・記録しない。標準経路のPATHは確認したPython・Gitと必要なOS utilityに限定し、miseや利用者shell初期化を呼ばない。
+
+互換caseだけはPi起動前に次も実行する。既存OS utilityをsymlinkするだけでinstallしない。`tee`はraw本文照合にも必要なので省かない。途中の失敗でPATH／経路を切り替えない。
+
+```bash
+ln -s "$GIT" "$OWNED/bin/git"
+for utility in bash sh dirname basename uname sed awk grep cut tr sort find ls cat wc od cmp tail head mktemp mkdir rmdir rm test printf env date perl chmod readlink xargs which tee dd diff cp mv stat touch du xxd shasum openssl; do
+  executable=$(PATH=/usr/bin:/bin /usr/bin/which "$utility") || continue
+  ln -s "$executable" "$OWNED/bin/$utility"
+done
+export PATH="$OWNED/bin"
+if command -v python3 >/dev/null 2>&1; then
+  printf '%s\n' 'Python must be absent for this case' >&2
+  exit 1
+fi
+```
+
+sandbox内でownedへの書込成功とsource／既存設定への書込拒否を確認する。拒否probeは既存ファイルを開いて書かず、source内の未存在の一意名に対する作成を試し、失敗と未作成を照合する。既存設定の拒否は同じprofileのルールを確認する。Piの`get_commands`で明示Skillだけ、`get_state`で通常の既存provider/model解決を確認する。lock拒否等のdiagnosticsを無視して別modelへ落ちた状態で検証しない。
+
+## 操作・観測・証拠
+
+Mapのsetupで新しいrepoを作る。Git identityは`Test User <test@example.invalid>`、署名なしとし、実remote通信はしない。証拠は既存ignore対象の`docs/verification/28/<一意なrun>/<case>/`を使う。sandboxはsource書込禁止なのでhelperの出力先は一時owned内、終了後に呼出し元が必要最小限を証拠先へコピーする。helperは標準RPCの接続・観測のみで、branch判断やGit操作を代行しない。
+
+```bash
+"$PYTHON" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.py" \
+  "$OWNED/repo" "$SOURCE/skills/commit/SKILL.md" "$OWNED/evidence" \
+  --request '/skill:commit --no-confirm'
+```
+
+通常承認では`--request '/skill:commit' --answer '提示内容で実行'`、cancelでは`--answer 'キャンセル'`を使う。初回settledの実際の提示・承認待ちを記録で確認する。helperは`ask_user_question`を偽装しない。read/bashだけのPiなのでSkillの通常テキストによる確認と、同じRPC sessionへの実follow-up回答を使う。候補競合で確認待ちなら回答を与えず停止状態を観測する。`--answer`は疑義への承認ではないので、想定外の質問ならそのrunを成功にしない。
+
+helperは`get_commands`でcommit検出、prompt応答成功、assistantのerror／abortなし、settled、process終了0をself-checkする。ただしこれだけでは機能成功ではない。Mapの期待結果を実Gitで別途照合する。必要なら新しいcaseでやり直し、失敗runを成功として置き換えない。
+
+before／afterに現在branch、HEAD（unbornはなし）、全refsとsymbolic target、index bytes digest／tree、実commitの親／tree、元branch ref、upstreamを取得する。操作記録のtool引数／結果と照合し、branch作成が承認後のcommit時だけ、元default ref不変、upstream非継承、対象tree一致、remote通信追加なしを確認する。diff本文や利用者情報の不要なraw logは残さない。失敗・未確認・部分成功を分ける。
+
+## 後始末と再利用
+
+所有するPi processはhelperがstdin close／終了待ちし、失敗時もそのPIDのみterminateする。自分が作った`OWNED`だけをcleanupする。証拠は削除しない。通常認証lockの残存有無を確認し、残ったら勝手に削らず報告する。run記録にsource版・dirty状態、前提、入口、操作、期待と観測、成功／失敗／未確認、証拠への相対参照、cleanup結果を残す。Mapにrun履歴を混ぜない。cleanup後にも記録と全証拠参照が読めることを確認する。ignoreは秘密保護の境界ではない。
+
+Piをこのrepositoryで起動しproject trustを確認する。追加・更新後は新セッションか`/reload`を使い、`/skill:verify-project commitのbranch判断`、またはこの実ファイルの明示読み込みで再利用する。自動選択自体は保証しない。通常変更では関連するMapと手順だけ更新・再実行し、無関係な全MapやMaintainを要求しない。

@@ -51,6 +51,10 @@ Pi を作業対象のプロジェクトで起動し、`/skill:<スキル名>` �
 
 コマンド名で終了地点が決まります。`commit` はローカル commit、`commit-push` は push、`commit-pr` は PR 作成まで進みます。変更がなければ空 commit は作らず、必要な残りの操作だけを行います。
 
+`commit`はローカルdefault相当上なら、diffの主目的から未存在の作業branchを1件計画し、一括承認後のcommit時に作成します。作業branch上ならそのままcommitします。local remote HEADとremote／fetch設定から判別できたdefault（master・develop等も含む）を優先し、情報なしの場合だけmain／masterをdefault相当として扱います。判定の通信・設定補修はせず、ローカル情報は古い可能性があります。候補競合・壊れたref・不明mappingはGit変更前に確認し、未解決なら停止します。詳細は[ローカルdefaultとbranch方針](CONTRIBUTING.md#ローカルdefaultとbranch方針)を参照してください。
+
+defaultへの直接commit指定でこの方針を迂回できません。直接ローカルcommit用の`/skill:commit-main`は後続Work Itemで提供予定で、現在は未導入です。
+
 対象や文章への要望も指定できます。
 
 ```text

@@ -217,18 +217,22 @@ print("[]")
         assert raw.split(b"\n\n", 1)[1] == expected_message
 
     @pytest.mark.parametrize("has_parent", [False, True], ids=["initial", "normal"])
+    @pytest.mark.parametrize("source_branch", ["main", "master", "develop"])
     def test_only_planned_new_branch_is_created_without_inheriting_upstream(
-        self, has_parent
+        self, has_parent, source_branch
     ):
+        self.git("symbolic-ref", "HEAD", f"refs/heads/{source_branch}")
         parent = self.initial_commit() if has_parent else None
         self.git("config", "branch.autoSetupMerge", "inherit")
-        self.git("config", "branch.main.remote", "origin")
-        self.git("config", "branch.main.merge", "refs/heads/main")
+        self.git("config", f"branch.{source_branch}.remote", "origin")
+        self.git(
+            "config", f"branch.{source_branch}.merge", f"refs/heads/{source_branch}"
+        )
         self.stage()
         checked = self.script("staged-commit.py", "check", "--branch", "fix/日本語")
-        assert checked["snapshot"]["branch"] == "main"
+        assert checked["snapshot"]["branch"] == source_branch
         assert checked["snapshot"]["plannedBranch"] == "fix/日本語"
-        assert self.script("git-status.py")["branch"] == "main"
+        assert self.script("git-status.py")["branch"] == source_branch
         assert self.git("for-each-ref", "--format=%(refname)", "refs/heads/fix/") == b""
         result = self.commit(checked)
         assert result["branch"] == "fix/日本語"
@@ -243,7 +247,10 @@ print("[]")
         )
         assert b"branch.fix/" not in self.git("config", "--local", "--list")
         if parent:
-            assert self.git("rev-parse", "refs/heads/main").strip().decode() == parent
+            assert (
+                self.git("rev-parse", f"refs/heads/{source_branch}").strip().decode()
+                == parent
+            )
 
     @pytest.mark.parametrize(
         "branch", ["bad..name", "-option", "@{-1}", "line\nname", "", "main", "HEAD"]

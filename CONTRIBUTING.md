@@ -45,6 +45,25 @@ Stage後の対象差分がなければ新commit・空commit・amendは作りま�
 - 必要objectがなければ自動fetchせず停止します。同時に他プロセスからGitを変更しないでください。照合と操作は非atomicで、hook副作用や通信断による部分成功・成否不明は残ります。失敗時は照会だけを行い、自動再試行・rollbackしません。
 - reset、amend、force push、rebase、merge、release、deploy、PR自動mergeは行いません。
 
+### ローカルdefaultとbranch方針
+
+`/skill:commit`はdefault相当上なら、Stage後のdiffの主目的から未存在の作業branchを1件計画し、通常の一括承認後のcommit時だけ作成します。作業branch上では現在branchを使い、明示新branch指定は維持します。不正名・衝突は停止し、既存branchへの自動切替・上書きはしません。対象diffなしではbranch・commitとも作らず終了し、初回commit前にも同じ方針を適用します。defaultへの直接commit指示ではGit変更前に停止し、branch作成を迂回しません。直接ローカルcommit用の`/skill:commit-main`は後続Work Itemで提供予定で、現在は未導入です。入口は引き続き3つ、配布Skillは7つです。
+
+判定の詳細は[共有手順のローカルdefault判定](skills/commit/references/workflow.md#ローカルdefault判定)に一箇所で定義し、Python不要の互換経路も参照します。
+
+- local remote HEADのsymbolic refと対応するremote／fetch設定から、宛先tracking refをremote側のbranchへ逆解決します。複数remoteが同じbranch名へ解決できれば利用できます。一意に判別できたdefaultを優先し、例えばdevelopならmainという別branchは作業branchです。
+- remote HEAD情報が存在しない場合だけmain／masterをdefault相当とするfallbackを使います。remote未設定・unbornにも適用します。upstream、存在branch、`init.defaultBranch`、古い会話は根拠にしません。
+- 候補の競合、壊れたref、対応不明・安全に解釈できないmappingは情報なしと混同せず、理由を示して確認し、未解決ならStageを含むGit変更前に停止します。origin名だけで選ばず、`--no-confirm`も疑義解消を省略しません。
+- 判定の通信・設定補修はしません。今回の根拠を保持しStage前と操作直前に再取得・照合して、変化なら停止します。判定根拠とローカル情報の古さを予定内容に示します。remoteの最新defaultは保証しません。これはAgentの手順であり、新しいscriptガードではありません。永続stateは作りません。
+
+標準経路は既存の`staged-commit.py check --branch NEW`とcommit APIを使います。checkではbranchを作らず、承認後のcommit時だけ`--no-track`で作成します。元defaultの既存refを進めず、upstreamも暗黙継承しません。既存Stage・ignore・対象・Gitleaks・diff・状態照合・detached／競合／submodule停止、失敗後の経路切替・自動再試行・rollback禁止は両経路で維持します。Stageはキャンセル時にも残り得ます。branch作成とcommitは非atomicで、失敗時にbranchだけ残る場合もあります。push／PRのremote default確認・直接push禁止・初回main push例外・既存HEAD処理は変更しません。
+
+#### branch判断の直接確認
+
+[プロジェクト検証Skill](.pi/skills/verify-project/SKILL.md)と[Feature Map](.pi/skills/verify-project/references/feature-map.md)に今回のbranch判断だけの再実行手順を置きます。Piの新セッションまたは`/reload`とproject trustを確認し、`/skill:verify-project commitのbranch判断`、または実ファイルの明示読み込みで使います。隔離repository／HOME／Git設定と架空identityを使い、変更後の実Skill入口から実行します。文言assertやscript単体実行をAgent判断の実証にしません。標準経路のmain／master fallback、local remote HEAD master／develop、作業branch、判別済みdefault優先、候補競合、空diff、一括承認／cancel／no-confirmと、開始時Python不足での互換経路master fallbackを代表確認します。before／afterのbranch・HEAD・refs・index・親・treeと最小tool操作記録を照合し、remote通信追加なしを確認します。
+
+証拠とrun記録は既存ignore対象の`docs/verification/28/`等へ保存し、Mapの手順と分けます。秘密情報・不要なraw logは保存せず、認証は正常なPiの方法だけを使います。利用者設定は変更せず、作成した一時環境だけcleanupし、その後も証拠参照を確認します。既存script統合テストと正式チェック、Rootの独立再実行・受入判断を代替しません。
+
 #### 状態一覧の色付き表示
 
 同梱の`extensions/commit-status.js`は、取得済みの状態JSONを表示するだけの`commit_status_display` toolを追加します。Git操作や`git-status.py`のJSONは変更しません。Pi packageとして導入した場合はmanifestの指定に従って読み込まれ、`/reload`後に使えます。Pi 1.3.0を対象としています。

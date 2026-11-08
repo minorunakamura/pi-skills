@@ -15,6 +15,8 @@
 
 ## 1. 状態取得とStage
 
+commit到達点は[ローカルdefault判定（両経路共通）](workflow.md#ローカルdefault判定)に従う。Stageを含むGit変更前に判定・矛盾チェックを行い、Stage前と操作直前に根拠を再取得・照合する。候補の競合・壊れたref・不明mappingは情報なしではなく、理由を示して確認し未解決なら停止する。Agentの手順でありscriptガードではない。
+
 - `git rev-parse --show-toplevel`・`git rev-parse --absolute-git-dir`でrepository／gitDirを確認し、以後ルートをcwdにする。`git symbolic-ref --quiet --short HEAD`でbranch、`git rev-parse --verify --quiet HEAD^{commit}`で親HEADを確認する。初回commit前だけ親なしを許し、detached HEAD・競合は停止する。この時点で変更なしを一律終了条件にしない。Stage後に対象diffが空なら新commitを作らず、commit到達点は終了、push／PRは下記既存HEAD経路へ進む。HEADも対象差分もなければ送信するcommitがないと報告して終了する。
 - `git status --porcelain=v1 -z --untracked-files=all --ignore-submodules=none`をNULのまま解析する。ルート相対path、index/worktree、staged/unstaged/untracked、rename/copyの元pathを保持する。NUL出力をshell変数へ格納せず、改行・空白で分割しない。表示用JSONはworkflow.mdの`commit_status_display`契約に従う（check JSONではない）。
 - 無指定ならUntracked・既存Staged・部分Stageの残りを含める。通常のStage選択質問はしない。明示「既存Stagedだけ」なら追加Stageなし。限定パスはrepository内のルート相対literal pathへ解決し、対象外Stagedがあればcommit前に停止・確認する。勝手にunstageしない。疑わしい対象・不明な意図だけ確認する。
@@ -24,7 +26,7 @@
 
 ## 2. 予定branch・Staged検査
 
-pushを伴う場合だけremote・実push URL・default branchを調べる。明示的な初回main例外（手順3）を除き、main／remote default上ならdiffに合う未存在の作業branch名を1件計画し、一括確認に含める。明示branchを優先する。`git check-ref-format --branch`と`git show-ref`等で形式・ref衝突を確認し、不正名・衝突なら停止する。既存branchへ切り替えない。branchはまだ作成しない。commitのみならmainでのローカルcommit、親なしの初回commitも許可する。
+pushを伴う場合だけremote・実push URL・default branchを調べる。明示的な初回main例外（手順3）を除き、main／remote default上ならdiffに合う未存在の作業branch名を1件計画し、一括確認に含める。明示branchを優先する。`git check-ref-format --branch`と`git show-ref`等で形式・ref衝突を確認し、不正名・衝突なら停止する。既存branchへ切り替えない。branchはまだ作成しない。commitのみの場合は共有のローカルdefault判定に従い、default相当上ならdiffの主目的から未存在の作業branchを1件計画する。作業branch上なら現在branchを使う。明示新branchを優先し、同じ形式・衝突検査を行う。親なしの初回commitも同じ方針。対象diffが空ならbranchを計画・作成せず終了する。defaultへの直接commit指示で迂回せずGit変更前に停止する。`/skill:commit-main`は後続Work Itemで提供予定で、現在は未導入。
 
 次を検査前後で取得・照合し、ひとまとまりで保持する。
 
@@ -80,7 +82,7 @@ commitのみならremote APIを使わず、pushまでならPR APIを使わない
 
 workflow.mdの文章手順でcommitとPRを同じ準備段階で作る。直近commit履歴は一度だけ取得し、明示規約・言語要望を補う。PRは今回のcommitだけでなくブランチ全体を根拠にし、テンプレート・確認したissueのCloses/Refs、実際のテスト結果だけを反映する。通常PRを既定に明示Draftを優先。WHYを創作せず、重要な根拠不足だけ質問する。
 
-承認質問の前に一時diffの削除成功を確認する。対象範囲、予定branch作成の有無、完成形commitメッセージ、remote／実push URL／target、送信する既存履歴＋今回のcommit、upstream、PR base/head、通常／Draft、完成形title/body、Closes/Refsを`ask_user_question`より前に、通常のassistantメッセージ／Markdownで一括提示する。commitメッセージ全文は1つのコードブロックにし、PR title/bodyも全文を表示する。緑色の成功枠を含むtool結果には表示しない。範囲外項目と既存PRの新規文章は不要。commitを作らなければcommit文章を作らず、PRを作らなければPR文章を作らない。
+承認質問の前に一時diffの削除成功を確認する。対象範囲、予定branch作成の有無、commitのみの場合は保持したローカルdefault判定の根拠・結果とローカル情報が古い可能性、完成形commitメッセージ、remote／実push URL／target、送信する既存履歴＋今回のcommit、upstream、PR base/head、通常／Draft、完成形title/body、Closes/Refsを`ask_user_question`より前に、通常のassistantメッセージ／Markdownで一括提示する。commitメッセージ全文は1つのコードブロックにし、PR title/bodyも全文を表示する。緑色の成功枠を含むtool結果には表示しない。範囲外項目と既存PRの新規文章は不要。commitを作らなければcommit文章を作らず、PRを作らなければPR文章を作らない。
 
 通常は一回の `ask_user_question` で `提示内容で実行` / `commitのみ修正` / `PR／実行設定を修正` / `キャンセル` とOther（自由入力）を提示する。ただし存在しない項目の修正選択肢は出さない。残りの操作が全て完了済みなら通常承認を求めない。question／label／description／previewには全文を入れず、短い質問・操作名・説明だけで表示済みの文章を参照する（例：`上に表示した内容で実行しますか？`）。片方だけの文章修正なら他方を保持し、変更箇所を示して同じ表示規則で質問前に最終一式を再提示して確認する。設定変更は影響する準備を取り直すが、状態不一致を最新値への書換えで吸収しない。
 
@@ -90,6 +92,7 @@ workflow.mdの文章手順でcommitとPRを同じ準備段階で作る。直近c
 
 既存HEAD経路では上記の承認後branch作成・照合だけを行い、以下のcommitは実行しない。
 
+- commit到達点では操作直前に共有のローカルdefault判定の根拠も再取得・照合し、変化なら停止する。
 - 実行直前にrepository／gitDir／元branch／親HEAD／全refs／upstream、予定tree、diff／index digest、必要remote／PR準備値を再取得し、完全一致を確認する。不一致なら停止し、古い承認を使わない。
 - 予定新branchがある場合だけ未存在条件を再確認して`git switch --no-track -c <予定branch>`を単一引数で実行する。暗黙のupstream継承はしない。そのbranch以外のrefs・親・indexが変わらず、upstreamが未設定であることを確認する。`--no-confirm`でもこの確定した予定branchを作成する。不正名・衝突・作成失敗は停止し、既存branchへ切り替えない。
 - 確定メッセージをデータとして`git commit --cleanup=verbatim --file=-`へ渡す。既存hooksを実行する。本文はUTF-8の完全bytesを原則とし、末尾LFなしの入力に限り1 LF付与だけを許す（既存LFの増減・space変更は不可）。
