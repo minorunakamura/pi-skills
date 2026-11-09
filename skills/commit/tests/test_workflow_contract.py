@@ -256,3 +256,43 @@ def test_local_default_policy_is_shared_and_rechecked_outside_script_snapshot():
         assert "初回main" in text
         assert "送信元・宛先ともmain" in text or "送信元／宛先ともmain" in text
         assert "commitのみならmain" not in text
+
+
+def test_new_commit_execution_batches_after_approval_without_changing_other_routes():
+    workflow = (SKILL_DIR / "references" / "workflow.md").read_text()
+    execution = workflow.split("## 9.", 1)[1]
+    assert "(execution-batching.md)" in execution and "全文" in execution
+    for contract in (
+        "新commitあり・標準経路・Codemode利用可能",
+        "1回のCodemode",
+        "集約開始前から利用不可",
+        "開始後の失敗・timeout・中断・不正応答ではfallbackせず停止",
+        "対象差分なし・既存HEAD・push済みからPRだけ・Python-freeは従来経路",
+        "途中生成してcreateせず",
+    ):
+        assert contract in execution
+    batching = (SKILL_DIR / "references" / "execution-batching.md").read_text()
+    for contract in (
+        "生成＋最終報告のassistant 2回",
+        "中継LLM requestは0回",
+        "別途完全再取得・比較",
+        "commitを呼ばない",
+        "通信なし",
+        "PR prepare／verify／check／create APIなし",
+        "commit → PR verify → push check／push → PR check",
+        "CLI exit 0だけでは続行しない",
+        "file側で解析/検証",
+        "0700",
+        "0600",
+        "umask 077",
+        "symlink",
+        "全量`store()`",
+        "diff: null",
+        "非空",
+        "operationMayHaveSucceeded",
+        "自動再試行・rollback・準備値更新",
+        "timeout_ms",
+        "記録済み所有fileだけ",
+        "必達を保証しない",
+    ):
+        assert contract in batching

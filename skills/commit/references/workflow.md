@@ -36,7 +36,7 @@ fi
 
 ## 同梱script（標準経路）
 
-標準経路ではGit状態の解析、Staged差分の検査、commit・push・PR作成直前の照合に、毎回コードを生成せず同梱scriptを使う。Python 3.14以上とGitが必要。対象リポジトリをcwdにしたまま、scriptのパスはcommitディレクトリから解決する。以下の`python3`は開始時に確認したPython実体に置き換え、必ず`-E -S`を付ける。この規則は`git-status.py`、`staged-commit.py`、`guarded-push.py`、`github-pr.py`の全サブコマンド（以下の省略表記を含む）に適用する。`-E`は`PYTHON*`環境変数の解釈、`-S`は`site`の自動読込みを抑える。隣接helperのimportを壊すため、`-I`／`-P`へ独自に置換・追加しない。diffのハッシュ計算専用の`-I -S -c`を同梱scriptへ流用しない。scriptは標準ライブラリだけを使い、依存の自動installはしない。
+標準経路ではGit状態の解析、Staged差分の検査、commit・push・PR作成直前の照合に、ガードを毎回生成せず同梱scriptを使う。Python 3.14以上とGitが必要。対象リポジトリをcwdにしたまま、scriptのパスはcommitディレクトリから解決する。以下の`python3`は開始時に確認したPython実体に置き換え、必ず`-E -S`を付ける。この規則は`git-status.py`、`staged-commit.py`、`guarded-push.py`、`github-pr.py`の全サブコマンド（以下の省略表記を含む）に適用する。`-E`は`PYTHON*`環境変数の解釈、`-S`は`site`の自動読込みを抑える。隣接helperのimportを壊すため、`-I`／`-P`へ独自に置換・追加しない。diffのハッシュ計算専用の`-I -S -c`を同梱scriptへ流用しない。scriptは標準ライブラリだけを使い、依存の自動installはしない。
 
 ```bash
 python3 -E -S "<skill-dir>/scripts/git-status.py"
@@ -267,6 +267,10 @@ ASD-STE100の考え方は参考にするが、厳密には適用しない。身�
 
 ## 9. 予定branch・commitと事後照合
 
+**新commitあり・標準経路・Codemode利用可能**なら、[承認後の実行集約](execution-batching.md)を**全文**読み、以下の手順9〜11の該当操作と最終状態確認・cleanupを**1回のCodemode**内で直列awaitする。ローカル2入口のdefault根拠再照合も集約内でcommitより先に行う。承認済み文章・元check／preparationは保持し、中継LLM requestを挟まない。正常時は生成＋最終報告のassistant 2回。`--no-confirm`でも通常承認以外は同じ。
+
+Codemodeが**集約開始前から利用不可**の場合だけ以下の逐次script呼出しを維持する。開始後の失敗・timeout・中断・不正応答ではfallbackせず停止し、Python-freeへも切り替えない。対象差分なし・既存HEAD・push済みからPRだけ・Python-freeは従来経路のまま。以下は既存の個別APIと各安全時点であり、集約時も省略しない。集約内の結果検査・完全JSON受渡し・停止/部分成功・timeout/cleanupは参照文書に従う。
+
 既存HEAD経路は、予定新branchがある場合だけ`guarded-push.py branch`へ`{"preparation": PUSH_PREPARATION}`を渡して同HEADで作成する。元branch refを保持し、事後照合失敗ならpushへ進まない。新branch不要ならここは操作なし。以下の`staged-commit.py commit`は新commitを作る場合だけ。
 
 commit到達点では操作直前に保持したローカルdefault判定の根拠を再取得・照合し、変化なら停止する（scriptのsnapshot照合とは別）。
@@ -293,9 +297,9 @@ hook等の不一致・失敗なら観測SHA、branch作成済み／commit済み�
 
 push成功後、`github-pr.py check --prepared`へ`{"preparation": PR_PREPARATION, "commit": COMMIT_RESULT}`を渡す（既存HEAD経路は`{"preparation": PR_PREPARATION}`のみ）。準備対実commitまたは固定HEADのdiff digest、base/head、認証・権限・テンプレート、予定push／upstream以外の状態変化を照合し、既存PRを再照会する。本文の再読・再承認はしない。
 
-既存PRがあればOPEN/CLOSED/MERGEDとも重複作成・自動編集せずURL・状態を報告する。新規なら返された実行用checkを`github-pr.py create`へ`{"check": PR_CHECK, "title": "確定title", "body": "確定body", "draft": false}`で渡す（明示Draftならtrue）。準備／verifyはcreate用checkではない。作成前にpush済みSHAを要求する既存ガードを維持する。
+既存PRがあればOPEN/CLOSED/MERGEDとも重複作成・自動編集せずURL・状態を報告する。新規でも今回確定した新規作成方針と承認済みtitle/body/draftを保持している場合だけ作成する。準備時に既存PRがあり文章・承認を省いた後、そのPRが消えても途中生成してcreateせず、成功済みcommit/pushと不足を報告して停止する。作成条件を満たす場合だけ返された実行用checkを`github-pr.py create`へ`{"check": PR_CHECK, "title": "確定title", "body": "確定body", "draft": false}`で渡す（明示Draftならtrue）。準備／verifyはcreate用checkではない。作成前にpush済みSHAを要求する既存ガードを維持する。
 
-成功時は`status: created`のURL、既存なら`status: existing`のURLを区別する。作成後のtitle/body/Draft・head/base読み戻し照合、各60秒timeout、2 MiB制限、既存PR100件上限、SSH・資格情報・同一repository制約は同梱script節のまま維持する。失敗・不正応答・不一致は`--no-confirm`でも停止し、自動再準備・再試行・削除・mergeをしない。照合と外部操作は非atomicで、hookの外部副作用も防げないことを隠さない。
+成功時は`status: created`のURL、既存なら`status: existing`の非空`pullRequests`を区別し、後者も正常な非重複結果として再create・編集しない。作成後のtitle/body/Draft・head/base読み戻し照合、各60秒timeout、2 MiB制限、既存PR100件上限、SSH・資格情報・同一repository制約は同梱script節のまま維持する。失敗・不正応答・不一致は`--no-confirm`でも停止し、自動再準備・再試行・削除・mergeをしない。照合と外部操作は非atomicで、hookの外部副作用も防げないことを隠さない。
 
 ## 12. 信頼境界
 

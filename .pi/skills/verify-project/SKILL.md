@@ -1,11 +1,11 @@
 ---
 name: verify-project
-description: Verify pi-skills commit branch decisions through Pi or the public staged-to-push-to-PR scripts in disposable Git repositories. Select the relevant feature for local default policy or isolated Git and fixture PR integration.
+description: Verify pi-skills post-approval Codemode batching, stopping and partial success through fresh Pi, or local branch policy and public scripts in disposable Git and fixture PR environments.
 ---
 
 # pi-skills の対象機能を直接確認する
 
-今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。Issue #28・#29の`/skill:commit`と`/skill:commit-main`のAgent branch判断と、Issue #31の公開scriptによるstaged → local bare push → fixture PRを別の入口として扱う。Issue #34のPython起動保護はMapの限定確認を選び、公開script接続とfresh Piの作業branch代表を照合する。script単体テスト・文言assert・Pi起動成功をAgentの判断成功としない。全runtime／refspec／OSの網羅は対象外。製品修正・本repositoryのcommit・独自runner・installはしない。正式チェックとRootの受入判断を代替しない。
+今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。新commit承認後のCodemode集約と停止・部分成功は[専用手順](references/execution-batching.md)を使い、fresh Piの実入口・通常承認・request timingと実Git/local bare/fixture PRを照合する。Issue #28・#29の`/skill:commit`と`/skill:commit-main`のAgent branch判断と、Issue #31の公開scriptによるstaged → local bare push → fixture PRを別の入口として扱う。Issue #34のPython起動保護はMapの限定確認を選び、公開script接続とfresh Piの作業branch代表を照合する。script単体テスト・文言assert・Pi起動成功をAgentの判断成功としない。全runtime／refspec／OSの網羅は対象外。製品修正・本repositoryのcommit・独自runner・installはしない。正式チェックとRootの受入判断を代替しない。
 
 ## 公開scriptの接続を選んだ場合
 
@@ -89,7 +89,7 @@ Mapのsetupで新しいrepoを作る。Git identityは`Test User <test@example.i
   --request '/skill:commit-main --no-confirm'
 ```
 
-commitの確認ではSkillパスとrequestの両方をcommitへ変える。通常承認では`--request '/skill:commit-main' --answer '提示内容で実行'`、cancelでは`--answer 'キャンセル'`を使う。初回settledの実際の提示・承認待ちを記録で確認する。helperは`ask_user_question`を偽装しない。read/bashだけのPiなのでSkillの通常テキストによる確認と、同じRPC sessionへの実follow-up回答を使う。候補競合・壊れたHEADでは`--no-confirm`でも候補／理由の表示後に実際の質問と選択肢・自由回答の要求があることを確認し、回答を与えず待機／停止状態を観測する。「確認が必要」という報告や再実行案内だけなら確認対話は不成立とする。矛盾指示も共有workflow全文read（切断時のtailを含む）の後に停止判断したことをread操作と照合する。`--answer`は疑義への承認ではないので、想定外の質問ならそのrunを成功にしない。
+commitの確認ではSkillパスとrequestの両方をcommitへ変える。通常承認では`--request '/skill:commit-main' --answer '提示内容で実行'`、cancelでは`--answer 'キャンセル'`を使う。初回settledの実際の提示・承認待ちを記録で確認する。helperは`ask_user_question`を偽装しない。read/bash/codemodeだけのPiなので質問専用toolはなく、Skillの通常テキストによる確認と、同じRPC sessionへの実follow-up回答を使う。Codemodeはbuilt-inだけを明示有効にし、ambient Extensions/MCPは使わない。候補競合・壊れたHEADでは`--no-confirm`でも候補／理由の表示後に実際の質問と選択肢・自由回答の要求があることを確認し、回答を与えず待機／停止状態を観測する。「確認が必要」という報告や再実行案内だけなら確認対話は不成立とする。矛盾指示も共有workflow全文read（切断時のtailを含む）の後に停止判断したことをread操作と照合する。`--answer`は疑義への承認ではないので、想定外の質問ならそのrunを成功にしない。
 
 helperは`get_commands`で指定Skillの名前を検出、prompt応答成功、assistantのerror／abortなし、settled、process終了0をself-checkする。ただしこれだけでは機能成功ではない。Mapの期待結果を実Gitで別途照合する。必要なら新しいcaseでやり直し、失敗runを成功として置き換えない。
 
@@ -97,6 +97,6 @@ before／afterに現在branch、HEAD（unbornはなし）、全refsとsymbolic t
 
 ## 後始末と再利用
 
-所有するPi processはhelperがstdin close／終了待ちし、失敗時もそのPIDのみterminateする。自分が作った`OWNED`だけをcleanupする。証拠は削除しない。通常認証lockの残存有無を確認し、残ったら勝手に削らず報告する。run記録にsource版・dirty状態、前提、入口、操作、期待と観測、成功／失敗／未確認、証拠への相対参照、cleanup結果を残す。Mapにrun履歴を混ぜない。cleanup後にも記録と全証拠参照が読めることを確認する。ignoreは秘密保護の境界ではない。
+所有するPi processはhelperが公開RPCのstdin close／終了待ちし、失敗時は自分が作ったprocess groupだけをterminate/kill・waitしてgroup不存在を確認する。中断caseで別groupのCLI/hook/adapterを使った場合は、その所有PID/group/handleの終了も別途確認し、残存している環境を削除しない。自分が作った`OWNED`だけをcleanupする。証拠は削除しない。通常認証lockの残存有無を確認し、残ったら勝手に削らず報告する。run記録にsource版・dirty状態、前提、入口、操作、期待と観測、成功／失敗／未確認、証拠への相対参照、cleanup結果を残す。Mapにrun履歴を混ぜない。cleanup後にも記録と全証拠参照が読めることを確認する。ignoreは秘密保護の境界ではない。
 
 Piをこのrepositoryで起動しproject trustを確認する。追加・更新後は新セッションか`/reload`を使い、`/skill:verify-project commitとcommit-mainのbranch判断`、またはこの実ファイルの明示読み込みで再利用する。自動選択自体は保証しない。通常変更では関連するMapと手順だけ更新・再実行し、無関係な全MapやMaintainを要求しない。
