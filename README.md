@@ -57,6 +57,8 @@ Pi を作業対象のプロジェクトで起動し、`/skill:<スキル名>` �
 
 defaultへの直接commitは`/skill:commit-main`を選びます。同じ共通判定でmain／master／その他のdefault相当と確認できた現在branchだけにcommitし、作業branch上や新branch作成・切替・push／PRの矛盾指示ではStageを含むGit変更前に停止します。defaultへ自動切替せず、未commit変更も持ち運びません。両ローカル入口ともremote準備・通信は追加せず、対象差分がなければbranch・commitを作りません。`--no-confirm`でもbranch条件は維持します。
 
+標準script経路で新commitがありCodemodeを使える場合、一括承認後の操作と最終確認・後始末を原則1回にまとめます。開始前からCodemodeが利用不可の場合だけ従来の逐次経路を使い、開始後の失敗から切り替えません。安全照合と各入口の終了位置は維持します。部分成功・中断の限界と検証方法は[実行集約の詳細](CONTRIBUTING.md#新commit承認後の実行集約)を参照してください。
+
 対象や文章への要望も指定できます。
 
 ```text

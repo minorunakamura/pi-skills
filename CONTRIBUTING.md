@@ -46,6 +46,16 @@ Stage後の対象差分がなければ新commit・空commit・amendは作りま�
 - 必要objectがなければ自動fetchせず停止します。同時に他プロセスからGitを変更しないでください。照合と操作は非atomicで、hook副作用や通信断による部分成功・成否不明は残ります。失敗時は照会だけを行い、自動再試行・rollbackしません。
 - reset、amend、force push、rebase、merge、release、deploy、PR自動mergeは行いません。
 
+### 新commit承認後の実行集約
+
+標準script経路で新commitがありCodemodeを使える場合は、一括承認後の操作・最終状態確認・cleanupを原則1回のCodemode内で直列awaitし、中継LLM requestを挟みません。`commit`/`commit-main`は別途ローカルdefault根拠の直前完全再照合→commit（通信なし）、`commit-push`はcommit→push check/push（PR APIなし）、`commit-pr`はcommit→PR verify→push check/push→PR check/必要createまでです。正常時のassistantは実行コード生成＋結果報告の2回。Stage・diff理解・Gitleaks・prepare・文章・一括承認と呼出し間の再利用禁止は変更しません。詳細は[共有実行集約](skills/commit/references/execution-batching.md)を参照してください。
+
+Codemodeが集約開始前から利用不可の場合だけ従来の逐次script経路を維持します。開始後の失敗からfallback/再試行/rollback/準備更新はしません。対象差分なし・既存HEAD・Python-freeは現行どおり。元JSONと返された実行用checkは完全保持し、exit 0だけでなく段階固有の型/期待値を確認します。大容量preparation/PR checkはrepo外owned private directory 0700/file 0600へ保持し、全量store/表示・切断復元はしません。既存PRのdiff:nullやcreateのexistingは正常な非重複結果です。新規文章/設定が今回確定していない場合は、既存PRが途中で消えてもcreateしません。
+
+成功済みcommit/pushと停止段階・部分成功/成否不明を区別して報告します。各外部コマンド60秒と外側全体deadlineは別で、一律短い全体期限は付けません。捕捉可能な失敗では記録済み所有fileだけcleanupし、未知fileは削除しません。任意の強制中断でfinally/報告/cleanupが必ず完了する保証はなく、残る出力と実状態を照合します。
+
+再実行は[検証Skill](.pi/skills/verify-project/SKILL.md)から[集約と停止・部分成功の手順](.pi/skills/verify-project/references/execution-batching.md)を選びます。fresh Piの通常承認PR正常、commit後verify/push後PR check停止、ローカル2入口の直前照合（少なくとも一方no-confirm）、大容量/不正応答/中断代表を実状態と照合します。既存PR/existing競合・文章未確定create禁止・push終点PR APIなし・開始前Codemode不在fallbackは文書/限定例/既存回帰とし、全入口full pipelineや実GitHubを保証しません。TDDは採用せず、baselineと関係回帰・実操作で確認します。性能は同条件fresh contextで前後各3run、承認回答受領〜最終報告の全assistant（tool-only含む）回数/duration合計・外側tool時間・wall時間の全値/中央値を分けます。Codemode内部bashを二重加算せず、構造達成と時間効果/ばらつき/未実証を別に報告し、固定秒数閾値は設けません。Worker選定実行後、Rootが更新手順だけから別fresh正常/commit後停止/local直前照合を独立再実行します。
+
 ### ローカルdefaultとbranch方針
 
 `/skill:commit`はdefault相当上なら、Stage後のdiffの主目的から未存在の作業branchを1件計画し、通常の一括承認後のcommit時だけ作成します。作業branch上では現在branchを使い、明示新branch指定は維持します。不正名・衝突は停止し、既存branchへの自動切替・上書きはしません。対象diffなしではbranch・commitとも作らず終了し、初回commit前にも同じ方針を適用します。defaultへの直接commit指示ではGit変更前に停止し、branch作成を迂回しません。直接ローカルcommitには`/skill:commit-main`を案内します。
@@ -119,6 +129,7 @@ pytestでは`tmp_path`・共通fixture・`parametrize`・`monkeypatch`を使い�
 | push/PRのprepare・照合・状態遷移 | `test_remote_scripts.py`の変更した群＋同じ公開経路の正常/拒否代表。staged経路なら`test_pr_prepared_check_accepts_only_planned_push_and_git_mapped_refs[standard]`、push前verifyの区別なら`test_pr_verify_accepts_actual_commit_before_push_but_is_not_create_check`。existing-headや通常push/check・PR/checkの変更にはそれぞれの既存代表を選び、stagedだけで代用しない |
 | remoteの宛先・fetch mapping・drift・失敗処理 | 変更したガードの既存正常/拒否node IDを選ぶ。SHA固定・main/default保護・余分なrefs非送信、Git自身のmapping/実object、各hook/check前後の安全時点、失敗後の非retry/非rollbackなど異なる保証を同じ判定として削らない。実2MiB等が対象なら実物の限界を確認 |
 | 共通fixture/接続wrapper | 実callersを検索し、影響する`test_remote_scripts.py`、`test_commit_scripts.py`、`test_diff_review.py`、`test_stage_workflow.py`等へ広げる。共有状態や巨大fakeへ移さない。fixture未変更なら無関係な群へ一律に広げない |
+| 承認後Codemode集約 | `test_workflow_contract.py`の最小契約、runtime/diff関係回帰、prepared正常接続・verify非実行用とpush/PR失敗・timeout非retry代表。上記の実Agent手順で操作遵守/構造/実状態を別途照合し、文言assertやscript成功で代用しない |
 | workflow/文書契約・runtime/Stage/diff・表示extension | 関係する既存`test_workflow_contract.py`、`test_runtime_selection.py`、`test_stage_workflow.py`、`test_diff_review.py`、Nodeテスト等を選ぶ。文言/形式検査はAgent動作や実操作の証拠とは分ける |
 | 検証Skill/Map/手順 | 変更した参照・構文/assertと、その手順で選んだ機能の実操作・証拠・cleanup/readback。公開script接続は[staged → local bare push → fixture PR](.pi/skills/verify-project/references/staged-push-pr.md)。branch判断MapとRPC helperは別入口として保持し、script結果をAgent判断成功と呼ばない |
 

@@ -1,6 +1,12 @@
-# Feature Map: commit のbranch判断と公開script接続
+# Feature Map: commit の承認後集約・branch判断と公開script接続
 
 今回の変更に関係する入口だけを選ぶ。全OS／全refspec／LLM判断精度全般は対象外。[準備・起動・安全性・cleanup](../SKILL.md)に従う。runの成否や一時パスはこのMapに書かず、`docs/verification/<issue-number>/<run>/`の実行記録へ分離する。
+
+## 新commit承認後のCodemode集約と停止・部分成功
+
+Issue #36の初期対象は[集約の再実行手順](execution-batching.md)。標準経路・新commitの`commit-pr`通常承認をfresh Piで操作し、承認前mutationなし、承認後1 Codemode/中継LLM0、公開CLIの直列接続・結果判定、完全JSON/承認済み文章保持、実Git/bare/fixture PRの整合を確認する。commit後verify driftとpush後PR check driftは公開fixture入力で注入し、後続mutation0とcommit/push保持を照合する。ローカル2入口の直前default根拠再照合（少なくとも一方no-confirm）、無秘密大容量・不正応答・[実commit後の明示中断限定例](interruption.md)を代表で選ぶ。
+
+前後各3runの全assistant request（tool-only含む）/durationMs、外側tool/wall時間の全値・中央値を記録し、構造と時間効果を分ける。既存PR/existing競合、文章未確定create禁止、push終点PR APIなし、開始前Codemode不在fallbackは[文書・同じ固定例の限定実行・既存回帰](limited-branches.md)とし、fresh Pi全入口通過とは呼ばない。元CLI objectを入力にする通常Python例と、push終点/fallbackの制御traceの未通過runtime境界を区別する。実GitHub/全条件/任意中断finally必達は保証しない。証拠は`docs/verification/36/<一意なrun>/`、cleanup後readbackとRootの別fresh再実行は手順どおり。既存の下記入口を置き換えず、全Map/Maintainは要求しない。
 
 ## 公開script: staged → local bare push → fixture PR
 
