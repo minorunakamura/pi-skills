@@ -1,13 +1,15 @@
 ---
 name: verify-project
-description: Verify pi-skills local commit Bun branch planning, approval, default ambiguity and compatibility through fresh Pi, or legacy Python push and PR procedures in disposable environments.
+description: Verify pi-skills local commit Bun branch planning, approval, default ambiguity and required-Bun stops through fresh Pi, push via Bun and local bare, or legacy Python PR procedures in disposable environments.
 ---
 
 # pi-skills の対象機能を直接確認する
 
-今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。**commit／commit-mainの現行Bun入口・branch方針・通常承認／cancel／no-confirm・default実質問の未回答Stage0・Bunなしlocal互換は[共有local手順](references/local-bun.md)**を使う。起動前に関連source／手順／helperと使捨てdriverのdigestを固定し、run中は編集しない。観測者のPIDを同じ親shellで記録しwaitする。実Gitの元ref／予定branch／親／tree／raw本文／index／upstream、全tool操作・Git子processの通信0、小diff一括、質問前の不要payload削除を照合する。script単体・文言assert・Pi起動成功だけでAgent判断を保証しない。RPCの通常テキスト承認はTUI実証でない。
+今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。**commit／commit-mainの現行Bun入口・branch方針・通常承認／cancel／no-confirm・default実質問の未回答Stage0・Bun不足のGit変更前停止は[共有local手順](references/local-bun.md)**を使う。起動前に関連source／手順／helperと使捨てdriverのdigestを固定し、run中は編集しない。観測者のPIDを同じ親shellで記録しwaitする。実Gitの元ref／予定branch／親／tree／raw本文／index／upstream、全tool操作・Git子processの通信0、小diff一括、質問前の不要payload削除を照合する。script単体・文言assert・Pi起動成功だけでAgent判断を保証しない。RPCの通常テキスト承認はTUI実証でない。
 
-以下のPython／Codemode setupは**未移行push／PR入口と変更前baselineだけ**に使う。現行ローカル入口へ旧Python判定／生成例を適用しない。新commitのcommit-pr通常承認・停止／部分成功は[旧集約手順](references/execution-batching.md)、公開Python接続は[staged → push → fixture PR](references/staged-push-pr.md)。全runtime／refspec／OS・実GitHub・任意中断保証は対象外。製品修正・本repositoryのcommit・独自runner・installはしない。正式チェック・独立Review・Root受入は代替しない。
+**commit-pushは[push専用Bun／runtime停止手順](references/push-bun.md)**を使う。新commit／既存HEAD、remote／実URL／target／予定upstreamの一括確認、固定SHA送信・PR API0、先行成功と後続停止を実Gitで照合する。
+
+以下のPython／Codemode setupは**未移行PR入口と変更前baselineだけ**に使う。現行local2入口／pushへ旧Python判定／生成例を適用しない。新commitのcommit-pr通常承認・停止／部分成功は[旧集約手順](references/execution-batching.md)、公開Python接続は[staged → push → fixture PR](references/staged-push-pr.md)。全runtime／refspec／OS・実GitHub・任意中断保証は対象外。製品修正・本repositoryのcommit・独自runner・installはしない。正式チェック・独立Review・Root受入は代替しない。
 
 ## 公開scriptの接続を選んだ場合
 
@@ -15,7 +17,7 @@ description: Verify pi-skills local commit Bun branch planning, approval, defaul
 
 Piで利用する場合はrepositoryをcwdにproject trustを確認し、新セッションまたは`/reload`後、`/skill:verify-project 公開scriptのstagedからfixture PRまで`、またはこの実ファイルの明示読み込みで選ぶ。自動選択自体は保証しない。実行分担・対象テストは[CONTRIBUTING](../../../CONTRIBUTING.md)に従う。
 
-## 旧push／PR・baseline: 前提と分離
+## 旧PR・baseline: 前提と分離
 
 - repositoryルートをcwdにし、Git、Python 3.14、導入済みPiを確認する。Pi 1.4.0の公開RPCを使う。現在のhelperはmacOSの`/usr/bin/sandbox-exec`が必要。他OSやsandbox不成立なら無制限実行へ逃げず不足を報告する。
 - `skills/commit/tests/conftest.py`、`CONTRIBUTING.md`、変更後の`skills/commit/SKILL.md`・`skills/commit-main/SKILL.md`と共有手順を読む。既存fixtureと同様、専用一時repository・HOME・Git設定・架空identityを使う。read/bashはcwdやHOMEだけでは隔離されない。
@@ -67,7 +69,7 @@ export PI_CODING_AGENT_DIR="$AGENT_DIR" PI_OFFLINE=1 PI_SKIP_VERSION_CHECK=1 PI_
 
 上の実行ファイルがmise等のshimなら、先に導入済みの実体を指定する。ambient変数に別のcredentialがある場合も引き継がず、値を表示・記録しない。標準経路のPATHは確認したPython・Gitと必要なOS utilityに限定し、miseや利用者shell初期化を呼ばない。
 
-互換caseだけはPi起動前に次も実行する。既存OS utilityをsymlinkするだけでinstallしない。`tee`はraw本文照合にも必要なので省かない。途中の失敗でPATH／経路を切り替えない。
+未移行PRのPython-free caseだけはPi起動前に次も実行する。既存OS utilityをsymlinkするだけでinstallしない。`tee`はraw本文照合にも必要なので省かない。途中の失敗でPATH／経路を切り替えない。
 
 ```bash
 ln -s "$GIT" "$OWNED/bin/git"

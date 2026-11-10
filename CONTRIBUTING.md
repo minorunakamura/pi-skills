@@ -8,7 +8,7 @@
 | --- | --- |
 | commit | ローカルcommit。default相当上なら未存在作業branchを承認後に作成。Bun標準経路 |
 | commit-main | default相当の現在branchへ直接commit。branch作成・切替・通信なし。Bun標準経路 |
-| commit-push | 必要なcommitとpush。PR APIなし。未移行Python経路 |
+| commit-push | 必要なcommitと固定SHA push。PR APIなし。Bun標準経路 |
 | commit-pr | 必要なcommit・pushと通常PR（明示Draft優先）。同一repository内のみ。未移行Python経路 |
 
 到達点・branch方針は自由文で上書きしません。矛盾はStageを含むGit変更前に停止し、対応入口を案内します。固定文章・対象・言語・形式などの明確な指定を尊重し、引数全体を固定タイトルにしません。呼出し間で過去の承認は流用しません。
@@ -21,7 +21,7 @@
 
 [commit](skills/commit/SKILL.md)／[commit-main](skills/commit-main/SKILL.md)から[同梱Bun手順](skills/commit/references/local-bun.md)を全文読みます。Bun1.3.0以上の確認済み絶対実体で同梱TSを直接実行し、製品npm依存・build・Codemode・Pythonは不要です。probeもtrusted scripts cwd、空の同梱TOML／env-file=/dev/null／no-install、BUN_OPTIONS／NODE_OPTIONS除去、絶対entrypoint／対象repositoryを使います。tsconfig-overrideなし、対象欠落fallbackなし。通常Git設定・hooksは維持します。
 
-開始時Bun不在の場合だけ[Python不要のlocal互換手順](skills/commit/references/local-compatibility.md)を読みます。非対応version／起動異常／script開始後の失敗から切替・install・手書きmutationで迂回しません。互換は同じ利用者方針を手順で守りますが、標準CLIと同等の機械的ガードや速度を保証しません。
+Bun 1.3.0以上は必須です。不在／非対応version／起動異常／不正probe／確認不能では必要条件を案内し、Stageを含むGit変更前に停止します。no-confirmでも省略しません。開始前後を問わず手書きBash／旧Python／互換へのfallback・自動install・PATH／利用者設定変更で迂回しません。新launcherやruntime管理は追加しません。
 
 公開CLIはinspect→materials→plan→execute。必要な固定材料まとめ読取／release／cleanupだけを補います。defaultは全local remote HEADのsymbolic target／解決OIDと対応remote／順序付きfetch設定から**宛先→送信元**へ逆mappingします。一意default優先、真に情報なしの場合だけmain／master fallback。競合・broken・orphan・non-symbolic・不明mapping・観測不能を情報なしにせず、候補／理由を表示して実質問し、未回答はStage0。commit-mainは回答後も作業branchなら拒否、commitは回答に応じて作業branchを計画します。通信・自動補修なし、Stage前／操作直前の根拠driftを拒否します。ローカル情報は古い可能性があり最新defaultを保証しません。
 
@@ -29,9 +29,17 @@ materialsで全Staged diffをGitleaks検査します。未導入だけunavailabl
 
 完成文章は承認前にrepo外private directory0700／file0600へ排他的保持。owner／非symlink／regular file／実体／bytes digest・repo／runを照合し、修正時は旧版削除成功後だけ新参照を返します。executeは参照だけで文章／設定を再送せず、途中LLM判断／処理コード生成なし。通常hooks、raw本文（末尾LFなし入力への1 LF追加だけ許容）／全親／tree／branch ref／index／他refsを事後照合します。失敗／drift／成否不明で後続停止し、Git成功応答後の確認失敗・cleanup失敗を区別します。所有実体だけcleanupし未知sentinel／他実行は消しません。完全atomic性・任意強制中断時のcleanup／報告必達は保証しません。
 
-### push／PR入口は未移行
+### push入口のBun標準経路
 
-commit-push／commit-prは[旧共有workflow](skills/commit/references/workflow.md)・[旧互換経路](skills/commit/references/compatibility.md)を維持します。Python3.14以上の開始時確認実体と-E -Sで同梱scriptを起動し、開始時Python不足の場合だけ既存Python-free経路を使います。新TSへ旧CLI／schema互換adapterは作りません。Python製品／tests／fixture／開発設定・CIと配布物は、この2入口に必要なため今回残しています。pack全体からPythonを除外しません。
+[commit-push](skills/commit-push/SKILL.md)から[push用Bun手順](skills/commit/references/push-bun.md)を全文読みます。起動はローカル入口と同じ保護形。新commit／既存HEADを区別し、事前push準備・確定文章／操作のprivate保持・通常assistant一括確認後、参照だけexecuteで必要branch／commit／固定SHA push／送信readback／予定upstream／cleanupまで進みます。既存HEADはmessage／commit不要、同SHA再pushなし、HEADも対象diffもなければ通信なし。PR準備／gh APIは0です。
+
+remote／実push URL／target／upstreamを確定表示します。branchは通信したremote defaultとmainで判断し、local2入口のdefault質問は転用しません。通常main／remote default宛てを拒否し、明示初回mainだけ全remote空（tag等もなし）かつ送信元／予定／宛先mainで許可。通常hooks有効、余分refs／tag／submodule非送信、必要object不足は非fetch。drift／異常／成否不明は後続停止し、先行branch／commit／push成功、事後照合／upstream／cleanup失敗を区別します。Bun必須条件とGit変更前停止はローカル2入口と共通であり、開始後の失敗でも別経路へ切り替えません。
+
+### 移行段階と未移行PR
+
+#47でlocal2入口／pushをBun必須にし、専用互換reference／例を廃止します。#48でPR本体とPR-onlyをBunへ移行・必須化し、4入口の契約が揃います。#49でその検証成立後に残存Python資材／開発設定／正式checks／配布を整理します。PR移行・Python一括撤去を#47の完了とは扱いません。
+
+commit-prは[旧共有workflow](skills/commit/references/workflow.md)・[旧互換経路](skills/commit/references/compatibility.md)を維持します。Python3.14以上の開始時確認実体と-E -Sで同梱scriptを起動し、開始時Python不足の場合だけ既存Python-free経路を使います。新TSへ旧CLI／schema互換adapterは作りません。Python製品／tests／fixture／開発設定・CIと配布物は、この入口に必要なため今回残しています。pack全体からPythonを除外しません。
 
 旧経路の新commit承認後Codemode集約は[旧実行集約](skills/commit/references/execution-batching.md)。pushはPR準備なし、PRはcommit前に必要準備を完了してからcommit→verify→push→PRへ進みます。既存HEAD／PR-only、既存PR非重複／非編集、通常main/default直接push禁止と明示初回main例外は変更しません。開始後fallback／retry／rollbackなし。旧性能3run条件を今回ローカル2入口へ流用しません。
 
@@ -39,7 +47,7 @@ commit-push／commit-prは[旧共有workflow](skills/commit/references/workflow.
 
 両ローカル入口とも共有CLIで根拠を保持・照合します。commitはinspectにmode=commitを指定し、default相当なら材料の意味から未存在branchをplan、承認後execute時だけ作成します。作業branch上は現在branchを基本とし、明示新branchも維持します。不正名／衝突は拒否し、既存branchを切替・上書きせず、元default ref保持／upstream非継承を確認します。commit-mainはmode=commit-mainで直接commitします。一意なdevelopならmainは作業branchであり、mainという名前だけで直接commitしません。defaultへ自動切替せず未commit変更を持ち運びません。
 
-直接確認は[検証Skill](.pi/skills/verify-project/SKILL.md)から[ローカルBun手順](.pi/skills/verify-project/references/local-bun.md)を選びます。fresh Piの通常承認／cancel／no-confirm／default実質問・未回答Stage0／Bunなしlocal互換と実Gitを照合します。push／PR入口は[旧集約手順](.pi/skills/verify-project/references/execution-batching.md)／[公開Python接続](.pi/skills/verify-project/references/staged-push-pr.md)を使います。共有RPC／metric helperはNode24で、legacy Codemodeだけ明示optionを付けます。model/thinkingは通常解決を記録し比較条件と照合、認証の独自read/copy/logは禁止。RPC通常テキスト承認はask_user_questionのTUI実証でありません。
+直接確認は[検証Skill](.pi/skills/verify-project/SKILL.md)から[ローカルBun手順](.pi/skills/verify-project/references/local-bun.md)を選びます。fresh Piの通常承認／cancel／no-confirm／default実質問・未回答Stage0／Bun不足／非対応／確認不能のGit変更前停止と実Gitを照合します。pushは[専用Bun検証手順](.pi/skills/verify-project/references/push-bun.md)、PR入口は[旧集約手順](.pi/skills/verify-project/references/execution-batching.md)／[公開Python接続](.pi/skills/verify-project/references/staged-push-pr.md)を使います。共有RPC／metric helperはNode24で、legacy Codemodeだけ明示optionを付けます。model/thinkingは通常解決を記録し比較条件と照合、認証の独自read/copy/logは禁止。RPC通常テキスト承認はask_user_questionのTUI実証でありません。
 
 production変更前のread-only archiveで旧commitと新commitを同じ小diff／history／明示文章／通常承認で1組比較します。provider／model／thinkingは通常解決を照合し、無断変更しません。承認前／後／全体時間、利用者待機、全assistant request、生成codeと固定呼出し／payload、取得可能usage・失敗・unknownを分け、nested toolを二重加算しません。構造改善と時間効果を分け、単発速度証明や全4入口完成と呼びません。
 
@@ -69,7 +77,7 @@ ln -s "$PWD/extensions/commit-status.js" ~/.pi/agent/extensions/commit-status.js
 
 ## 開発時の検証
 
-開発にはmiseとGitを使います。Node24・Bun1.3.0・pnpm、および未移行2入口に必要なPython3.14系・uv・Ruff・tyを`mise.toml`で固定します。pytest 9系は開発用依存として`pyproject.toml`と`uv.lock`で管理し、uvが`.venv`に導入します。miseを有効化したshellで次を実行してください。
+開発にはmiseとGitを使います。Node24・Bun1.3.0・pnpm、および未移行PR入口に必要なPython3.14系・uv・Ruff・tyを`mise.toml`で固定します。pytest 9系は開発用依存として`pyproject.toml`と`uv.lock`で管理し、uvが`.venv`に導入します。miseを有効化したshellで次を実行してください。
 
 ```bash
 mise install
@@ -81,7 +89,7 @@ pnpm format:check
 pnpm test
 ```
 
-`pnpm lint`はoxlint + oxlint-tsgolintのtype-aware lint（--type-aware --deny-warnings）と既存PythonのRuff。`pnpm typecheck`はtsc --noEmitとty、formatはBiome専用（linter/assist無効）とPythonのRuff、testはNode24標準node:test／node:assertのTS直接実行・既存JS tests・pytestです。製品TS・tests・fixture・隠し`.pi/skills/verify-project/scripts` helperを収集し、最寄りtsconfigを整合します。warningはsource修正で0にし、quiet／一括disable／除外で隠しません。devDependenciesとlockはexact version固定、追加製品npm依存はありません。Node/Bun用build成果物は作りません。Python設定／uv.lockの撤去は残2入口の移行後です。
+`pnpm lint`はoxlint + oxlint-tsgolintのtype-aware lint（--type-aware --deny-warnings）と既存PythonのRuff。`pnpm typecheck`はtsc --noEmitとty、formatはBiome専用（linter/assist無効）とPythonのRuff、testはNode24標準node:test／node:assertのTS直接実行・既存JS tests・pytestです。製品TS・tests・fixture・隠し`.pi/skills/verify-project/scripts` helperを収集し、最寄りtsconfigを整合します。warningはsource修正で0にし、quiet／一括disable／除外で隠しません。devDependenciesとlockはexact version固定、追加製品npm依存はありません。Node/Bun用build成果物は作りません。Python設定／uv.lockの撤去はPR入口の移行後です。
 
 pytestでは`tmp_path`・共通fixture・`parametrize`・`monkeypatch`を使い、一時Gitリポジトリとbare remoteでstatus解析、部分Stage、Gitleaks検査、状態変化時のcommit/push拒否、main保護と初回登録の例外、PRの本文・Draft・重複防止、認証・通信エラーとtimeout時の再試行禁止などを検証します。Gitleaks・gh・SSHはテスト用の実行ファイルで再現するため、実行時には不要です。実remoteやGitHubには接続しません。回帰テストはGitとPOSIX環境を対象とします。表示extensionのNode.jsテストはPi提供moduleの境界だけをstubにし、色の割当て、部分Stage・rename・競合、制御文字のescape、不正JSONの拒否、TUI以外の表示を確認します。Pi本体の追加installや外部接続は不要です。Pi提供moduleはoptionalなpeer dependencyとして宣言し、`pnpm-workspace.yaml`でpeerの自動installを無効化して、開発時にもSDKを二重導入しません。
 

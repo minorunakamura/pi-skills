@@ -1,6 +1,8 @@
-# 未移行のcommit-push / commit-pr 共通手順
+> 現行commit-pushはBun 1.3.0以上必須の[push用Bun手順](push-bun.md)を使う。不足／非対応／確認不能はGit変更前に停止し、旧経路へ切り替えない。この旧Python資材は未移行commit-prと変更前baseline用。以下のpush単独例を現行入口へ振り戻さない。
 
-commit／commit-mainは[共有Bun手順](local-bun.md)へ移行済み。この文書のPython／Codemode経路はcommit-push／commit-pr用として保持する。以下のローカル入口の比較説明・commit到達点例は旧経路の参考であり、現行の両ローカル入口から呼ばない。
+# 未移行commit-pr 共通手順
+
+commit／commit-mainは[共有Bun手順](local-bun.md)へ移行済み。この文書のPython／Codemode経路はcommit-pr用として保持する。以下のローカル入口の比較説明・commit到達点例は旧経路の参考であり、現行の両ローカル入口から呼ばない。
 
 入口で確定した到達点（commit / push / PR）とbranch方針を保持して全文を読む。**到達点未指定なら停止**し、PRへフォールバックしない。**branch方針未確定なら停止**し、同じcommit到達点だけで入口を推測して直接commitしない。`/skill:commit`と`/skill:commit-main`はcommit、`/skill:commit-push`はpush、`/skill:commit-pr`はcommit → push → 通常PRまで。branch方針はcommitがdefault相当から作業branchを計画、commit-mainがdefault相当の現在branchへ直接commit、commit-push／commit-prが従来のpush／PR用branch計画。自由文で到達点・branch方針を上書きしない。矛盾はGit変更前に止め、対応Skillを案内する。同じ到達点の再指定は矛盾ではない。
 

@@ -38,8 +38,27 @@ import {
 } from "./private-files.ts";
 import { repository } from "./local-git.ts";
 
+import {
+  assertSafeTrackingRef,
+  destination,
+  pushContext,
+  pushHistory,
+  pushOptions,
+  remoteState,
+  sameContext,
+  sameRemote,
+  upstreamMatches,
+  verifyPushedLocal,
+  type Destination,
+  type PushContext,
+  type PushOptions,
+  type RemoteState,
+} from "./push-git.ts";
+
 type BranchPolicy = {
-  mode: "commit" | "commit-main";
+  mode: "commit" | "commit-main" | "push";
+  push: PushOptions | null;
+  context: PushContext | null;
   requestedBranch: string | null;
 };
 type Inspection = BranchPolicy & {
@@ -51,6 +70,8 @@ type Materials = BranchPolicy & {
   phase: "materials";
   state: Snapshot;
   scope: Scope;
+  commitNeeded: boolean;
+  pushRemote: RemoteState | null;
   tree: string;
   entries: string;
   diffDigest: string;
@@ -60,13 +81,22 @@ type Materials = BranchPolicy & {
 };
 type Plan = Omit<Materials, "phase"> & {
   phase: "plan";
-  message: string;
+  message: string | null;
+  destination: Destination | null;
   newBranch: string | null;
 };
 type HeldState = Inspection | Materials | Plan;
 let owned: Reference | undefined;
 let operationMayHaveSucceeded = false;
 let commitSucceeded = false;
+let commitVerified = false;
+let pushAttempted = false;
+let pushSucceeded = false;
+let pushVerified = false;
+let upstreamConfigured = false;
+let remoteObserved: string | null | undefined;
+const execution: { destination: Destination | null; verifiedCommit?: string } =
+  { destination: null };
 let branchMayHaveChanged = false;
 let branchCreated = false;
 let observed: { branch: string | null; head: string | null } | undefined;
@@ -89,6 +119,7 @@ function validateNewBranch(
   repo: string,
   state: Snapshot,
   value: unknown,
+  protectedBranches?: (string | null)[],
 ): asserts value is string {
   requireThat(
     typeof value === "string" &&
@@ -134,9 +165,12 @@ function validateNewBranch(
   );
   const classification = state.default.classification;
   requireThat(
-    !(classification.kind === "unique"
-      ? classification.candidates.includes(value)
-      : classification.kind === "absent" && ["main", "master"].includes(value)),
+    !(protectedBranches
+      ? protectedBranches.includes(value)
+      : classification.kind === "unique"
+        ? classification.candidates.includes(value)
+        : classification.kind === "absent" &&
+          ["main", "master"].includes(value)),
     "new_branch_is_default_use_commit_main",
   );
   const config = Buffer.from(state.branchConfig, "base64")
@@ -272,6 +306,16 @@ function materialView(ref: Reference, data: Materials) {
     },
     tree: data.tree,
     scanner: data.scanner,
+    commitNeeded: data.commitNeeded,
+    push:
+      data.pushRemote && data.context
+        ? {
+            remote: data.push?.remote,
+            url: data.context.url,
+            defaultBranch: data.pushRemote.defaultBranch,
+            emptyRemote: data.pushRemote.empty,
+          }
+        : null,
     diffDigest: data.diffDigest,
     diffBytes: diff.length,
     historyBytes: history.length,
@@ -315,22 +359,43 @@ function main() {
   if (operation === "inspect") {
     requireThat(
       Object.keys(input).every((key) =>
-        ["scope", "mode", "newBranch"].includes(key),
+        ["scope", "mode", "newBranch", "push"].includes(key),
       ),
       "invalid_input",
     );
     const selected = scope(input.scope, repo);
     const state = snapshot(repo);
     const mode = input.mode ?? "commit-main";
-    requireThat(mode === "commit" || mode === "commit-main", "invalid_mode");
     requireThat(
-      mode === "commit" || input.newBranch === undefined,
+      mode === "commit" || mode === "commit-main" || mode === "push",
+      "invalid_mode",
+    );
+    requireThat(mode === "push" || input.push === undefined, "invalid_input");
+    const hasContent =
+      state.head !== null ||
+      state.changes.some(
+        (change) =>
+          isStaged(change) ||
+          (selected.kind !== "staged" &&
+            inScope(Buffer.from(change.pathBytes, "base64"), selected)),
+      );
+    const push = mode === "push" && hasContent ? pushOptions(input.push) : null;
+    const context = push ? pushContext(repo, push.remote) : null;
+    requireThat(
+      mode !== "commit-main" || input.newBranch === undefined,
       "branch_policy_conflict",
     );
     if (input.newBranch !== undefined)
-      validateNewBranch(repo, state, input.newBranch);
+      validateNewBranch(
+        repo,
+        state,
+        input.newBranch,
+        mode === "push" ? ["main"] : undefined,
+      );
     const policy: BranchPolicy = {
       mode,
+      push,
+      context,
       requestedBranch: (input.newBranch as string | undefined) ?? null,
     };
     owned = createPrivate(repo);
@@ -348,7 +413,11 @@ function main() {
       changes: state.changes,
       default: state.default.classification,
       evidence: state.default.evidence,
-      questions: questions(state, selected),
+      questions: {
+        ...questions(state, selected),
+        default:
+          mode !== "push" && state.default.classification.kind === "ambiguous",
+      },
       localInformationMayBeStale: true,
     };
   }
@@ -425,7 +494,7 @@ function main() {
     );
     const classification = data.state.default.classification;
     let defaultAnswer: string | null = null;
-    if (classification.kind === "ambiguous") {
+    if (data.mode !== "push" && classification.kind === "ambiguous") {
       requireThat(
         typeof input.defaultBranch === "string" &&
           input.defaultBranch.length > 0 &&
@@ -449,7 +518,12 @@ function main() {
       "current_branch_is_not_default",
     );
     if (data.requestedBranch !== null) {
-      validateNewBranch(repo, data.state, data.requestedBranch);
+      validateNewBranch(
+        repo,
+        data.state,
+        data.requestedBranch,
+        data.mode === "push" ? ["main"] : undefined,
+      );
       requireThat(
         data.requestedBranch !== defaultAnswer,
         "new_branch_is_default_use_commit_main",
@@ -504,24 +578,69 @@ function main() {
         );
     }
     const diff = stagedDiff(repo);
-    if (!diff.length)
+    if (!diff.length && (data.mode !== "push" || !data.state.head))
       return { phase: "empty", commitCreated: false, cleanup: cleanup(ref) };
     const tree = line(git(repo, ["write-tree"]));
     const after = snapshot(repo);
     unchangedPolicy(data.state, after);
-    const scanner = scan(repo, diff);
+    const scanner = diff.length ? scan(repo, diff) : "unavailable";
     sameSnapshot(repo, after);
     requireThat(digest(stagedDiff(repo)) === digest(diff), "repository_drift");
-    const history = after.head
-      ? git(repo, ["--no-pager", "log", "-20", "--format=%s%n%b%n---"])
-      : Buffer.alloc(0);
+    let pushRemote: RemoteState | null = null;
+    if (data.push && data.context) {
+      sameContext(repo, data.push.remote, data.context);
+      pushRemote = remoteState(repo, data.context.url);
+      if (data.push.initialMain)
+        requireThat(
+          pushRemote.empty &&
+            after.branch === "main" &&
+            (data.push.target === null || data.push.target === "main") &&
+            data.requestedBranch === null,
+          "initial_main_requires_empty_remote",
+        );
+    }
+    const createBranch =
+      data.mode === "push"
+        ? !data.push?.initialMain &&
+          (after.branch === "main" ||
+            after.branch === pushRemote?.defaultBranch ||
+            data.requestedBranch !== null)
+        : data.mode === "commit" &&
+          (currentIsDefault || data.requestedBranch !== null);
+    const preliminaryTarget =
+      data.push?.target ??
+      data.requestedBranch ??
+      (createBranch ? null : after.branch);
+    if (pushRemote && data.push && !data.push.initialMain && preliminaryTarget)
+      requireThat(
+        preliminaryTarget !== "main" &&
+          preliminaryTarget !== pushRemote.defaultBranch,
+        "protected_push_target",
+      );
+    if (pushRemote)
+      git(repo, [
+        "rev-list",
+        "--objects",
+        "--missing=error",
+        tree,
+        ...(after.head ? [after.head] : []),
+        "--",
+      ]);
+    const history = pushRemote
+      ? pushHistory(repo, after, pushRemote, preliminaryTarget)
+      : after.head
+        ? git(repo, ["--no-pager", "log", "-20", "--format=%s%n%b%n---"])
+        : Buffer.alloc(0);
+    sameSnapshot(repo, after);
     const materials: Materials = {
       phase: "materials",
       mode: data.mode,
+      push: data.push,
+      context: data.context,
       requestedBranch: data.requestedBranch,
-      createBranch:
-        data.mode === "commit" &&
-        (currentIsDefault || data.requestedBranch !== null),
+      createBranch,
+      commitNeeded: diff.length > 0,
+      pushRemote,
       state: after,
       scope: data.scope,
       tree,
@@ -544,11 +663,15 @@ function main() {
         ),
       "invalid_plan_input",
     );
+    const message =
+      input.message ?? (data.phase === "plan" ? data.message : null);
     requireThat(
-      typeof input.message === "string" &&
-        input.message.trim().length > 0 &&
-        !input.message.includes("\0") &&
-        Buffer.from(input.message).toString() === input.message,
+      !data.commitNeeded
+        ? input.message === undefined
+        : typeof message === "string" &&
+            message.trim().length > 0 &&
+            !message.includes("\0") &&
+            Buffer.from(message).toString() === message,
       "invalid_message",
     );
     sameSnapshot(repo, data.state);
@@ -565,7 +688,14 @@ function main() {
         newBranch !== null && newBranch !== undefined,
         "new_branch_required",
       );
-      validateNewBranch(repo, data.state, newBranch);
+      validateNewBranch(
+        repo,
+        data.state,
+        newBranch,
+        data.mode === "push"
+          ? ["main", data.pushRemote?.defaultBranch ?? null]
+          : undefined,
+      );
       requireThat(
         newBranch !== data.defaultAnswer,
         "new_branch_is_default_use_commit_main",
@@ -579,11 +709,49 @@ function main() {
         "branch_policy_conflict",
       );
     } else requireThat(newBranch === null, "branch_policy_conflict");
+    const preparedDestination =
+      data.push && data.context && data.pushRemote
+        ? destination(
+            repo,
+            data.push,
+            data.context,
+            data.pushRemote,
+            data.state,
+            (newBranch as string) ?? data.state.branch ?? "",
+          )
+        : null;
+    if (preparedDestination) {
+      sameContext(repo, preparedDestination.remote, preparedDestination);
+      sameRemote(
+        repo,
+        preparedDestination,
+        preparedDestination.observed,
+        preparedDestination.target,
+      );
+      sameSnapshot(repo, data.state);
+      if (
+        !data.commitNeeded &&
+        newBranch === null &&
+        preparedDestination.observed.refs[
+          `refs/heads/${preparedDestination.target}`
+        ] === data.state.head &&
+        (!preparedDestination.setUpstream ||
+          upstreamMatches(data.state, preparedDestination))
+      )
+        return {
+          phase: "already_pushed",
+          commit: data.state.head,
+          commitCreated: false,
+          pushSent: false,
+          cleanup: cleanup(ref),
+        };
+    }
     release(ref);
     const plan: Plan = {
       ...data,
       phase: "plan",
-      message: input.message,
+      message: message as string | null,
+      destination: preparedDestination,
       newBranch: newBranch as string | null,
     };
     transition(ref, current.name, plan);
@@ -600,14 +768,47 @@ function main() {
       scanner: plan.scanner,
       default: plan.state.default.classification,
       defaultAnswer: plan.defaultAnswer,
+      commitNeeded: plan.commitNeeded,
+      push: plan.destination
+        ? {
+            remote: plan.destination.remote,
+            url: plan.destination.url,
+            target: plan.destination.target,
+            sourceBranch: plan.destination.branch,
+            defaultBranch: plan.destination.observed.defaultBranch,
+            remoteHead:
+              plan.destination.observed.refs[
+                `refs/heads/${plan.destination.target}`
+              ] ?? null,
+            initialMain: plan.destination.initialMain,
+            setUpstream: plan.destination.setUpstream,
+            upstream: plan.destination.setUpstream
+              ? {
+                  remote: plan.destination.remote,
+                  merge: `refs/heads/${plan.destination.target}`,
+                }
+              : "preserve existing settings",
+          }
+        : null,
       operations: [
         ...(plan.newBranch
           ? [
               "create planned branch without tracking",
-              "commit on planned branch",
+              ...(plan.commitNeeded ? ["commit on planned branch"] : []),
             ]
-          : ["commit directly on current branch"]),
-        "verify commit",
+          : plan.commitNeeded
+            ? ["commit directly on current branch"]
+            : []),
+        ...(plan.commitNeeded ? ["verify commit"] : []),
+        ...(plan.destination
+          ? [
+              "push fixed SHA if needed",
+              "verify remote SHA",
+              ...(plan.destination.setUpstream
+                ? ["configure planned upstream"]
+                : []),
+            ]
+          : []),
         "cleanup",
       ],
       payloadRemoved: true,
@@ -628,9 +829,31 @@ function main() {
       "repository_drift",
     );
     sameSnapshot(repo, data.state);
+    execution.destination = data.destination;
+    const checkDestination = () => {
+      if (data.destination) {
+        sameContext(repo, data.destination.remote, data.destination);
+        assertSafeTrackingRef(repo, data.destination.tracking);
+        sameRemote(
+          repo,
+          data.destination,
+          data.destination.observed,
+          data.destination.target,
+        );
+      }
+    };
+    checkDestination();
+    sameSnapshot(repo, data.state);
     let expectedState = data.state;
     if (data.newBranch !== null) {
-      validateNewBranch(repo, data.state, data.newBranch);
+      validateNewBranch(
+        repo,
+        data.state,
+        data.newBranch,
+        data.mode === "push"
+          ? ["main", data.pushRemote?.defaultBranch ?? null]
+          : undefined,
+      );
       branchMayHaveChanged = true;
       operationMayHaveSucceeded = true;
       const switched = command(repo, "git", [
@@ -655,73 +878,163 @@ function main() {
       );
       sameSnapshot(repo, expectedState);
     }
-    operationMayHaveSucceeded = true;
-    const result = command(
-      repo,
-      "git",
-      ["commit", "--cleanup=verbatim", "--file=-"],
-      Buffer.from(data.message),
-    );
-    requireThat(!result.error && result.status === 0, "commit_failed");
-    commitSucceeded = true;
-    const after = snapshot(repo);
-    observed = { branch: after.branch, head: after.head };
-    requireThat(after.head, "commit_verification_failed");
-    const raw = git(repo, ["cat-file", "commit", after.head]);
-    const separator = raw.indexOf("\n\n");
-    requireThat(separator >= 0, "commit_verification_failed");
-    const headers = raw.subarray(0, separator).toString().split("\n");
-    const parents = headers
-      .filter((header) => header.startsWith("parent "))
-      .map((header) => header.slice(7));
-    const tree = headers.find((header) => header.startsWith("tree "))?.slice(5);
-    const message = raw.subarray(separator + 2);
-    const expected = Buffer.from(data.message);
-    const messageMatches =
-      message.equals(expected) ||
-      (!data.message.endsWith("\n") &&
-        message.equals(Buffer.concat([expected, Buffer.from("\n")])));
-    const otherRefs = (state: Snapshot) =>
-      state.refs
-        .split("\n")
-        .filter((ref) => ref && !ref.startsWith(`${state.branchRef} `))
-        .join("\n");
-    requireThat(
-      after.branchRef === expectedState.branchRef &&
-        after.gitDir === data.state.gitDir &&
-        after.branchConfig === expectedState.branchConfig &&
-        otherRefs(after) === otherRefs(expectedState) &&
-        after.refsDiagnostics === data.state.refsDiagnostics &&
-        JSON.stringify(after.default) ===
-          JSON.stringify(expectedState.default) &&
-        line(git(repo, ["rev-parse", "--verify", after.branchRef ?? ""])) ===
-          after.head &&
-        tree === data.tree &&
-        JSON.stringify(parents) ===
-          JSON.stringify(data.state.head ? [data.state.head] : []) &&
-        messageMatches &&
-        indexEntries(repo) === data.entries &&
-        line(git(repo, ["write-tree"])) === data.tree,
-      "commit_verification_failed",
-    );
-    return {
-      phase: "committed",
-      commit: after.head,
-      branch: after.branch,
-      tree,
-      parents,
-      messageDigest: digest(message),
-      scanner: data.scanner,
-      branchCreated,
-      cleanup: cleanup(ref),
-    };
+    let committed: Record<string, unknown> = {};
+    if (data.commitNeeded) {
+      checkDestination();
+      sameSnapshot(repo, expectedState);
+      operationMayHaveSucceeded = true;
+      const result = command(
+        repo,
+        "git",
+        ["commit", "--cleanup=verbatim", "--file=-"],
+        Buffer.from(data.message ?? ""),
+      );
+      requireThat(!result.error && result.status === 0, "commit_failed");
+      commitSucceeded = true;
+      const after = snapshot(repo);
+      observed = { branch: after.branch, head: after.head };
+      requireThat(after.head, "commit_verification_failed");
+      const raw = git(repo, ["cat-file", "commit", after.head]);
+      const separator = raw.indexOf("\n\n");
+      requireThat(separator >= 0, "commit_verification_failed");
+      const headers = raw.subarray(0, separator).toString().split("\n");
+      const parents = headers
+        .filter((header) => header.startsWith("parent "))
+        .map((header) => header.slice(7));
+      const tree = headers
+        .find((header) => header.startsWith("tree "))
+        ?.slice(5);
+      const message = raw.subarray(separator + 2);
+      const expected = Buffer.from(data.message ?? "");
+      const messageMatches =
+        message.equals(expected) ||
+        (!data.message?.endsWith("\n") &&
+          message.equals(Buffer.concat([expected, Buffer.from("\n")])));
+      const otherRefs = (state: Snapshot) =>
+        state.refs
+          .split("\n")
+          .filter((ref) => ref && !ref.startsWith(`${state.branchRef} `))
+          .join("\n");
+      requireThat(
+        after.branchRef === expectedState.branchRef &&
+          after.gitDir === data.state.gitDir &&
+          after.branchConfig === expectedState.branchConfig &&
+          otherRefs(after) === otherRefs(expectedState) &&
+          after.refsDiagnostics === data.state.refsDiagnostics &&
+          JSON.stringify(after.default) ===
+            JSON.stringify(expectedState.default) &&
+          line(git(repo, ["rev-parse", "--verify", after.branchRef ?? ""])) ===
+            after.head &&
+          tree === data.tree &&
+          JSON.stringify(parents) ===
+            JSON.stringify(data.state.head ? [data.state.head] : []) &&
+          messageMatches &&
+          indexEntries(repo) === data.entries &&
+          line(git(repo, ["write-tree"])) === data.tree,
+        "commit_verification_failed",
+      );
+      commitVerified = true;
+      execution.verifiedCommit = after.head;
+      expectedState = after;
+      committed = {
+        phase: "committed",
+        commit: after.head,
+        branch: after.branch,
+        tree,
+        parents,
+        messageDigest: digest(message),
+        scanner: data.scanner,
+        branchCreated,
+      };
+    }
+    if (data.destination) {
+      checkDestination();
+      sameSnapshot(repo, expectedState);
+      const planned = data.destination;
+      const sha = expectedState.head;
+      requireThat(sha, "missing_push_head");
+      const alreadyPushed =
+        planned.observed.refs[`refs/heads/${planned.target}`] === sha;
+      if (!alreadyPushed) {
+        operationMayHaveSucceeded = true;
+        pushAttempted = true;
+        const pushed = command(repo, "git", [
+          "-c",
+          "push.followTags=false",
+          "-c",
+          "push.autoSetupRemote=false",
+          "-c",
+          `remote.${planned.remote}.mirror=false`,
+          "push",
+          "--porcelain",
+          "--recurse-submodules=no",
+          "--",
+          planned.remote,
+          `${sha}:refs/heads/${planned.target}`,
+        ]);
+        requireThat(
+          !pushed.error && pushed.status === 0,
+          pushed.error ? "push_result_unknown" : "push_failed",
+        );
+        pushSucceeded = true;
+      }
+      remoteObserved =
+        remoteState(repo, planned.url).refs[`refs/heads/${planned.target}`] ??
+        null;
+      requireThat(remoteObserved === sha, "push_verification_failed");
+      pushVerified = true;
+      sameContext(repo, planned.remote, planned);
+      if (alreadyPushed) sameSnapshot(repo, expectedState);
+      else verifyPushedLocal(repo, expectedState, planned, sha, false);
+      if (planned.setUpstream && !upstreamMatches(expectedState, planned)) {
+        const prefix = `branch.${planned.branch}`;
+        for (const [key, value] of [
+          ["remote", planned.remote],
+          ["merge", `refs/heads/${planned.target}`],
+        ]) {
+          const configured = command(repo, "git", [
+            "config",
+            "--local",
+            "--replace-all",
+            `${prefix}.${key}`,
+            value,
+          ]);
+          requireThat(
+            !configured.error && configured.status === 0,
+            "post_push_upstream_update_failed",
+          );
+        }
+        upstreamConfigured = true;
+        verifyPushedLocal(
+          repo,
+          expectedState,
+          { ...planned, tracking: alreadyPushed ? null : planned.tracking },
+          sha,
+          true,
+        );
+      }
+      return {
+        ...committed,
+        phase: alreadyPushed ? "already_pushed" : "pushed",
+        commit: sha,
+        branch: expectedState.branch,
+        commitCreated: data.commitNeeded,
+        pushSent: pushAttempted,
+        pushSucceeded,
+        pushVerified,
+        upstreamConfigured,
+        branchCreated,
+        cleanup: cleanup(ref),
+      };
+    }
+    return { ...committed, cleanup: cleanup(ref) };
   }
   throw new WorkflowError("unknown_operation");
 }
 try {
   console.log(JSON.stringify(main()));
 } catch (error) {
-  if (operationMayHaveSucceeded && activeRepository && !observed) {
+  if (operationMayHaveSucceeded && activeRepository) {
     try {
       const state = snapshot(activeRepository);
       observed = { branch: state.branch, head: state.head };
@@ -729,9 +1042,35 @@ try {
       /* Observation failure is not proof that the commit was not created. */
     }
   }
+  if (
+    pushAttempted &&
+    execution.destination &&
+    activeRepository &&
+    remoteObserved === undefined
+  ) {
+    try {
+      remoteObserved =
+        remoteState(activeRepository, execution.destination.url).refs[
+          `refs/heads/${execution.destination.target}`
+        ] ?? null;
+    } catch {
+      /* A failed readback does not prove no push occurred. */
+    }
+  }
   const code = error instanceof WorkflowError ? error.code : "workflow_failed";
   const result = {
-    error: commitSucceeded ? "commit_verification_failed" : code,
+    error:
+      commitSucceeded && !commitVerified ? "commit_verification_failed" : code,
+    commitVerified,
+    ...(execution.verifiedCommit
+      ? { verifiedCommit: execution.verifiedCommit }
+      : {}),
+    pushAttempted,
+    pushSucceeded,
+    pushVerified,
+    upstreamConfigured,
+    remoteMayHaveChanged: pushAttempted,
+    ...(remoteObserved !== undefined ? { remoteObserved } : {}),
     operationMayHaveSucceeded,
     commitSucceeded,
     branchMayHaveChanged,

@@ -112,7 +112,13 @@ def test_four_explicit_entries_pin_endpoint_and_branch_policy_and_load_shared_wo
     assert description.isascii()
     assert "disable-model-invocation: true" in text
     assert f"到達点は **{endpoint}**" in text
-    reference = "local-bun.md" if name in ("commit", "commit-main") else "workflow.md"
+    reference = (
+        "local-bun.md"
+        if name in ("commit", "commit-main")
+        else "push-bun.md"
+        if name == "commit-push"
+        else "workflow.md"
+    )
     relative = (
         f"references/{reference}"
         if name == "commit"
@@ -125,7 +131,7 @@ def test_four_explicit_entries_pin_endpoint_and_branch_policy_and_load_shared_wo
     if name != "commit-main":
         assert "到達点とbranch方針を確定して共有手順へ引き継" in text
     else:
-        assert "他2入口の旧Python workflow" in text
+        assert "push用Bun手順やPR用旧Python workflow" in text
     for entry in ("commit", "commit-main", "commit-push", "commit-pr"):
         assert f"`/skill:{entry}`" in text
     assert "### Stage実行" not in text
@@ -206,8 +212,9 @@ def test_commit_main_entry_pins_direct_default_commit_without_branch_switching()
         "途中LLM",
         "実際に質問",
         "Stage0",
-        "local-compatibility.md",
-        "Python不要",
+        "Bun 1.3.0以上は必須",
+        "Stageを含むGit変更前に停止",
+        "fallbackはなく",
         "承認token",
     ):
         assert contract in workflow

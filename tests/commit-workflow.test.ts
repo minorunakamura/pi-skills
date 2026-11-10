@@ -1237,3 +1237,691 @@ for (const settings of ["remote", "merge", "empty-merge", "upstream"]) {
     assert.equal(f.git("config", "--get-regexp", "^branch\\."), config);
   });
 }
+
+function pushFixture(t: { after: (fn: () => void) => void }, empty = false) {
+  const f = fixture(t);
+  const bare = join(f.owned, "remote.git");
+  f.git("init", "--bare", "-b", "main", bare);
+  f.git("remote", "add", "origin", bare);
+  if (!empty) f.git("push", "origin", "main");
+  const bareGit = (...args: string[]) => f.git(`--git-dir=${bare}`, ...args);
+  return { ...f, bare, bareGit };
+}
+function pushPlan(
+  f: ReturnType<typeof pushFixture>,
+  options: Record<string, unknown> = {},
+  extra: Record<string, unknown> = {},
+) {
+  const materials = prepare(f, {
+    mode: "push",
+    push: { remote: "origin", setUpstream: true, ...options },
+    ...extra,
+  });
+  const planned = f.cli("plan", {
+    reference: materials.value.reference,
+    ...(materials.value.commitNeeded
+      ? { message: "docs: exact 'bytes' $HOME\n\n" }
+      : {}),
+    ...((materials.value.branchPolicy as { createBranch: boolean }).createBranch
+      ? { newBranch: "docs/pushed" }
+      : {}),
+  });
+  assert.equal(planned.exit, 0, JSON.stringify(planned.value));
+  return planned;
+}
+for (const existing of [false, true]) {
+  await test(`push public CLI ${existing ? "existing HEAD without message or commit" : "new commit"} from main retains source ref and scoped work`, (t) => {
+    const f = pushFixture(t);
+    if (existing) {
+      writeFileSync(join(f.repo, "example.txt"), "already committed\n");
+      f.git("add", "example.txt");
+      f.git("commit", "-m", "docs: existing history");
+    } else writeFileSync(join(f.repo, "example.txt"), "new commit\n");
+    writeFileSync(join(f.repo, "outside.txt"), "preserve\n");
+    const parent = f.git("rev-parse", "HEAD");
+    const main = f.bareGit("rev-parse", "main");
+    f.git("config", "push.followTags", "true");
+    f.git("config", "remote.origin.mirror", "true");
+    f.git("config", "push.recurseSubmodules", "on-demand");
+    f.git("config", "push.autoSetupRemote", "true");
+    f.git("tag", "-a", "unsent", "-m", "do not send");
+    const planned = pushPlan(
+      f,
+      {},
+      { scope: { kind: "paths", paths: ["example.txt"] } },
+    );
+    assert.equal(
+      planned.value.message,
+      existing ? null : "docs: exact 'bytes' $HOME\n\n",
+    );
+    assert.equal(planned.value.commitNeeded, !existing);
+    assert.equal(f.git("branch", "--show-current"), "main");
+    assert.equal(
+      f.bareGit("for-each-ref", "--format=%(refname)"),
+      "refs/heads/main",
+    );
+    writeFileSync(
+      join(f.repo, ".git/hooks/pre-push"),
+      `#!/bin/sh\ncat > '${f.owned}/push-input'\nprintf called > '${f.owned}/push-hook'\n`,
+    );
+    chmodSync(join(f.repo, ".git/hooks/pre-push"), 0o700);
+    const result = f.cli("execute", { reference: planned.value.reference });
+    assert.equal(result.exit, 0, JSON.stringify(result.value));
+    const sha = f.git("rev-parse", "HEAD");
+    assert.equal(result.value.phase, "pushed");
+    assert.equal(result.value.commitCreated, !existing);
+    assert.equal(f.git("rev-parse", "main"), parent);
+    assert.equal(f.bareGit("rev-parse", "main"), main);
+    assert.equal(f.bareGit("rev-parse", "docs/pushed"), sha);
+    assert.equal(
+      f.bareGit("for-each-ref", "--format=%(refname)"),
+      "refs/heads/docs/pushed\nrefs/heads/main",
+    );
+    assert.equal(f.git("rev-parse", "refs/remotes/origin/docs/pushed"), sha);
+    assert.equal(
+      f.git("rev-parse", "--abbrev-ref", "@{upstream}"),
+      "origin/docs/pushed",
+    );
+    assert.match(
+      readFileSync(join(f.owned, "push-input"), "utf8"),
+      new RegExp(`${sha} refs/heads/docs/pushed`),
+    );
+    assert.equal(readFileSync(join(f.owned, "push-hook"), "utf8"), "called");
+    assert.equal(
+      readFileSync(join(f.repo, "outside.txt"), "utf8"),
+      "preserve\n",
+    );
+    assert.equal(f.git("ls-tree", "--name-only", "HEAD"), "example.txt");
+    assert.equal(existing ? sha : f.git("rev-parse", "HEAD^"), parent);
+    rmSync(join(f.owned, "push-hook"));
+    const again = pushPlan(
+      f,
+      {},
+      { scope: { kind: "paths", paths: ["example.txt"] } },
+    );
+    assert.equal(again.value.phase, "already_pushed");
+    assert.equal(again.value.pushSent, false);
+    assert.equal(existsSync(join(f.owned, "push-hook")), false);
+    assert.equal(f.git("rev-parse", "HEAD"), sha);
+  });
+}
+for (const initial of [
+  "new",
+  "existing",
+  "tags",
+  "populated",
+  "wrong-source",
+  "wrong-target",
+] as const) {
+  await test(`explicit initial main push ${initial}`, (t) => {
+    const f = pushFixture(t, initial !== "populated");
+    if (initial === "tags") f.git("push", "origin", "HEAD:refs/tags/nonempty");
+    if (initial === "wrong-source") f.git("switch", "-c", "feature");
+    if (initial === "new")
+      writeFileSync(join(f.repo, "example.txt"), "initial remote commit\n");
+    const count = f.git("rev-list", "--count", "HEAD");
+    const inspected = f.cli("inspect", {
+      mode: "push",
+      push: {
+        remote: "origin",
+        initialMain: true,
+        ...(initial === "wrong-target" ? { target: "other" } : {}),
+      },
+    });
+    const materials = f.cli("materials", {
+      reference: inspected.value.reference,
+    });
+    if (initial !== "new" && initial !== "existing") {
+      assert.equal(materials.exit, 1);
+      assert.equal(f.git("rev-list", "--count", "HEAD"), count);
+      return;
+    }
+    assert.equal(materials.exit, 0, JSON.stringify(materials.value));
+    const planned = f.cli("plan", {
+      reference: materials.value.reference,
+      ...(initial === "new" ? { message: "docs: first remote\n" } : {}),
+    });
+    assert.equal(planned.exit, 0, JSON.stringify(planned.value));
+    const pushed = f.cli("execute", { reference: planned.value.reference });
+    assert.equal(pushed.exit, 0, JSON.stringify(pushed.value));
+    assert.equal(pushed.value.branchCreated, false);
+    assert.equal(f.bareGit("rev-parse", "main"), f.git("rev-parse", "HEAD"));
+  });
+}
+for (const target of ["main", "develop"]) {
+  await test(`normal push rejects protected destination ${target} before commit`, (t) => {
+    const f = pushFixture(t);
+    if (target === "develop") {
+      f.git("push", "origin", "HEAD:refs/heads/develop");
+      f.bareGit("symbolic-ref", "HEAD", "refs/heads/develop");
+    }
+    f.git("switch", "-c", "feature");
+    writeFileSync(join(f.repo, "example.txt"), "pending\n");
+    const inspected = f.cli("inspect", {
+      mode: "push",
+      push: { remote: "origin", target },
+    });
+    const stopped = f.cli("materials", {
+      reference: inspected.value.reference,
+    });
+    assert.equal(stopped.value.error, "protected_push_target");
+    assert.equal(f.git("rev-list", "--count", "HEAD"), "1");
+  });
+}
+await test("push without HEAD or selected changes performs no remote preparation", (t) => {
+  const f = fixture(t, true);
+  const inspected = f.cli("inspect", {
+    mode: "push",
+    scope: { kind: "staged" },
+  });
+  assert.equal(inspected.exit, 0);
+  const result = f.cli("materials", { reference: inspected.value.reference });
+  assert.equal(result.value.phase, "empty");
+});
+for (const boundary of [
+  "before-execute",
+  "after-commit",
+  "push-hook",
+  "post-push",
+] as const) {
+  await test(`push ${boundary} failure stops mutations and reports prior success`, (t) => {
+    const f = pushFixture(t);
+    f.git("switch", "-c", "feature");
+    writeFileSync(join(f.repo, "example.txt"), "pending\n");
+    const planned = pushPlan(f);
+    if (boundary === "before-execute")
+      f.git(
+        "remote",
+        "set-url",
+        "--push",
+        "origin",
+        join(f.owned, "other.git"),
+      );
+    if (boundary === "after-commit") {
+      writeFileSync(
+        join(f.repo, ".git/hooks/post-commit"),
+        "#!/bin/sh\ngit remote set-url --push origin /nonexistent\n",
+      );
+      chmodSync(join(f.repo, ".git/hooks/post-commit"), 0o700);
+    }
+    if (boundary === "push-hook" || boundary === "post-push") {
+      writeFileSync(
+        join(f.repo, ".git/hooks/pre-push"),
+        boundary === "push-hook"
+          ? "#!/bin/sh\necho DO-NOT-EXPOSE-HOOK >&2\nexit 1\n"
+          : "#!/bin/sh\ngit tag drift HEAD\n",
+      );
+      chmodSync(join(f.repo, ".git/hooks/pre-push"), 0o700);
+    }
+    const result = f.cli("execute", { reference: planned.value.reference });
+    assert.equal(result.exit, 1);
+    assert.equal(result.value.commitSucceeded, boundary !== "before-execute");
+    assert.equal(result.value.commitVerified, boundary !== "before-execute");
+    assert.equal(
+      result.value.pushAttempted,
+      boundary === "push-hook" || boundary === "post-push",
+    );
+    assert.equal(result.value.pushVerified, boundary === "post-push");
+    assert.equal(
+      result.value.error,
+      boundary === "push-hook"
+        ? "push_failed"
+        : boundary === "post-push"
+          ? "post_push_local_verification_failed"
+          : "push_destination_drift",
+    );
+    assert.equal(result.value.upstreamConfigured, false);
+    assert.equal(
+      JSON.stringify(result.value).includes("DO-NOT-EXPOSE-HOOK"),
+      false,
+    );
+    assert.equal(
+      f.git("for-each-ref", "--format=%(upstream)", "refs/heads/feature"),
+      "",
+    );
+    assert.equal(
+      f.bareGit("for-each-ref", "--format=%(refname)"),
+      boundary === "post-push"
+        ? "refs/heads/feature\nrefs/heads/main"
+        : "refs/heads/main",
+    );
+  });
+}
+await test("push observes remote drift before branch creation and commit", (t) => {
+  const f = pushFixture(t);
+  writeFileSync(join(f.repo, "example.txt"), "pending\n");
+  const planned = pushPlan(f);
+  f.bareGit("symbolic-ref", "HEAD", "refs/heads/changed");
+  const result = f.cli("execute", { reference: planned.value.reference });
+  assert.equal(result.exit, 1);
+  assert.equal(result.value.branchCreated, false);
+  assert.equal(result.value.commitSucceeded, false);
+  assert.equal(f.git("branch", "--show-current"), "main");
+});
+await test("push tracking follows first positive mapping rather than negative fetch exclusion", (t) => {
+  const f = pushFixture(t);
+  f.git("switch", "-c", "feature");
+  f.git("config", "--unset-all", "remote.origin.fetch");
+  f.git(
+    "config",
+    "--add",
+    "remote.origin.fetch",
+    "+refs/heads/*:refs/remotes/first/*",
+  );
+  f.git(
+    "config",
+    "--add",
+    "remote.origin.fetch",
+    "+refs/heads/*:refs/remotes/second/*",
+  );
+  f.git("config", "--add", "remote.origin.fetch", "^refs/heads/feature");
+  const planned = pushPlan(f, { setUpstream: false });
+  const result = f.cli("execute", { reference: planned.value.reference });
+  assert.equal(result.exit, 0, JSON.stringify(result.value));
+  assert.equal(
+    f.git("rev-parse", "refs/remotes/first/feature"),
+    f.git("rev-parse", "HEAD"),
+  );
+  assert.equal(
+    f.git("for-each-ref", "--format=%(refname)", "refs/remotes/second"),
+    "",
+  );
+});
+
+function pushRefState(f: ReturnType<typeof pushFixture>) {
+  return {
+    head: f.git("rev-parse", "HEAD"),
+    branch: f.git("symbolic-ref", "HEAD"),
+    refs: f.git("for-each-ref", "--format=%(refname) %(objectname) %(symref)"),
+    config: readFileSync(join(f.repo, ".git/config")),
+    staged: f.git("diff", "--cached", "--binary"),
+    worktree: readFileSync(join(f.repo, "example.txt")),
+    index: readFileSync(join(f.repo, ".git/index")),
+    remote: f.bareGit("for-each-ref", "--format=%(refname) %(objectname)"),
+  };
+}
+for (const mapped of [
+  "refs/heads/main",
+  "refs/heads/other",
+  "refs/tags/kept",
+]) {
+  await test(`push rejects fetch mapping to ${mapped} before branch creation or commit`, (t) => {
+    const f = pushFixture(t);
+    f.git("update-ref", mapped, "HEAD");
+    f.git(
+      "config",
+      "--replace-all",
+      "remote.origin.fetch",
+      `+refs/heads/published:${mapped}`,
+    );
+    writeFileSync(join(f.repo, "example.txt"), "pending\n");
+    const materials = prepare(f, {
+      mode: "push",
+      push: { remote: "origin", target: "published" },
+    });
+    const before = pushRefState(f);
+    const result = f.cli("plan", {
+      reference: materials.value.reference,
+      message: "docs: pending\n",
+      newBranch: "docs/pushed",
+    });
+    assert.equal(result.exit, 1);
+    assert.equal(result.value.error, "unsafe_push_tracking_ref");
+    assert.deepEqual(pushRefState(f), before);
+  });
+}
+for (const afterPlan of [false, true]) {
+  for (const dangling of [false, true]) {
+    await test(`push rejects ${dangling ? "dangling" : "resolved"} symbolic tracking ref ${afterPlan ? "after plan" : "during preparation"} without mutation`, (t) => {
+      const f = pushFixture(t);
+      const tracking = "refs/remotes/origin/published";
+      const target = dangling ? "refs/heads/missing" : "refs/heads/main";
+      f.git(
+        "config",
+        "--replace-all",
+        "remote.origin.fetch",
+        `+refs/heads/published:${tracking}`,
+      );
+      if (!afterPlan) f.git("symbolic-ref", tracking, target);
+      writeFileSync(join(f.repo, "example.txt"), "pending\n");
+      const materials = prepare(f, {
+        mode: "push",
+        push: { remote: "origin", target: "published" },
+      });
+      const input = {
+        reference: materials.value.reference,
+        message: "docs: pending\n",
+        newBranch: "docs/pushed",
+      };
+      let reference = materials.value.reference;
+      if (afterPlan) {
+        const planned = f.cli("plan", input);
+        assert.equal(planned.exit, 0, JSON.stringify(planned.value));
+        reference = planned.value.reference;
+        f.git("symbolic-ref", tracking, target);
+      }
+      const before = pushRefState(f);
+      const result = afterPlan
+        ? f.cli("execute", { reference })
+        : f.cli("plan", input);
+      assert.equal(result.exit, 1);
+      assert.equal(
+        result.value.error,
+        afterPlan && !dangling
+          ? "repository_drift"
+          : "unsafe_push_tracking_ref",
+      );
+      assert.deepEqual(pushRefState(f), before);
+      assert.equal(f.git("symbolic-ref", tracking), target);
+      if (afterPlan) {
+        assert.equal(result.value.branchCreated, false);
+        assert.equal(result.value.commitSucceeded, false);
+        assert.equal(result.value.pushAttempted, false);
+      }
+    });
+  }
+}
+await test("push rechecks symbolic tracking after commit and stops before transmission", (t) => {
+  const f = pushFixture(t);
+  writeFileSync(join(f.repo, "example.txt"), "pending\n");
+  const planned = pushPlan(f, { setUpstream: false });
+  const parent = f.git("rev-parse", "main");
+  const remote = f.bareGit("for-each-ref", "--format=%(refname) %(objectname)");
+  writeFileSync(
+    join(f.repo, ".git/hooks/post-commit"),
+    "#!/bin/sh\ngit symbolic-ref refs/remotes/origin/docs/pushed refs/heads/missing\n",
+  );
+  chmodSync(join(f.repo, ".git/hooks/post-commit"), 0o700);
+  const result = f.cli("execute", { reference: planned.value.reference });
+  assert.equal(result.exit, 1);
+  assert.equal(result.value.error, "unsafe_push_tracking_ref");
+  assert.equal(result.value.commitVerified, true);
+  assert.equal(result.value.pushAttempted, false);
+  assert.equal(f.git("rev-parse", "main"), parent);
+  assert.equal(
+    f.git("for-each-ref", "--format=%(refname)", "refs/heads/missing"),
+    "",
+  );
+  assert.equal(
+    f.bareGit("for-each-ref", "--format=%(refname) %(objectname)"),
+    remote,
+  );
+});
+for (const mapping of ["custom", "none"]) {
+  await test(`push accepts safe ${mapping} fetch mapping without changing unrelated refs`, (t) => {
+    const f = pushFixture(t);
+    const tracking = "refs/custom/published";
+    f.git("config", "--unset-all", "remote.origin.fetch");
+    if (mapping === "custom") {
+      f.git(
+        "config",
+        "--add",
+        "remote.origin.fetch",
+        `+refs/heads/published:${tracking}`,
+      );
+      // Only the first positive match is updated by push, not this later mapping.
+      f.git(
+        "config",
+        "--add",
+        "remote.origin.fetch",
+        "+refs/heads/published:refs/heads/main",
+      );
+    }
+    const parent = f.git("rev-parse", "main");
+    writeFileSync(join(f.repo, "example.txt"), "pending\n");
+    const planned = pushPlan(f, { target: "published", setUpstream: false });
+    const result = f.cli("execute", { reference: planned.value.reference });
+    assert.equal(result.exit, 0, JSON.stringify(result.value));
+    assert.equal(result.value.pushVerified, true);
+    const sha = f.git("rev-parse", "HEAD");
+    assert.equal(f.bareGit("rev-parse", "published"), sha);
+    assert.equal(f.git("rev-parse", "main"), parent);
+    assert.equal(
+      f.git("for-each-ref", "--format=%(objectname)", tracking),
+      mapping === "custom" ? sha : "",
+    );
+    assert.equal(
+      f.git("for-each-ref", "--format=%(refname)", "refs/remotes"),
+      "refs/remotes/origin/main",
+    );
+  });
+}
+
+for (const laterHead of [false, true]) {
+  await test(`push accepts unchanged tracking with exact negative refspec${laterHead ? " and later local-head mapping" : ""} and verifies upstream`, (t) => {
+    const f = pushFixture(t);
+    const tracking = "refs/custom/published";
+    const parent = f.git("rev-parse", "main");
+    f.git("update-ref", tracking, parent);
+    f.git(
+      "config",
+      "--replace-all",
+      "remote.origin.fetch",
+      `+refs/heads/published:${tracking}`,
+    );
+    if (laterHead)
+      f.git(
+        "config",
+        "--add",
+        "remote.origin.fetch",
+        "+refs/heads/published:refs/heads/main",
+      );
+    f.git("config", "--add", "remote.origin.fetch", "^refs/heads/published");
+    writeFileSync(join(f.repo, "example.txt"), "pending\n");
+    const planned = pushPlan(f, { target: "published" });
+    const result = f.cli("execute", { reference: planned.value.reference });
+    assert.equal(result.exit, 0, JSON.stringify(result.value));
+    assert.equal(result.value.pushVerified, true);
+    assert.equal(result.value.upstreamConfigured, true);
+    assert.equal(
+      f.bareGit("rev-parse", "published"),
+      f.git("rev-parse", "HEAD"),
+    );
+    assert.equal(f.git("rev-parse", tracking), parent);
+    assert.equal(f.git("rev-parse", "main"), parent);
+    assert.equal(f.git("config", "branch.docs/pushed.remote"), "origin");
+    assert.equal(
+      f.git("config", "branch.docs/pushed.merge"),
+      "refs/heads/published",
+    );
+  });
+}
+for (const changed of ["refs/custom/published", "refs/heads/foreign"]) {
+  await test(`push rejects unplanned ${changed} change even when tracking may remain unchanged`, (t) => {
+    const f = pushFixture(t);
+    const parent = f.git("rev-parse", "main");
+    const unrelated = f.git(
+      "commit-tree",
+      "HEAD^{tree}",
+      "-m",
+      "unrelated object",
+    );
+    f.git("update-ref", "refs/custom/published", parent);
+    f.git(
+      "config",
+      "--replace-all",
+      "remote.origin.fetch",
+      "+refs/heads/published:refs/custom/published",
+    );
+    f.git("config", "--add", "remote.origin.fetch", "^refs/heads/published");
+    writeFileSync(join(f.repo, "example.txt"), "pending\n");
+    const planned = pushPlan(f, { target: "published" });
+    const config = readFileSync(join(f.repo, ".git/config"));
+    writeFileSync(
+      join(f.repo, ".git/hooks/pre-push"),
+      `#!/bin/sh\ngit update-ref ${changed} ${unrelated}\n`,
+    );
+    chmodSync(join(f.repo, ".git/hooks/pre-push"), 0o700);
+    const result = f.cli("execute", { reference: planned.value.reference });
+    assert.equal(result.exit, 1);
+    assert.equal(result.value.error, "post_push_local_verification_failed");
+    assert.equal(result.value.pushVerified, true);
+    assert.equal(result.value.upstreamConfigured, false);
+    assert.equal(
+      f.bareGit("rev-parse", "published"),
+      f.git("rev-parse", "HEAD"),
+    );
+    assert.equal(f.git("rev-parse", changed), unrelated);
+    assert.equal(f.git("rev-parse", "main"), parent);
+    assert.deepEqual(readFileSync(join(f.repo, ".git/config")), config);
+  });
+}
+
+await test("push does not ask a local default question and may target a different work branch", (t) => {
+  const f = pushFixture(t);
+  f.git("switch", "-c", "feature");
+  f.git(
+    "symbolic-ref",
+    "refs/remotes/origin/HEAD",
+    "refs/remotes/origin/missing",
+  );
+  const inspected = f.cli("inspect", {
+    mode: "push",
+    push: { remote: "origin", target: "published", setUpstream: false },
+  });
+  assert.equal(
+    (inspected.value.questions as { default: boolean }).default,
+    false,
+  );
+  const materials = f.cli("materials", {
+    reference: inspected.value.reference,
+  });
+  assert.equal(materials.exit, 0, JSON.stringify(materials.value));
+  const planned = f.cli("plan", { reference: materials.value.reference });
+  assert.equal(planned.exit, 0, JSON.stringify(planned.value));
+  const result = f.cli("execute", { reference: planned.value.reference });
+  assert.equal(result.exit, 0, JSON.stringify(result.value));
+  assert.equal(f.bareGit("rev-parse", "published"), f.git("rev-parse", "HEAD"));
+  assert.equal(f.git("branch", "--show-current"), "feature");
+});
+for (const kind of ["credentials", "multiple", "custom-ssh"] as const) {
+  await test(`push rejects ${kind} destination without exposing raw URL or starting a commit`, (t) => {
+    const f = pushFixture(t);
+    if (kind === "credentials")
+      f.git(
+        "remote",
+        "set-url",
+        "origin",
+        "https://SECRET-TOKEN@example.invalid/x",
+      );
+    if (kind === "multiple")
+      f.git("config", "--add", "remote.origin.pushurl", f.bare);
+    if (kind === "multiple")
+      f.git(
+        "config",
+        "--add",
+        "remote.origin.pushurl",
+        join(f.owned, "second.git"),
+      );
+    if (kind === "custom-ssh") {
+      f.git("remote", "set-url", "origin", "git@alias.invalid:x/repo.git");
+      f.git("config", "core.sshCommand", "untrusted ssh");
+    }
+    writeFileSync(join(f.repo, "example.txt"), "pending\n");
+    const result = f.cli("inspect", {
+      mode: "push",
+      push: { remote: "origin" },
+    });
+    assert.equal(result.exit, 1);
+    assert.equal(JSON.stringify(result.value).includes("SECRET-TOKEN"), false);
+    assert.equal(f.git("rev-list", "--count", "HEAD"), "1");
+    assert.equal(f.git("diff", "--cached"), "");
+  });
+}
+await test("push fixed SHA remains fixed even when a normal pre-push hook moves HEAD", (t) => {
+  const f = pushFixture(t);
+  f.git("switch", "-c", "feature");
+  const sha = f.git("rev-parse", "HEAD");
+  writeFileSync(join(f.repo, "example.txt"), "second\n");
+  f.git("add", "example.txt");
+  f.git("commit", "-m", "docs: second");
+  const later = f.git("rev-parse", "HEAD");
+  f.git("update-ref", "refs/heads/feature", sha);
+  f.git("read-tree", "-u", "--reset", "HEAD"); // Fixture setup only, never a product operation.
+  const planned = pushPlan(f);
+  writeFileSync(
+    join(f.repo, ".git/hooks/pre-push"),
+    `#!/bin/sh\ngit update-ref refs/heads/feature ${later}\n`,
+  );
+  chmodSync(join(f.repo, ".git/hooks/pre-push"), 0o700);
+  const result = f.cli("execute", { reference: planned.value.reference });
+  assert.equal(result.value.error, "post_push_local_verification_failed");
+  assert.equal(result.value.pushVerified, true);
+  assert.equal(result.value.upstreamConfigured, false);
+  assert.equal(f.bareGit("rev-parse", "feature"), sha);
+  assert.equal(f.git("rev-parse", "HEAD"), later);
+});
+await test("push upstream update failure preserves verified transmission and reports its own stage", (t) => {
+  const f = pushFixture(t);
+  f.git("switch", "-c", "feature");
+  const planned = pushPlan(f);
+  const realGit = spawnSync("which", ["git"], {
+    encoding: "utf8",
+  }).stdout.trim();
+  const bin = join(f.owned, "bin");
+  mkdirSync(bin);
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\ncase "$*" in 'config --local --replace-all branch.feature.remote origin') exit 1;; esac\nexec '${realGit}' "$@"\n`,
+  );
+  chmodSync(join(bin, "git"), 0o700);
+  f.env.PATH = `${bin}:${f.env.PATH}`;
+  const result = f.cli("execute", { reference: planned.value.reference });
+  assert.equal(result.exit, 1);
+  assert.equal(result.value.error, "post_push_upstream_update_failed");
+  assert.equal(result.value.pushSucceeded, true);
+  assert.equal(result.value.pushVerified, true);
+  assert.equal(result.value.upstreamConfigured, false);
+  assert.equal(f.bareGit("rev-parse", "feature"), f.git("rev-parse", "HEAD"));
+});
+await test("push rejects missing remote target object before commit without fetching", (t) => {
+  const f = pushFixture(t);
+  f.git("switch", "-c", "feature");
+  const other = join(f.owned, "other");
+  f.git("clone", f.bare, other);
+  for (const args of [
+    ["user.name", "Test User"],
+    ["user.email", "test@example.invalid"],
+    ["commit.gpgsign", "false"],
+  ])
+    f.git("-C", other, "config", ...args);
+  writeFileSync(join(other, "remote-only.txt"), "not fetched\n");
+  f.git("-C", other, "add", "remote-only.txt");
+  f.git("-C", other, "commit", "-m", "docs: remote-only");
+  f.git("-C", other, "push", "origin", "HEAD:refs/heads/feature");
+  writeFileSync(join(f.repo, "example.txt"), "pending\n");
+  const inspected = f.cli("inspect", {
+    mode: "push",
+    push: { remote: "origin" },
+  });
+  const result = f.cli("materials", { reference: inspected.value.reference });
+  assert.equal(result.exit, 1);
+  assert.equal(f.git("rev-list", "--count", "HEAD"), "1");
+  const missing = f.bareGit("rev-parse", "feature");
+  assert.equal(
+    spawnSync("git", ["cat-file", "-e", missing], { cwd: f.repo, env: f.env })
+      .status,
+    1,
+  );
+});
+
+await test("push failure reports the verified commit separately from a hook-moved observed HEAD", (t) => {
+  const f = pushFixture(t);
+  f.git("switch", "-c", "feature");
+  const parent = f.git("rev-parse", "HEAD");
+  writeFileSync(join(f.repo, "example.txt"), "approved new commit\n");
+  const planned = pushPlan(f);
+  writeFileSync(
+    join(f.repo, ".git/hooks/pre-push"),
+    `#!/bin/sh\ngit update-ref refs/heads/feature ${parent}\n`,
+  );
+  chmodSync(join(f.repo, ".git/hooks/pre-push"), 0o700);
+  const result = f.cli("execute", { reference: planned.value.reference });
+  assert.equal(result.value.error, "post_push_local_verification_failed");
+  assert.equal(result.value.commitVerified, true);
+  assert.equal(result.value.pushVerified, true);
+  assert.equal(result.value.verifiedCommit, f.bareGit("rev-parse", "feature"));
+  assert.notEqual(result.value.verifiedCommit, parent);
+  assert.equal((result.value.observed as { head: string }).head, parent);
+  assert.equal(result.value.upstreamConfigured, false);
+});

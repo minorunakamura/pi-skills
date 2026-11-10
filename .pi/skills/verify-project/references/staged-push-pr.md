@@ -1,3 +1,5 @@
+> 現行commit-pushは[push専用Bun／Bun不足停止手順](push-bun.md)。以下のPython接続は未移行PRと変更前baseline用であり、現行push入口へ適用しない。
+
 # 公開script: staged → local bare push → fixture PR
 
 [Feature Map](feature-map.md)のscript接続用の一経路。repositoryルートをcwdにし、以下のBashブロック全体を実行する。前回の環境・Pi session・一時pathは不要。既存のPython 3.14以上・Git・開発用pytest（`.venv`）が必要。installしない。`uv --no-sync`が失敗したら不足を報告し、認証や安全条件を迂回しない。

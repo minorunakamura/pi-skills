@@ -2,7 +2,7 @@
 name: commit
 description: Review and stage changes with bundled Bun TypeScript, then commit locally on the current work branch or a planned new branch after approval.
 disable-model-invocation: true
-compatibility: Requires Git and shell access. Bun 1.3.0+ runs the bundled TypeScript; only when Bun is absent at startup, use the separate Python-free local compatibility reference. Gitleaks is optional. No network operations.
+compatibility: Requires Git, shell access, and Bun 1.3.0+. Missing, unsupported, or unverifiable Bun stops before any Git mutation, even with no-confirm. No fallback or automatic installation. Gitleaks is optional. No network operations.
 ---
 
 # commit

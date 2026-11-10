@@ -1,6 +1,6 @@
 # commit / commit-main: Bun公開CLIとfresh Pi入口
 
-対象は両ローカル入口。製品手順は[同梱Bun手順](../../../../skills/commit/references/local-bun.md)。push／PR入口は未移行で[旧集約手順](execution-batching.md)／[既存公開Python接続](staged-push-pr.md)を維持する。旧3run／Codemode回数／性能閾値を今回へ流用しない。以下だけでfresh setupから再実行する。正式checks・独立Review・受入はRootの担当。
+対象は両ローカル入口。製品手順は[同梱Bun手順](../../../../skills/commit/references/local-bun.md)。pushは[専用Bun手順](push-bun.md)、未移行PRは[旧集約手順](execution-batching.md)／[既存公開Python接続](staged-push-pr.md)を使う。旧3run／Codemode回数／性能閾値を今回へ流用しない。以下だけでfresh setupから再実行する。正式checks・独立Review・受入はRootの担当。
 
 ## 前提・fresh setup
 
@@ -58,7 +58,7 @@ printf '# Example\n' > README.md
 printf '\nRun the example locally.\n' >> README.md
 ```
 
-起動前にsource版／dirty（新規未追跡資材含む）と関連fileのSHA-256 manifest、runtime版、probe結果を無秘密のrun記録へ保存・固定する。manifestには入口／両製品reference／製品TS・設定と、使用する検証Skill／Map／専用手順／RPC・metric helper／使捨てsetup・driverを含める。終了後も同じdigestを照合し、run中はsource・手順・helper・起動済みsetup／driverを編集しない。修正が必要ならそのrunを終了・wait・cleanupして証拠を保持し、修正後に別fresh setupと新manifestで検証する。以前の版不明runを最終版の成功に流用しない。production変更前baselineが必要な変更ではclean HEADの`git archive`をowned read-onlyコピーへ保存しchmod -R a-w／uidを確認する。reset／stashは禁止。旧Pythonは既存実体だけ使い、新installしない。比較は旧commitと新commitの同じ小diff／履歴／明示文章／通常承認を1組。baselineだけ既存Pythonとlegacy Codemodeが必要で、後続installしない。provider／model／thinkingの通常解決を照合し、条件差・失敗は隠さない。
+起動前にsource版／dirty（新規未追跡資材含む）と関連fileのSHA-256 manifest、runtime版、probe結果を無秘密のrun記録へ保存・固定する。manifestには入口／両製品reference／製品TS・設定と、使用する検証Skill／Map／専用手順／RPC・metric helper／使捨てsetup・driverを含める。終了後も同じdigestを照合し、run中はsource・手順・helper・起動済みsetup／driverを編集しない。修正が必要ならそのrunを終了・wait・cleanupして証拠を保持し、修正後に別fresh setupと新manifestで検証する。以前の版不明runを最終版の成功に流用しない。production変更前baselineが必要な変更では未コミット／未追跡を含む変更直前sourceをowned read-onlyコピーへ保存しchmod -R a-w／uidを確認する。reset／stashは禁止。旧Pythonは既存実体だけ使い、新installしない。比較は旧commitと新commitの同じ小diff／履歴／明示文章／通常承認を1組。baselineのruntime／呼出しは実際の変更前sourceに従い、既存Python／legacy Codemodeが必要な旧版でも後続installしない。provider／model／thinkingの通常解決を照合し、条件差・失敗は隠さない。
 
 ## 公開CLI: focused代表
 
@@ -114,26 +114,33 @@ fresh setupのbase commit後、README追記前にfixtureを追加する。通信
 
 request=`/skill:commit --no-confirm`、answer-fileなしで起動する。候補／理由、実際のdefault質問、選択肢＋自由回答要求を通常assistantで観測する。回答は与えない。HEAD／全refs／index bytesがbeforeと同じ、Stage0と通信0を確認する。「確認が必要」や再実行案内だけの報告なら不成立。commit-mainの既知作業branchは疑義質問で押し通さず拒否し、回答後の作業branch拒否は公開CLIで別途確認する。commitは回答でdefaultを確定後、現在が作業branchなら維持する。
 
-## Bunなしlocal互換
+## Bun必須: 不在／非対応／確認不能のGit変更前停止
 
-fresh setup後、Pi起動前からPATHをowned/binだけにする。導入済みGitと既存OS utilityをsymlinkし、Node観測者は絶対実体で起動する。Bun／Pythonを導入・偽装・起動しない。
+3入口はBun 1.3.0以上必須。起動前からBunなしPATHを作り、絶対Node観測者でfresh Piを起動する。local2入口それぞれとpushを別fresh状態で通し、no-confirmでも停止することを確認する。対象はREADME pendingの小fixtureだけでよく、無関係なhistoryを増やさない。
+
+[push手順](push-bun.md)のfixture setupを再利用するとGit wrapper／PR呼出しmarkerとread-onlyなsnapshotを使える。local入口の正常caseとは別のfresh OWNEDへsetupし、local caseではremote通信を許可する--fixture-remoteを付けない。fixture seed pushは製品操作ではなく観測log開始前。snapshotはwrite-treeを呼ばずGIT_OPTIONAL_LOCKS=0でindex refreshも避け、index bytes・HEAD・全refs／symref・branch・全local config（upstream含む）・tracked／untracked worktree bytes/mode・bare refsを保持する。
 
 ```bash
-ln -s "$GIT" "$OWNED/bin/git"
+# fixtureの既存bin/gitを上書きしない。正常setupもrun前に完了しておく。
 for utility in bash sh dirname basename uname sed awk grep cut tr sort find ls cat wc od cmp tail head mktemp mkdir rmdir rm test printf env date perl chmod readlink xargs which tee dd diff cp mv stat touch du xxd shasum openssl realpath; do
   executable=$(PATH=/usr/bin:/bin /usr/bin/which "$utility") || continue
   ln -s "$executable" "$OWNED/bin/$utility"
 done
 export PATH="$OWNED/bin"
 ! command -v bun && ! command -v python3 || exit 1
+"$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/push-fixture.ts" snapshot "$OWNED" "$GIT" > "$OWNED/before-stop.json"
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.ts" \
   "$OWNED/repo" "$SOURCE/skills/commit/SKILL.md" "$OWNED/evidence" \
-  --request '/skill:commit --no-confirm README.mdだけを対象。commit messageは正確に docs: explain local example と末尾LF。'
+  --request '/skill:commit --no-confirm README.mdだけを対象。'
+"$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/push-fixture.ts" snapshot "$OWNED" "$GIT" > "$OWNED/after-stop.json"
+cmp "$OWNED/before-stop.json" "$OWNED/after-stop.json"
 ```
 
-起動・親PID・wait・manifest固定は通常承認と同じ。互換referenceの直接`mktemp`代入／捕捉／実体照合の短例は`"$VERIFY_NODE" --test "$SOURCE/tests/verification-skills.test.js"`でもBashと実Gitを使ってself-checkする。Bash 3.2を使う場合は版も記録し、成功だけでなく捕捉コマンド非0で後続停止することも確認する。
+commit-mainはSkillとrequestを置換し別fresh状態で実行。pushは[専用手順](push-bun.md)の--fixture-remoteを付ける。command exit／snapshot一致と全tool操作・git.jsonlで、必要条件「Bun 1.3.0以上」案内、Stage／commit／push／PR作成0、旧Python／手書きmutation／install未試行を照合する。製品Git操作が全くない場合のgit.jsonl未作成は0回として記録する。観測だけでStage成功を推定しない。
 
-開始時Bun不在の観測→別互換ref全文read→mainから意味に基づく新作業branchへのcommitをtool操作と実Gitで確認する。元main ref保持／新branchのupstream未設定／対象外保持も照合する。同梱TS／旧Pythonの製品CLI未試行、通常承認だけ省略、安全照合／raw本文／親／tree／ref／index保持と通信0を確認する。最初のGit観測前の`GIT_NO_LAZY_FETCH=1`設定、Stage前／commit直前のMERGE_HEAD不在確認もtool操作で照合する。同じ機械的ガード／速度の実証とは呼ばない。
+非対応versionと不正probeは同じ共有起動経路の代表を選ぶ。古いBun実体がなければinstallせず、owned/bin/bunをversion応答と呼出し記録だけの小fixtureにする。trusted scripts cwd・BUN_OPTIONS／NODE_OPTIONS除去・同梱config／env-file／no-install付き--version以外は拒否し、製品CLI／Gitを代行しない。1.2.0応答と不正応答を別fresh状態で確認し、**Agentの停止判断のみ、実旧Bunの実証ではない**と明記する。source／fixture／driverを起動前manifestへ含める。対応実Bunの正常と人工startup marker非実行は公開CLIの既存testを使う。開始後scanner／hook失敗の代表では別経路への切替がないこともtool操作で確認する。
+
+起動・親PID／wait・manifest・metric・cleanup/readbackは正常caseと共通。停止成功は互換経路でのcommit／local bare到達成功とは呼ばない。
 
 ## 通信と小diff一括の観測
 
@@ -141,7 +148,7 @@ export PATH="$OWNED/bin"
 
 ## 証拠・cleanup・readback
 
-保存先は`docs/verification/<issue-number>/<一意run>/<case>/`（commit移行は46、commit-mainは45）。source版／dirty／関連digest、環境／操作／command exit／期待／観測／pass-fail／未確認、承認前後の最小Git snapshot、必要RPC操作とmetric、cleanupを無秘密の最小記録にする。Mapに履歴を書かない。fixture由来と確認したものだけを保存し、auth／秘密／不要raw logは記録しない。
+保存先は`docs/verification/<issue-number>/<一意run>/<case>/`（今回のruntime変更は47）。source版／dirty／関連digest、環境／操作／command exit／期待／観測／pass-fail／未確認、承認前後の最小Git snapshot、必要RPC操作とmetric、cleanupを無秘密の最小記録にする。Mapに履歴を書かない。fixture由来と確認したものだけを保存し、auth／秘密／不要raw logは記録しない。
 
 `operations.jsonl`は全assistant request（tool-only含む）のtimestamp／duration／取得可能usageを含む。承認前／利用者待機／承認後／全体時間、assistant request数、生成code bytes／行（固定CLI呼出し・文章／設定payloadと区別）、未取得unknownを記録する。nested toolは外側toolCall IDで二重加算しない。旧入口との条件差を明記し、単発観測を安定した高速化の証明にしない。
 
@@ -149,4 +156,4 @@ helperはstdin closeでorderly shutdownし、自分のPi process groupだけをt
 
 必要証拠をowned外のrunへ保存後、所有確認した今回OWNEDだけを削除する。read-only baseline sourceはRootの保存確認後、全必要run終了・uid確認後に所有者がcleanupする。製品cleanupの未知file保持と、検証者の使捨て環境全体cleanupは別。cleanup後にも短いrun READMEから**全証拠参照を実read**する。
 
-再利用はproject trustを確認し新セッション／reload後、`/skill:verify-project commit Bun local`、または実ファイルの明示read。Rootは別fresh状態でこの手順だけから公開CLI／実入口を選び独立確認する。全Map反復・未移行push／PR full-pipelineを今回成功扱いにしない。
+再利用はproject trustを確認し新セッション／reload後、`/skill:verify-project commit Bun local`、または実ファイルの明示read。Rootは別fresh状態でこの手順だけから公開CLI／実入口を選び独立確認する。全Map反復・未移行PR full-pipelineを今回成功扱いにしない。
