@@ -8,4 +8,4 @@
 
 保護されたBun起動・scope／対象外保持・全Staged検査・private参照・通常assistant一括承認・参照だけexecuteは共通。runtime不在／非対応／確認不能はStageを含むGit変更前停止。開始後の失敗でもPython／手書き互換へ切り替えず、自動install・retry・rollbackしない。
 
-[差分確認](diff-review.md)と[承認後の実行](execution-batching.md)は現行Bun手順に対応する。残存Python製品・開発checksは#49で撤去する移行資材であり、現行入口への利用許可ではない。
+[差分確認](diff-review.md)と[承認後の実行](execution-batching.md)は現行Bun手順に対応する。製品・tests・検証helperにPythonは不要。

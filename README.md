@@ -53,11 +53,11 @@ Pi を作業対象のプロジェクトで起動し、`/skill:<スキル名>` �
 
 コマンド名で終了地点が決まります。`commit` と `commit-main` はローカル commit、`commit-push` は push、`commit-pr` は PR 作成まで進みます。変更がなければ空 commit は作らず、必要な残りの操作だけを行います。
 
-`commit`はローカルdefault相当上なら、diffの主目的から未存在の作業branchを1件計画し、一括承認後のcommit時に作成します。作業branch上ならそのままcommitします。local remote HEADとremote／fetch設定から判別できたdefault（master・develop等も含む）を優先し、情報なしの場合だけmain／masterをdefault相当として扱います。判定の通信・設定補修はせず、ローカル情報は古い可能性があります。候補競合・壊れたref・不明mappingはGit変更前に確認し、未解決なら停止します。詳細は[ローカルdefaultとbranch方針](CONTRIBUTING.md#ローカルdefaultとbranch方針)を参照してください。
+`commit`はローカルdefault相当上なら、diffの主目的から未存在の作業branchを1件計画し、一括承認後のcommit時に作成します。作業branch上ならそのままcommitします。local remote HEADとremote／fetch設定から判別できたdefault（master・develop等も含む）を優先し、情報なしの場合だけmain／masterをdefault相当として扱います。判定の通信・設定補修はせず、ローカル情報は古い可能性があります。候補競合・壊れたref・不明mappingはGit変更前に確認し、未解決なら停止します。詳細は[ローカルdefaultとbranch方針](CONTRIBUTING.md#ローカル2入口のbun標準経路)を参照してください。
 
 defaultへの直接commitは`/skill:commit-main`を選びます。同じ共通判定でmain／master／その他のdefault相当と確認できた現在branchだけにcommitし、作業branch上や新branch作成・切替・push／PRの矛盾指示ではStageを含むGit変更前に停止します。defaultへ自動切替せず、未commit変更も持ち運びません。両ローカル入口ともremote準備・通信は追加せず、対象差分がなければbranch・commitを作りません。`--no-confirm`でもbranch条件は維持します。
 
-`commit`・`commit-main`・`commit-push`・`commit-pr`は同梱TypeScriptをBun 1.3.0以上で直接実行します。完成文章を承認前にprivate保持し、承認後は参照だけで必要なcommit・push・事後確認・cleanupまで進みます。Codemodeは不要です。PR-onlyも同じBun経路です。Bun不在・非対応・確認不能はStageを含むGit変更前に停止し、no-confirmでも省略しません。起動・停止条件と移行段階は[詳細仕様](CONTRIBUTING.md#ローカル2入口のbun標準経路)を参照してください。
+`commit`・`commit-main`・`commit-push`・`commit-pr`は同梱TypeScriptをBun 1.3.0以上で直接実行します。完成文章を承認前にprivate保持し、承認後は参照だけで必要なcommit・push・事後確認・cleanupまで進みます。Codemodeは不要です。PR-onlyも同じBun経路です。Bun不在・非対応・確認不能はStageを含むGit変更前に停止し、no-confirmでも省略しません。起動・停止条件と詳細は[詳細仕様](CONTRIBUTING.md#ローカル2入口のbun標準経路)を参照してください。
 
 対象や文章への要望も指定できます。
 

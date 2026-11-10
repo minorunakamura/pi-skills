@@ -35,19 +35,19 @@ materialsで全Staged diffをGitleaks検査します。未導入だけunavailabl
 
 remote／実push URL／target／upstreamを確定表示します。branchは通信したremote defaultとmainで判断し、local2入口のdefault質問は転用しません。通常main／remote default宛てを拒否し、明示初回mainだけ全remote空（tag等もなし）かつ送信元／予定／宛先mainで許可。通常hooks有効、余分refs／tag／submodule非送信、必要object不足は非fetch。drift／異常／成否不明は後続停止し、先行branch／commit／push成功、事後照合／upstream／cleanup失敗を区別します。Bun必須条件とGit変更前停止はローカル2入口と共通であり、開始後の失敗でも別経路へ切り替えません。
 
-### 移行段階とPR入口
+### PR入口と移行完了
 
-#47でlocal2入口／push、#48でPR本体／PR-onlyをBunへ移行し、4入口すべてBun必須になりました。#49で検証成立後に残存Python製品／tests／開発設定／CI／配布を整理します。現行入口は旧Pythonを使いませんが、残存資材の正式checks／packをこの段階で除外しません。
+#47でlocal2入口／push、#48でPR本体／PR-onlyをBunへ移行し、#49で対応検証と照合して旧Python製品／tests／開発設定／CI呼出し／配布を撤去しました。4入口すべてBun必須で、開発検証もPython不要です。既存local `.venv`／cacheと過去証拠は残存artifactとして保持し、新しい開発前提にはしません。
 
 commit-prは[PR用Bun手順](skills/commit/references/pr-bun.md)でbranch全体の固定diff／履歴／templateと同repo／認証／権限／base／既存PRを新commit前に準備します。通常PR既定、明示Draft優先、既存PRは全state非編集／非重複。具体branchを準備するplanが文章未確定なら非実行可能materials参照を返し、必要文章を補って完成planを通常承認します。片側文章だけの修正は他方bytesを保持し旧参照失効、設定修正はcleanupから影響準備をやり直します。承認後executeは参照だけ、固定SHA送信とPR全文／head／base／SHA readback、drift／異常応答後停止・先行成功保持を行います。汎用engineや旧CLI／schema互換adapterはありません。
 
-直接確認は[検証Skill](.pi/skills/verify-project/SKILL.md)から[ローカルBun手順](.pi/skills/verify-project/references/local-bun.md)を選びます。fresh Piの通常承認／cancel／no-confirm／default実質問・未回答Stage0／Bun不足／非対応／確認不能のGit変更前停止と実Gitを照合します。pushは[専用Bun検証手順](.pi/skills/verify-project/references/push-bun.md)、PR入口は[PR用Bun検証手順](.pi/skills/verify-project/references/pr-bun.md)を使います。共有RPC／metric helperはNode24で、legacy Codemodeだけ明示optionを付けます。model/thinkingは通常解決を記録し比較条件と照合、認証の独自read/copy/logは禁止。RPC通常テキスト承認はask_user_questionのTUI実証でありません。
+直接確認は[検証Skill](.pi/skills/verify-project/SKILL.md)から[ローカルBun手順](.pi/skills/verify-project/references/local-bun.md)を選びます。fresh Piの通常承認／cancel／no-confirm／default実質問・未回答Stage0／Bun不足／非対応／確認不能のGit変更前停止と実Gitを照合します。pushは[専用Bun検証手順](.pi/skills/verify-project/references/push-bun.md)、PR入口は[PR用Bun検証手順](.pi/skills/verify-project/references/pr-bun.md)を使います。共有RPC／metric／fixture helperはNode24で実行し、read,bashだけのfresh Piを使います。model/thinkingは通常解決を記録し比較条件と照合、認証の独自read/copy/logは禁止。RPC通常テキスト承認はask_user_questionのTUI実証でありません。
 
-production変更前のread-only archiveで旧commitと新commitを同じ小diff／history／明示文章／通常承認で1組比較します。provider／model／thinkingは通常解決を照合し、無断変更しません。承認前／後／全体時間、利用者待機、全assistant request、生成codeと固定呼出し／payload、取得可能usage・失敗・unknownを分け、nested toolを二重加算しません。構造改善と時間効果を分け、単発速度証明や全4入口完成と呼びません。
+production変更前のread-only archiveで旧commitと新commitを同じ小diff／history／明示文章／通常承認で1組比較します。provider／model／thinkingは通常解決を照合し、無断変更しません。承認前／後／全体時間、利用者待機、全assistant request、生成codeと固定呼出し／payload、取得可能usage・失敗・unknownを分け、nested toolを二重加算しません。構造改善と時間効果を分け、単発観測を安定した高速化の証明と呼びません。変更前baselineがすでにBun版ならPython→Bunの速度効果とは呼ばず、条件差・比較不能・未実証を明記します。
 
 #### 状態一覧の色付き表示
 
-同梱の`extensions/commit-status.js`は、取得済みの状態JSONを表示するだけの`commit_status_display` toolを追加します。Git操作や`git-status.py`のJSONは変更しません。Pi packageとして導入した場合はmanifestの指定に従って読み込まれ、`/reload`後に使えます。Pi 1.3.0を対象としています。
+同梱の`extensions/commit-status.js`は、取得済みの状態JSONを表示するだけの`commit_status_display` toolを追加します。Git操作はせず、公開CLI `inspect`の`branch/changes[].path/index/worktree/originalPath?`を含むJSON表示入力は変更しません。Pi packageとして導入した場合はmanifestの指定に従って読み込まれ、`/reload`後に使えます。Pi 1.3.0を対象としています。
 
 絵文字ではないテキストの`●`だけを色付けし、状態名・ファイル名は通常色で表示します。このtoolは標準の色付き背景枠を使わず、通常背景に一覧を表示します。theme設定や他のtoolの表示は変更しません。
 
@@ -71,21 +71,20 @@ ln -s "$PWD/extensions/commit-status.js" ~/.pi/agent/extensions/commit-status.js
 
 ## 開発時の検証
 
-開発にはmiseとGitを使います。Node24・Bun1.3.0・pnpm、および撤去を#49へ残したPython資材用のPython3.14系・uv・Ruff・tyを`mise.toml`で固定します。pytest 9系は開発用依存として`pyproject.toml`と`uv.lock`で管理し、uvが`.venv`に導入します。miseを有効化したshellで次を実行してください。
+開発にはmiseとGitを使います。Node24・Bun1.3.0・pnpmを`mise.toml`で固定します。新しい環境ではmiseを有効化したshellで次を実行してください（検証作業中の無断installはしません）。Python／uv／Ruff／ty／pytestは不要です。
 
 ```bash
 mise install
 pnpm install --frozen-lockfile
-mise exec -- uv sync --locked --python python
 pnpm lint
 pnpm typecheck
 pnpm format:check
 pnpm test
 ```
 
-`pnpm lint`はoxlint + oxlint-tsgolintのtype-aware lint（--type-aware --deny-warnings）と既存PythonのRuff。`pnpm typecheck`はtsc --noEmitとty、formatはBiome専用（linter/assist無効）とPythonのRuff、testはNode24標準node:test／node:assertのTS直接実行・既存JS tests・pytestです。製品TS・tests・fixture・隠し`.pi/skills/verify-project/scripts` helperを収集し、最寄りtsconfigを整合します。warningはsource修正で0にし、quiet／一括disable／除外で隠しません。devDependenciesとlockはexact version固定、追加製品npm依存はありません。Node/Bun用build成果物は作りません。Python設定／uv.lockの撤去は移行検証成立後の#49です。
+`pnpm lint`はoxlint + oxlint-tsgolintのtype-aware lint（--type-aware --deny-warnings）、`pnpm typecheck`はtsc --noEmit、formatはBiome専用（linter/assist無効）、testはNode24標準node:test／node:assertのTS直接実行と既存JS testsです。製品TS・tests・fixture・隠し`.pi/skills/verify-project/scripts` helperを収集し、最寄りtsconfigを整合します。warningはsource修正で0にし、quiet／一括disable／除外で隠しません。devDependenciesとlockはexact version固定、追加製品npm依存・build成果物はありません。
 
-pytestでは`tmp_path`・共通fixture・`parametrize`・`monkeypatch`を使い、一時Gitリポジトリとbare remoteでstatus解析、部分Stage、Gitleaks検査、状態変化時のcommit/push拒否、main保護と初回登録の例外、PRの本文・Draft・重複防止、認証・通信エラーとtimeout時の再試行禁止などを検証します。Gitleaks・gh・SSHはテスト用の実行ファイルで再現するため、実行時には不要です。実remoteやGitHubには接続しません。回帰テストはGitとPOSIX環境を対象とします。表示extensionのNode.jsテストはPi提供moduleの境界だけをstubにし、色の割当て、部分Stage・rename・競合、制御文字のescape、不正JSONの拒否、TUI以外の表示を確認します。Pi本体の追加installや外部接続は不要です。Pi提供moduleはoptionalなpeer dependencyとして宣言し、`pnpm-workspace.yaml`でpeerの自動installを無効化して、開発時にもSDKを二重導入しません。
+`tests/commit-workflow.test.ts`は実Gitと保護起動したBun公開CLIを使い、scope／部分Stage／default／全Staged検査／通常hooks／raw本文／固定SHA／PR非重複／drift後停止／private所有物とcleanupを検証します。scanner・gh・SSHはowned fixtureで観測し、実remoteやGitHubには接続しません。回帰テストはGitとPOSIX環境が対象です。表示extensionのNode testsはPi提供module境界だけをstubにし、色・部分Stage・rename・競合・制御文字escape・不正JSON・TUI以外の表示を確認します。Pi本体の追加installや外部接続は不要です。Pi提供moduleはoptional peer dependency、`pnpm-workspace.yaml`でpeer自動installを無効化し、SDKを二重導入しません。
 
 ### 変更対象から検証を選ぶ
 
@@ -93,20 +92,19 @@ pytestでは`tmp_path`・共通fixture・`parametrize`・`monkeypatch`を使い�
 
 | 変更箇所・理由 | Workerの対象例と直接確認 |
 | --- | --- |
-| commit/index・branch作成・raw message照合 | `test_commit_scripts.py`の変更した契約と正常/拒否代表。親・tree・raw message、元ref・index bytes/mode・upstreamを実Gitで照合。Agentのdefault判断・確認対話を変えた時だけ既存branch Mapの関係caseも実Skill入口で確認 |
-| push/PRのprepare・照合・状態遷移 | `test_remote_scripts.py`の変更した群＋同じ公開経路の正常/拒否代表。staged経路なら`test_pr_prepared_check_accepts_only_planned_push_and_git_mapped_refs[standard]`、push前verifyの区別なら`test_pr_verify_accepts_actual_commit_before_push_but_is_not_create_check`。existing-headや通常push/check・PR/checkの変更にはそれぞれの既存代表を選び、stagedだけで代用しない |
-| remoteの宛先・fetch mapping・drift・失敗処理 | 変更したガードの既存正常/拒否node IDを選ぶ。SHA固定・main/default保護・余分なrefs非送信、Git自身のmapping/実object、各hook/check前後の安全時点、失敗後の非retry/非rollbackなど異なる保証を同じ判定として削らない。実2MiB等が対象なら実物の限界を確認 |
-| 共通fixture/接続wrapper | 実callersを検索し、影響する`test_remote_scripts.py`、`test_commit_scripts.py`、`test_diff_review.py`、`test_stage_workflow.py`等へ広げる。共有状態や巨大fakeへ移さない。fixture未変更なら無関係な群へ一律に広げない |
-| 承認後Codemode集約 | `test_workflow_contract.py`の最小契約、runtime/diff関係回帰、prepared正常接続・verify非実行用とpush/PR失敗・timeout非retry代表。上記の実Agent手順で操作遵守/構造/実状態を別途照合し、文言assertやscript成功で代用しない |
-| workflow/文書契約・runtime/Stage/diff・表示extension | 関係する既存`test_workflow_contract.py`、`test_runtime_selection.py`、`test_stage_workflow.py`、`test_diff_review.py`、Nodeテスト等を選ぶ。文言/形式検査はAgent動作や実操作の証拠とは分ける |
-| 検証Skill/Map/手順 | 変更した参照・構文/assertと、その手順で選んだ機能の実操作・証拠・cleanup/readback。公開script接続は[staged → local bare push → fixture PR](.pi/skills/verify-project/references/staged-push-pr.md)。branch判断MapとRPC helperは別入口として保持し、script結果をAgent判断成功と呼ばない |
+| commit/index・scope・default・branch・raw本文 | `tests/commit-workflow.test.ts`の対応公開CLI正常／拒否代表。親・tree・元ref・index bytes・upstreamを実Gitで照合。Agentの判断・確認対話は[local手順](.pi/skills/verify-project/references/local-bun.md)で実入口を選ぶ |
+| push/PR準備・固定宛先・状態遷移 | 同suiteのpush／PR代表。新commit／既存HEAD／PR-only、固定SHA／通常hooks／tracking mapping／readback／既存PR、先行成功と後続停止を区別し、内部handler成功mockで消さない |
+| stdin・秘密保護・失敗・private | 同suiteの不正UTF-8／JSON／非object入力、scanner／hook／子CLI生出力非表示、drift拒否、差替え／別repo・run／未知sentinel保持。廃止CLI間のschemaや内部timeout monkeypatchは再建せず公開境界で確認 |
+| 共通fixture／RPC／metric helper | 実callersを検索して対応する`push-fixture.test.ts`／`pr-fixture.test.ts`／`commit-rpc.test.ts`と利用する公開CLIへ広げる。fixtureがGit操作・文章・判断を代行しない |
+| workflow／文書契約・runtime・表示extension | `tests/verification-skills.test.js`と表示extension tests。文言assertはAgent動作の証拠でない。Bun不足はfresh Pi実入口と変更前後のread-only snapshot／tool操作で確認 |
+| 検証Skill／Map／手順 | 関連する参照検査と、その手順で選んだ機能のfresh setup→実操作→期待照合→証拠→所有PID wait／group不存在→owned cleanup→全参照readback。local／push／PRの専用Bun手順を再利用 |
 
 例えば公開scriptの再実行手順だけの変更なら、その新しい隔離経路と関係する正常/拒否代表を選び、全remoteや全branchのPi sessionは起動しません。共通fixtureを変えた場合だけその実callersへ対象を広げます。選んだnode ID/経路と理由、維持する保証、未確認範囲をrun記録に残してください。通常の関連更新に全Map実行やMaintainは不要です。
 
 ### Worker / Root / Reviewer の分担
 
 - **Worker**: 変更したテスト群・実callers・対応する実Git正常/拒否代表を実行します。変更対象、選択理由、コマンド/exit、期待と観測、未確認、証拠・owned環境のcleanupを報告します。全remote・広い非remote回帰・正式全suite・全Mapを無条件には要求しません。非自明なhelperには最小assert self-checkと実手順の実行を残します。文書整理・既存テスト再構成にはTDDを一律要求しませんが、検証不要にはしません。
-- **Root**: 各Work Itemの最終差分で`pnpm lint`、`pnpm typecheck`、`pnpm format:check`、全収集の`pnpm test`を自ら実行します。配布文書/参照変更では`npm pack --dry-run --json --ignore-scripts`も確認します。正式testの件数・pass/fail/skip・pytest時間・外側wall timeを記録します。Workerとは新しい隔離状態で変更に対応する公開CLI/実状態を独立に直接確認し、全完了条件を受け入れます。手順変更ではWorker実行後、履歴・前回の一時path・稼働processなしで手順だけから再実行します。Workerの全操作や過去の全シナリオの丸ごと反復は不要で、一つの直接実行で複数条件を満たして構いません。
+- **Root**: 各Work Itemの最終差分で`pnpm lint`、`pnpm typecheck`、`pnpm format:check`、全収集の`pnpm test`を自ら実行します。配布文書/参照変更では`npm pack --dry-run --json --ignore-scripts`も確認します。正式testの件数・pass/fail/skip・Node test実行時間・外側wall timeを記録します。Workerとは新しい隔離状態で変更に対応する公開CLI/実状態を独立に直接確認し、全完了条件を受け入れます。手順変更ではWorker実行後、履歴・前回の一時path・稼働processなしで手順だけから再実行します。Workerの全操作や過去の全シナリオの丸ごと反復は不要で、一つの直接実行で複数条件を満たして構いません。
 - **Reviewer**: sourceと変更前後の保証対応、期待error、負例の成立、隔離と証拠を点検し、疑義のある対象だけ追加実行します。Reviewごとの全suite/全Mapは不要です。**独立ReviewとCode Reviewの明示承認は省略しません**。最終受入れはRootが行います。
 
 source再変更後は該当検証と最終チェックを更新し、以前の結果/Approveを流用しません。同じ最終差分の性能確認だけを理由に全suiteを2回実行せず、固定の短縮率や秒数を合否条件にしません。旧Plan・CLOSED Issue・既存証拠は保持し、昔のwrapper性能比較や過去の全代表を無条件の再実行義務にしません。
@@ -146,6 +144,6 @@ pnpm exec biome format tests/verification-skills.test.js
 
 ## CI
 
-`.github/workflows/ci.yml`で、PRの作成・更新とmainへのpush時にUbuntu上で同じlint・型検査・format確認・Node TS/JS testsとpytestを実行します。依存は`pnpm install --frozen-lockfile`と`uv sync --locked`で固定し、Pythonはmiseで選ばれた実行ファイルを使います。Actionはcommit SHA、mise本体もバージョンを固定しています。
+`.github/workflows/ci.yml`で、PRの作成・更新とmainへのpush時にUbuntu上で同じlint・型検査・format確認・Node TS/JS testsを実行します。依存は`pnpm install --frozen-lockfile`で固定し、Python開発環境を準備しません。Actionはcommit SHA、mise本体もバージョンを固定しています。
 
 権限は`contents: read`のみで、checkoutの認証情報は永続化しません。実GitHubへのpush・PR作成や個人の認証情報は不要です。CI成功をmerge条件にする場合は、workflowとは別にGitHubのRuleset等で必須チェックを設定してください。

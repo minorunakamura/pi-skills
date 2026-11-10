@@ -49,4 +49,4 @@
 | commit後／送信後drift・異常応答 | 公開Git hooks／TS gh faultとfresh Pi代表 | commit／送信先行成功を保持し後続PR0、異常create応答は作成済み可能性・readback失敗を区別。Python／手書き代替／install／retry／rollbackなし |
 | Bun不足停止 | 起動前からowned PATHにBunなし、絶対Nodeでfresh Pi PR／PR-only別状態。共有経路の非対応／不正probe代表 | Bun1.3.0以上案内、index bytes／HEAD／全refs／branch／upstream／worktree／bare不変、Stage/commit/push/PR0、代替経路未試行。version応答fixtureはAgent停止分岐だけ |
 
-小diff一括／大diffの複数固定範囲読取・未表示明示、全Staged検査、private・秘密非出力・未知file保持は共通公開Bun suiteの対応代表で確認する。新PR helper／fixtureにもsource-named testsを持つ。旧[execution-batching](execution-batching.md)／[staged-push-pr](staged-push-pr.md)は変更前baseline資材で、現行入口に使わない。Python残存checksの一括撤去は#49。証拠／metric／cleanup／全参照実readはPR手順どおり、Rootは別fresh状態で独立確認する。
+小diff一括／大diffの複数固定範囲読取・未表示明示、全Staged検査、private・秘密非出力・未知file保持は共通公開Bun suiteの対応代表で確認する。新PR helper／fixtureにもsource-named testsを持つ。廃止したPython専用の大容量／不正応答／中断／限定分岐例は再建しない。大材料まとめ読取・非object入力拒否・秘密非表示・失敗後停止・所有外保持・既存PR非重複は同じ公開Bun suiteで照合し、任意中断時のcleanup必達は保証しない。証拠／metric／cleanup／全参照実readはPR手順どおり、Rootは別fresh状態で独立確認する。

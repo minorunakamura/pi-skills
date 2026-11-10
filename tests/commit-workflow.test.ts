@@ -83,6 +83,56 @@ function fixture(t: { after: (fn: () => void) => void }, unborn = false) {
   return { owned, repo, git, cli, env };
 }
 
+for (const [kind, payload] of [
+  ["invalid UTF-8", Buffer.from('{"message":"SECRET_INPUT\xff"}', "binary")],
+  ["invalid JSON", Buffer.from('{"SECRET_INPUT":')],
+  ["nonobject JSON", Buffer.from('["SECRET_INPUT"]')],
+] as const) {
+  await test(`public stdin rejects ${kind} without echo or Git mutation`, (t) => {
+    const f = fixture(t);
+    writeFileSync(join(f.repo, "example.txt"), "pending\n");
+    const before = {
+      head: f.git("rev-parse", "HEAD"),
+      refs: f.git("show-ref"),
+      index: readFileSync(join(f.repo, ".git/index")),
+    };
+    const result = spawnSync(
+      bun,
+      [
+        "--config=" + join(scripts, "bunfig.toml"),
+        "--env-file=/dev/null",
+        "--no-install",
+        join(scripts, "commit-workflow.ts"),
+        "inspect",
+        "--repository",
+        f.repo,
+      ],
+      { cwd: scripts, env: f.env, input: payload },
+    );
+    assert.equal(result.status, 1);
+    assert.equal(result.stderr.toString(), "");
+    const response = JSON.parse(result.stdout.toString());
+    assert.equal(
+      response.error,
+      kind === "nonobject JSON" ? "invalid_input" : "workflow_failed",
+    );
+    assert.equal(response.commitSucceeded, false);
+    assert.equal(response.pushAttempted, false);
+    assert.equal(response.prAttempted, false);
+    assert.doesNotMatch(
+      result.stdout.toString(),
+      /SECRET_INPUT|Traceback|SyntaxError/,
+    );
+    assert.equal(f.git("rev-parse", "HEAD"), before.head);
+    assert.equal(f.git("show-ref"), before.refs);
+    assert.deepEqual(readFileSync(join(f.repo, ".git/index")), before.index);
+    assert.equal(
+      readFileSync(join(f.repo, "example.txt"), "utf8"),
+      "pending\n",
+    );
+  });
+}
+
 await test("inspect prioritizes the unique local remote default over main fallback", (t) => {
   const f = fixture(t);
   f.git("remote", "add", "origin", "https://example.invalid/fixture.git");

@@ -126,7 +126,6 @@ async function main() {
       "follow-up-file": { type: "string", multiple: true },
       "abort-file": { type: "string" },
       "fixture-remote": { type: "boolean", default: false },
-      "legacy-codemode": { type: "boolean", default: false },
       timeout: { type: "string" },
     },
   });
@@ -182,7 +181,6 @@ async function main() {
       "rpc",
       "--no-session",
       "--no-extensions",
-      ...(values["legacy-codemode"] ? ["-e", "builtin:codemode"] : []),
       "--no-mcp",
       "--no-skills",
       "--skill",
@@ -193,7 +191,7 @@ async function main() {
       "--offline",
       "--no-approve",
       "--tools",
-      values["legacy-codemode"] ? "read,bash,codemode" : "read,bash",
+      "read,bash",
       "--append-system-prompt",
       "This is a disposable commit verification. Operate only in the target cwd repository and owned HOME/TMPDIR. Read the supplied Skill and its references/scripts, but do not modify them. Do not access credentials, user files, or settings through tools. Do not install anything. " +
         remotePolicy +

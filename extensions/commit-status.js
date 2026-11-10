@@ -92,7 +92,7 @@ export default function (pi) {
     exposure: "model-only",
     renderShell: "self",
     description:
-      "Display Git status metadata with themed text dots, without running Git or changing files. Pass the original git-status.py JSON string. Approval and checks remain separate.",
+      "Display Git status metadata with themed text dots, without running Git or changing files. Pass the inspect branch/changes metadata as a JSON string. Approval and checks remain separate.",
     parameters: Type.Object({ status: Type.String() }),
     annotations: {
       readOnlyHint: true,
