@@ -123,6 +123,7 @@ async function main() {
       request: { type: "string", default: "/skill:commit-main" },
       answer: { type: "string" },
       "answer-file": { type: "string" },
+      "follow-up-file": { type: "string", multiple: true },
       "abort-file": { type: "string" },
       "fixture-remote": { type: "boolean", default: false },
       "legacy-codemode": { type: "boolean", default: false },
@@ -135,6 +136,22 @@ async function main() {
     "Usage: node commit-rpc.ts REPO SKILL EVIDENCE [options]",
   );
   assert(!(values.answer && values["answer-file"]));
+  let answer = values.answer;
+  const followUpFiles = (values["follow-up-file"] ?? []).map((path) =>
+    resolve(path),
+  );
+  assert(
+    !followUpFiles.length || values["answer-file"],
+    "Follow-ups require an initial answer file",
+  );
+  let answerFile = values["answer-file"]
+    ? resolve(values["answer-file"])
+    : undefined;
+  assert(
+    new Set([answerFile, ...followUpFiles].filter(Boolean)).size ===
+      [answerFile, ...followUpFiles].filter(Boolean).length,
+    "Each follow-up needs its own file",
+  );
   const [repo, skill, evidence] = positionals.map((path) => resolve(path));
   const selectedSkill = realpathSync(skill);
   const owned = realpathSync(dirname(evidence));
@@ -200,10 +217,6 @@ async function main() {
     record({ type: "input", id, text });
     send({ id, type: "prompt", message: text });
   };
-  let answer = values.answer;
-  let answerFile = values["answer-file"]
-    ? resolve(values["answer-file"])
-    : undefined;
   let waiting = false;
   let abortSent = false;
   let abortAcknowledged = false;
@@ -253,7 +266,7 @@ async function main() {
             if (text !== undefined) {
               assert(text.trim());
               waiting = false;
-              answerFile = undefined;
+              answerFile = followUpFiles.shift();
               prompt("answer", text);
             }
           }

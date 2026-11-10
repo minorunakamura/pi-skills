@@ -1,3 +1,16 @@
+import {
+  prOptions,
+  preparePr,
+  samePrPreparation,
+  prMaterials,
+  existingPrs,
+  prText,
+  createPr,
+  type PrOptions,
+  type PrPreparation,
+  type ExistingPr,
+  type PrText,
+} from "./pull-request.ts";
 import { randomUUID } from "node:crypto";
 import {
   accessSync,
@@ -56,7 +69,8 @@ import {
 } from "./push-git.ts";
 
 type BranchPolicy = {
-  mode: "commit" | "commit-main" | "push";
+  mode: "commit" | "commit-main" | "push" | "pr";
+  pr: PrOptions | null;
   push: PushOptions | null;
   context: PushContext | null;
   requestedBranch: string | null;
@@ -68,10 +82,22 @@ type Inspection = BranchPolicy & {
 };
 type Materials = BranchPolicy & {
   phase: "materials";
+  prepared?: {
+    newBranch: string | null;
+    destination: Destination | null;
+    existingPrs: ExistingPr[];
+    message: string | null;
+    prText: PrText | null;
+  };
   state: Snapshot;
   scope: Scope;
   commitNeeded: boolean;
   pushRemote: RemoteState | null;
+  prPreparation: PrPreparation | null;
+  prDiffDigest: string | null;
+  prReusablePaths: string[];
+  prFiles: { pathBytes: string; path: string; reusedStaged: boolean }[];
+  prMergeBase: string | null;
   tree: string;
   entries: string;
   diffDigest: string;
@@ -82,6 +108,8 @@ type Materials = BranchPolicy & {
 type Plan = Omit<Materials, "phase"> & {
   phase: "plan";
   message: string | null;
+  prText: PrText | null;
+  existingPrs: ExistingPr[];
   destination: Destination | null;
   newBranch: string | null;
 };
@@ -94,6 +122,8 @@ let pushAttempted = false;
 let pushSucceeded = false;
 let pushVerified = false;
 let upstreamConfigured = false;
+let prAttempted = false;
+let prVerified = false;
 let remoteObserved: string | null | undefined;
 const execution: { destination: Destination | null; verifiedCommit?: string } =
   { destination: null };
@@ -240,7 +270,13 @@ function transition(ref: Reference, previous: string, data: HeldState) {
   removeOwned(ref, previous);
 }
 function release(ref: Reference) {
-  for (const name of ["diff.bin", "history.bin"])
+  for (const name of [
+    "diff.bin",
+    "history.bin",
+    "pr-diff.bin",
+    "pr-history.bin",
+    "pr-templates.bin",
+  ])
     if (ref.files[name]) removeOwned(ref, name);
 }
 function view(bytes: Buffer) {
@@ -316,9 +352,31 @@ function materialView(ref: Reference, data: Materials) {
             emptyRemote: data.pushRemote.empty,
           }
         : null,
+    pr: data.prPreparation
+      ? {
+          repository: data.prPreparation.options.repository,
+          base: data.prPreparation.base,
+          baseHead: data.prPreparation.baseHead,
+          draft: data.prPreparation.options.draft,
+          diffDigest: data.prDiffDigest,
+          mergeBase: data.prMergeBase,
+          stagedDiffIdentical: data.prDiffDigest === data.diffDigest,
+          reusableStagedPathBytes: [...data.prReusablePaths],
+          files: [...data.prFiles],
+          filesOmitted: 0,
+          reusablePathsOmitted: 0,
+        }
+      : null,
     diffDigest: data.diffDigest,
     diffBytes: diff.length,
     historyBytes: history.length,
+    ...(data.prPreparation
+      ? {
+          prDiffBytes: readOwned(ref, "pr-diff.bin").length,
+          prHistoryBytes: readOwned(ref, "pr-history.bin").length,
+          prTemplatesBytes: readOwned(ref, "pr-templates.bin").length,
+        }
+      : {}),
     files,
     filesOmitted: 0,
     displayed: false,
@@ -328,6 +386,13 @@ function materialView(ref: Reference, data: Materials) {
     displayed: true,
     diff: view(diff),
     history: view(history),
+    ...(data.prPreparation
+      ? {
+          prDiff: view(readOwned(ref, "pr-diff.bin")),
+          prHistory: view(readOwned(ref, "pr-history.bin")),
+          prTemplates: view(readOwned(ref, "pr-templates.bin")),
+        }
+      : {}),
   };
   if (Buffer.byteLength(JSON.stringify(small)) <= 32 * 1024) return small;
   while (
@@ -336,6 +401,22 @@ function materialView(ref: Reference, data: Materials) {
   ) {
     base.files.pop();
     base.filesOmitted++;
+  }
+  if (base.pr) {
+    while (
+      Buffer.byteLength(JSON.stringify(base)) > 28 * 1024 &&
+      base.pr.files.length
+    ) {
+      base.pr.files.pop();
+      base.pr.filesOmitted++;
+    }
+    while (
+      Buffer.byteLength(JSON.stringify(base)) > 28 * 1024 &&
+      base.pr.reusableStagedPathBytes.length
+    ) {
+      base.pr.reusableStagedPathBytes.pop();
+      base.pr.reusablePathsOmitted++;
+    }
   }
   return {
     ...base,
@@ -359,7 +440,7 @@ function main() {
   if (operation === "inspect") {
     requireThat(
       Object.keys(input).every((key) =>
-        ["scope", "mode", "newBranch", "push"].includes(key),
+        ["scope", "mode", "newBranch", "push", "pr"].includes(key),
       ),
       "invalid_input",
     );
@@ -367,10 +448,17 @@ function main() {
     const state = snapshot(repo);
     const mode = input.mode ?? "commit-main";
     requireThat(
-      mode === "commit" || mode === "commit-main" || mode === "push",
+      mode === "commit" ||
+        mode === "commit-main" ||
+        mode === "push" ||
+        mode === "pr",
       "invalid_mode",
     );
-    requireThat(mode === "push" || input.push === undefined, "invalid_input");
+    requireThat(
+      mode === "push" || mode === "pr" || input.push === undefined,
+      "invalid_input",
+    );
+    requireThat(mode === "pr" || input.pr === undefined, "invalid_input");
     const hasContent =
       state.head !== null ||
       state.changes.some(
@@ -379,7 +467,12 @@ function main() {
           (selected.kind !== "staged" &&
             inScope(Buffer.from(change.pathBytes, "base64"), selected)),
       );
-    const push = mode === "push" && hasContent ? pushOptions(input.push) : null;
+    const push =
+      (mode === "push" || mode === "pr") && hasContent
+        ? pushOptions(input.push)
+        : null;
+    const pr = mode === "pr" && hasContent ? prOptions(input.pr) : null;
+    requireThat(!pr || !push?.initialMain, "initial_main_push_only");
     const context = push ? pushContext(repo, push.remote) : null;
     requireThat(
       mode !== "commit-main" || input.newBranch === undefined,
@@ -390,10 +483,11 @@ function main() {
         repo,
         state,
         input.newBranch,
-        mode === "push" ? ["main"] : undefined,
+        mode === "push" || mode === "pr" ? ["main"] : undefined,
       );
     const policy: BranchPolicy = {
       mode,
+      pr,
       push,
       context,
       requestedBranch: (input.newBranch as string | undefined) ?? null,
@@ -416,7 +510,9 @@ function main() {
       questions: {
         ...questions(state, selected),
         default:
-          mode !== "push" && state.default.classification.kind === "ambiguous",
+          mode !== "push" &&
+          mode !== "pr" &&
+          state.default.classification.kind === "ambiguous",
       },
       localInformationMayBeStale: true,
     };
@@ -446,14 +542,16 @@ function main() {
     const parts = input.parts.map((value: unknown) => {
       const part = object(value);
       requireThat(
-        (part.name === "diff" || part.name === "history") &&
+        ["diff", "history", "pr-diff", "pr-history", "pr-templates"].includes(
+          String(part.name),
+        ) &&
           Number.isSafeInteger(part.offset) &&
           Number.isSafeInteger(part.length) &&
           Number(part.offset) >= 0 &&
           Number(part.length) > 0,
         "invalid_material_request",
       );
-      const payload = readOwned(ref, `${part.name}.bin`);
+      const payload = readOwned(ref, `${String(part.name)}.bin`);
       const end = Number(part.offset) + Number(part.length);
       requireThat(end <= payload.length, "invalid_material_request");
       return {
@@ -467,6 +565,10 @@ function main() {
     const result = {
       parts,
       fixed: true,
+      prFiles: data.prFiles.slice(
+        Number(input.fileOffset ?? 0),
+        Number(input.fileOffset ?? 0) + Number(input.fileCount ?? 0),
+      ),
       files: data.state.changes
         .filter(isStaged)
         .slice(
@@ -494,7 +596,11 @@ function main() {
     );
     const classification = data.state.default.classification;
     let defaultAnswer: string | null = null;
-    if (data.mode !== "push" && classification.kind === "ambiguous") {
+    if (
+      data.mode !== "push" &&
+      data.mode !== "pr" &&
+      classification.kind === "ambiguous"
+    ) {
       requireThat(
         typeof input.defaultBranch === "string" &&
           input.defaultBranch.length > 0 &&
@@ -522,7 +628,7 @@ function main() {
         repo,
         data.state,
         data.requestedBranch,
-        data.mode === "push" ? ["main"] : undefined,
+        data.mode === "push" || data.mode === "pr" ? ["main"] : undefined,
       );
       requireThat(
         data.requestedBranch !== defaultAnswer,
@@ -578,7 +684,10 @@ function main() {
         );
     }
     const diff = stagedDiff(repo);
-    if (!diff.length && (data.mode !== "push" || !data.state.head))
+    if (
+      !diff.length &&
+      ((data.mode !== "push" && data.mode !== "pr") || !data.state.head)
+    )
       return { phase: "empty", commitCreated: false, cleanup: cleanup(ref) };
     const tree = line(git(repo, ["write-tree"]));
     const after = snapshot(repo);
@@ -600,7 +709,7 @@ function main() {
         );
     }
     const createBranch =
-      data.mode === "push"
+      data.mode === "push" || data.mode === "pr"
         ? !data.push?.initialMain &&
           (after.branch === "main" ||
             after.branch === pushRemote?.defaultBranch ||
@@ -631,10 +740,32 @@ function main() {
       : after.head
         ? git(repo, ["--no-pager", "log", "-20", "--format=%s%n%b%n---"])
         : Buffer.alloc(0);
+    const prPreparation =
+      data.pr && data.context && pushRemote
+        ? preparePr(repo, data.context, pushRemote, data.pr)
+        : null;
+    const prMaterial = prPreparation
+      ? prMaterials(repo, prPreparation, after.head, tree)
+      : null;
+    if (prMaterial) {
+      save(ref, "pr-diff.bin", prMaterial.diff);
+      save(ref, "pr-history.bin", prMaterial.history);
+      save(
+        ref,
+        "pr-templates.bin",
+        Buffer.from(JSON.stringify(prPreparation?.templates)),
+      );
+    }
     sameSnapshot(repo, after);
     const materials: Materials = {
       phase: "materials",
       mode: data.mode,
+      pr: data.pr,
+      prPreparation,
+      prDiffDigest: prMaterial ? digest(prMaterial.diff) : null,
+      prReusablePaths: prMaterial?.reusablePaths ?? [],
+      prFiles: prMaterial?.files ?? [],
+      prMergeBase: prMaterial?.mergeBase ?? null,
       push: data.push,
       context: data.context,
       requestedBranch: data.requestedBranch,
@@ -659,19 +790,24 @@ function main() {
       (data.phase === "materials" || data.phase === "plan") &&
         Object.keys(input).every(
           (key) =>
-            key === "reference" || key === "message" || key === "newBranch",
+            key === "reference" ||
+            key === "message" ||
+            key === "newBranch" ||
+            key === "pr",
         ),
       "invalid_plan_input",
     );
     const message =
-      input.message ?? (data.phase === "plan" ? data.message : null);
+      input.message ??
+      (data.phase === "plan" ? data.message : (data.prepared?.message ?? null));
     requireThat(
       !data.commitNeeded
         ? input.message === undefined
-        : typeof message === "string" &&
-            message.trim().length > 0 &&
-            !message.includes("\0") &&
-            Buffer.from(message).toString() === message,
+        : (data.mode === "pr" && message === null) ||
+            (typeof message === "string" &&
+              message.trim().length > 0 &&
+              !message.includes("\0") &&
+              Buffer.from(message).toString() === message),
       "invalid_message",
     );
     sameSnapshot(repo, data.state);
@@ -682,7 +818,9 @@ function main() {
     );
     const newBranch =
       input.newBranch ??
-      (data.phase === "plan" ? data.newBranch : data.requestedBranch);
+      (data.phase === "plan"
+        ? data.newBranch
+        : (data.prepared?.newBranch ?? data.requestedBranch));
     if (data.createBranch) {
       requireThat(
         newBranch !== null && newBranch !== undefined,
@@ -692,7 +830,7 @@ function main() {
         repo,
         data.state,
         newBranch,
-        data.mode === "push"
+        data.mode === "push" || data.mode === "pr"
           ? ["main", data.pushRemote?.defaultBranch ?? null]
           : undefined,
       );
@@ -709,17 +847,24 @@ function main() {
         "branch_policy_conflict",
       );
     } else requireThat(newBranch === null, "branch_policy_conflict");
+    if (data.phase === "materials" && data.prepared)
+      requireThat(
+        newBranch === data.prepared.newBranch,
+        "branch_policy_conflict",
+      );
     const preparedDestination =
-      data.push && data.context && data.pushRemote
-        ? destination(
-            repo,
-            data.push,
-            data.context,
-            data.pushRemote,
-            data.state,
-            (newBranch as string) ?? data.state.branch ?? "",
-          )
-        : null;
+      data.phase === "materials" && data.prepared
+        ? data.prepared.destination
+        : data.push && data.context && data.pushRemote
+          ? destination(
+              repo,
+              data.push,
+              data.context,
+              data.pushRemote,
+              data.state,
+              (newBranch as string) ?? data.state.branch ?? "",
+            )
+          : null;
     if (preparedDestination) {
       sameContext(repo, preparedDestination.remote, preparedDestination);
       sameRemote(
@@ -730,6 +875,7 @@ function main() {
       );
       sameSnapshot(repo, data.state);
       if (
+        data.mode !== "pr" &&
         !data.commitNeeded &&
         newBranch === null &&
         preparedDestination.observed.refs[
@@ -746,11 +892,103 @@ function main() {
           cleanup: cleanup(ref),
         };
     }
+    let prs: ExistingPr[] = [];
+    let retainedPrText: PrText | null = null;
+    if (data.prPreparation && data.context && preparedDestination) {
+      requireThat(
+        preparedDestination.target === (newBranch ?? data.state.branch),
+        "pr_push_destination_mismatch",
+      );
+      samePrPreparation(repo, data.context, data.prPreparation);
+      prs = existingPrs(repo, data.prPreparation, preparedDestination.target);
+      const previousPrs =
+        data.phase === "plan"
+          ? data.existingPrs
+          : (data.prepared?.existingPrs ?? []);
+      if (previousPrs.length)
+        requireThat(
+          previousPrs.every((old) => prs.some((now) => now.url === old.url)),
+          "prepared_pr_disappeared",
+        );
+      if (!prs.length) {
+        requireThat(
+          data.prDiffDigest !== digest(Buffer.alloc(0)),
+          "empty_pr_diff",
+        );
+        const previousText =
+          data.phase === "plan" ? data.prText : (data.prepared?.prText ?? null);
+        retainedPrText =
+          input.pr !== undefined || previousText !== null
+            ? prText(input.pr, previousText)
+            : null;
+      } else requireThat(input.pr === undefined, "existing_pr_needs_no_text");
+    } else requireThat(input.pr === undefined, "invalid_plan_input");
+    sameSnapshot(repo, data.state);
+    if (
+      data.prPreparation &&
+      preparedDestination &&
+      prs.length &&
+      !data.commitNeeded &&
+      newBranch === null &&
+      preparedDestination.observed.refs[
+        `refs/heads/${preparedDestination.target}`
+      ] === data.state.head &&
+      (!preparedDestination.setUpstream ||
+        upstreamMatches(data.state, preparedDestination))
+    )
+      return {
+        phase: "existing_pr",
+        existingPullRequests: prs,
+        commitCreated: false,
+        pushSent: false,
+        cleanup: cleanup(ref),
+      };
     release(ref);
+    if (
+      data.mode === "pr" &&
+      ((data.commitNeeded && message === null) ||
+        (!prs.length && retainedPrText === null))
+    ) {
+      const pending: Materials = {
+        ...data,
+        phase: "materials",
+        prepared: {
+          newBranch: newBranch as string | null,
+          destination: preparedDestination,
+          existingPrs: prs,
+          message: message as string | null,
+          prText: retainedPrText,
+        },
+      };
+      transition(ref, current.name, pending);
+      return {
+        reference: ref,
+        phase: "materials",
+        executable: false,
+        requiredInputs: [
+          ...(data.commitNeeded && message === null ? ["message"] : []),
+          ...(!prs.length && retainedPrText === null
+            ? ["pr.title", "pr.body"]
+            : []),
+        ],
+        branch: newBranch ?? data.state.branch,
+        message,
+        pr: {
+          repository: data.prPreparation?.options.repository,
+          head: preparedDestination?.target,
+          base: data.prPreparation?.base,
+          draft: data.prPreparation?.options.draft,
+          existingPullRequests: prs,
+        },
+        payloadRemoved: true,
+      };
+    }
     const plan: Plan = {
       ...data,
       phase: "plan",
       message: message as string | null,
+      prText: retainedPrText,
+      existingPrs: prs,
       destination: preparedDestination,
       newBranch: newBranch as string | null,
     };
@@ -759,6 +997,17 @@ function main() {
       reference: ref,
       phase: "plan",
       message: plan.message,
+      pr: plan.prPreparation
+        ? {
+            repository: plan.prPreparation.options.repository,
+            head: preparedDestination?.target,
+            base: plan.prPreparation.base,
+            baseHead: plan.prPreparation.baseHead,
+            draft: plan.prPreparation.options.draft,
+            ...plan.prText,
+            existingPullRequests: plan.existingPrs,
+          }
+        : null,
       branch: plan.newBranch ?? plan.state.branch,
       sourceBranch: plan.state.branch,
       newBranch: plan.newBranch,
@@ -809,6 +1058,13 @@ function main() {
                 : []),
             ]
           : []),
+        ...(plan.prPreparation
+          ? [
+              plan.existingPrs.length
+                ? "report existing PR without editing"
+                : "create PR and verify title/body/draft/head/base/SHA",
+            ]
+          : []),
         "cleanup",
       ],
       payloadRemoved: true,
@@ -830,6 +1086,25 @@ function main() {
     );
     sameSnapshot(repo, data.state);
     execution.destination = data.destination;
+    const checkPr = () => {
+      if (data.prPreparation && data.context) {
+        samePrPreparation(repo, data.context, data.prPreparation);
+        const prs = existingPrs(
+          repo,
+          data.prPreparation,
+          data.destination?.target ?? "",
+        );
+        if (data.existingPrs.length)
+          requireThat(
+            data.existingPrs.every((old) =>
+              prs.some((now) => now.url === old.url),
+            ),
+            "prepared_pr_disappeared",
+          );
+        return prs;
+      }
+      return [];
+    };
     const checkDestination = () => {
       if (data.destination) {
         sameContext(repo, data.destination.remote, data.destination);
@@ -843,6 +1118,7 @@ function main() {
       }
     };
     checkDestination();
+    checkPr();
     sameSnapshot(repo, data.state);
     let expectedState = data.state;
     if (data.newBranch !== null) {
@@ -850,7 +1126,7 @@ function main() {
         repo,
         data.state,
         data.newBranch,
-        data.mode === "push"
+        data.mode === "push" || data.mode === "pr"
           ? ["main", data.pushRemote?.defaultBranch ?? null]
           : undefined,
       );
@@ -881,6 +1157,7 @@ function main() {
     let committed: Record<string, unknown> = {};
     if (data.commitNeeded) {
       checkDestination();
+      checkPr();
       sameSnapshot(repo, expectedState);
       operationMayHaveSucceeded = true;
       const result = command(
@@ -949,6 +1226,7 @@ function main() {
     }
     if (data.destination) {
       checkDestination();
+      checkPr();
       sameSnapshot(repo, expectedState);
       const planned = data.destination;
       const sha = expectedState.head;
@@ -1013,6 +1291,47 @@ function main() {
           true,
         );
       }
+      let prResult: Record<string, unknown> = {};
+      if (data.prPreparation) {
+        // The push/upstream transition is verified above; pin its local result for the PR boundary.
+        const postPush = snapshot(repo);
+        const prs = checkPr();
+        sameContext(repo, planned.remote, planned);
+        requireThat(
+          remoteState(repo, planned.url).refs[
+            `refs/heads/${planned.target}`
+          ] === sha,
+          "push_verification_failed",
+        );
+        sameSnapshot(repo, postPush);
+        if (prs.length)
+          prResult = { phase: "existing_pr", existingPullRequests: prs };
+        else {
+          requireThat(data.prText, "unconfirmed_pr_text");
+          const created = createPr(
+            repo,
+            data.prPreparation,
+            planned.target,
+            sha,
+            data.prText,
+            () => {
+              prAttempted = true;
+              operationMayHaveSucceeded = true;
+            },
+          );
+          prVerified = true;
+          sameSnapshot(repo, postPush);
+          sameContext(repo, planned.remote, planned);
+          samePrPreparation(repo, planned, data.prPreparation);
+          requireThat(
+            remoteState(repo, planned.url).refs[
+              `refs/heads/${planned.target}`
+            ] === sha,
+            "push_verification_failed",
+          );
+          prResult = { phase: "pr_created", ...created };
+        }
+      }
       return {
         ...committed,
         phase: alreadyPushed ? "already_pushed" : "pushed",
@@ -1024,6 +1343,9 @@ function main() {
         pushVerified,
         upstreamConfigured,
         branchCreated,
+        ...prResult,
+        prAttempted,
+        prVerified,
         cleanup: cleanup(ref),
       };
     }
@@ -1065,6 +1387,8 @@ try {
     ...(execution.verifiedCommit
       ? { verifiedCommit: execution.verifiedCommit }
       : {}),
+    prAttempted,
+    prVerified,
     pushAttempted,
     pushSucceeded,
     pushVerified,

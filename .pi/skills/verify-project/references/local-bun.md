@@ -1,6 +1,6 @@
 # commit / commit-main: Bun公開CLIとfresh Pi入口
 
-対象は両ローカル入口。製品手順は[同梱Bun手順](../../../../skills/commit/references/local-bun.md)。pushは[専用Bun手順](push-bun.md)、未移行PRは[旧集約手順](execution-batching.md)／[既存公開Python接続](staged-push-pr.md)を使う。旧3run／Codemode回数／性能閾値を今回へ流用しない。以下だけでfresh setupから再実行する。正式checks・独立Review・受入はRootの担当。
+対象は両ローカル入口。製品手順は[同梱Bun手順](../../../../skills/commit/references/local-bun.md)。pushは[専用Bun手順](push-bun.md)、PRは[専用Bun手順](pr-bun.md)を使う。旧3run／Codemode回数／性能閾値を今回へ流用しない。以下だけでfresh setupから再実行する。正式checks・独立Review・受入はRootの担当。
 
 ## 前提・fresh setup
 

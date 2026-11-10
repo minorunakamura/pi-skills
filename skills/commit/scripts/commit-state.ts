@@ -26,7 +26,7 @@ export function splitNull(bytes: Buffer): Buffer[] {
   requireThat(start === bytes.length, "invalid_git_paths");
   return parts;
 }
-function display(bytes: Buffer): string {
+export function displayPath(bytes: Buffer): string {
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
@@ -48,7 +48,7 @@ export function changes(repo: string): Change[] {
     const field = fields[at];
     const path = field.subarray(3);
     const change: Change = {
-      path: display(path),
+      path: displayPath(path),
       pathBytes: path.toString("base64"),
       index: String.fromCharCode(field[0]),
       worktree: String.fromCharCode(field[1]),
@@ -61,7 +61,7 @@ export function changes(repo: string): Change[] {
     ) {
       const original = fields[++at];
       requireThat(original, "invalid_git_paths");
-      change.originalPath = display(original);
+      change.originalPath = displayPath(original);
       change.originalBytes = original.toString("base64");
     }
     result.push(change);

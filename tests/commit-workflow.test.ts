@@ -16,6 +16,11 @@ import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import {
+  configurePrFixture,
+  fixtureRepository,
+} from "../.pi/skills/verify-project/scripts/pr-fixture.ts";
+
 const scripts = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../skills/commit/scripts",
@@ -1924,4 +1929,499 @@ await test("push failure reports the verified commit separately from a hook-move
   assert.notEqual(result.value.verifiedCommit, parent);
   assert.equal((result.value.observed as { head: string }).head, parent);
   assert.equal(result.value.upstreamConfigured, false);
+});
+
+function prFixture(t: { after: (fn: () => void) => void }) {
+  const f = pushFixture(t);
+  configurePrFixture(
+    f.owned,
+    "" + spawnSync("which", ["git"], { encoding: "utf8" }).stdout.trim(),
+    process.execPath,
+  );
+  f.env.PATH = join(f.owned, "bin") + ":" + f.env.PATH;
+  return f;
+}
+await test("PR plan retains fixed title/body bytes when only the commit message changes", (t) => {
+  const f = prFixture(t);
+  writeFileSync(join(f.repo, "example.txt"), "base\nPR change\n");
+  const materials = prepare(f, {
+    mode: "pr",
+    push: { remote: "origin" },
+    pr: { repository: fixtureRepository, draft: true },
+  });
+  const title = "docs: exact 'title' $HOME `code`";
+  const body = "## Summary\n\nKeep $(touch unwanted), `code` and 日本語.\n\n";
+  const first = f.cli("plan", {
+    reference: materials.value.reference,
+    newBranch: "docs/pr",
+    message: "docs: original\n\n",
+    pr: { title, body },
+  });
+  assert.equal(first.exit, 0, JSON.stringify(first.value));
+  const changed = f.cli("plan", {
+    reference: first.value.reference,
+    message: "docs: revised\n",
+  });
+  assert.equal(changed.exit, 0, JSON.stringify(changed.value));
+  assert.deepEqual(changed.value.pr, first.value.pr);
+  assert.equal((changed.value.pr as { title: string }).title, title);
+  assert.equal((changed.value.pr as { body: string }).body, body);
+});
+await test("PR plan text revision preserves fixed commit and the other PR field and invalidates old references", (t) => {
+  const f = prFixture(t);
+  writeFileSync(join(f.repo, "example.txt"), "branch history\n");
+  const materials = prepare(f, {
+    mode: "pr",
+    push: { remote: "origin" },
+    pr: { repository: fixtureRepository },
+  });
+  const first = f.cli("plan", {
+    reference: materials.value.reference,
+    newBranch: "docs/pr",
+    message: "docs: fixed commit\n\n",
+    pr: { title: "docs: fixed title", body: "original\n\n" },
+  });
+  assert.equal(first.exit, 0, JSON.stringify(first.value));
+  const changed = f.cli("plan", {
+    reference: first.value.reference,
+    pr: { body: "revised $HOME\n\n" },
+  });
+  assert.equal(changed.exit, 0, JSON.stringify(changed.value));
+  assert.equal(changed.value.message, "docs: fixed commit\n\n");
+  assert.equal(
+    (changed.value.pr as { title: string }).title,
+    "docs: fixed title",
+  );
+  assert.equal(
+    (changed.value.pr as { body: string }).body,
+    "revised $HOME\n\n",
+  );
+  assert.equal(f.cli("execute", { reference: first.value.reference }).exit, 1);
+  const result = f.cli("execute", { reference: changed.value.reference });
+  assert.equal(result.exit, 0, JSON.stringify(result.value));
+  assert.equal(result.value.phase, "pr_created");
+});
+function preparePrPlan(
+  f: ReturnType<typeof prFixture>,
+  pr: Record<string, unknown> = {},
+) {
+  const materials = prepare(f, {
+    mode: "pr",
+    scope: { kind: "paths", paths: ["example.txt"] },
+    push: { remote: "origin", setUpstream: true },
+    pr: { repository: fixtureRepository, ...pr },
+  });
+  const pending = f.cli("plan", {
+    reference: materials.value.reference,
+    ...(materials.value.commitNeeded ? { message: "docs: fixed\n\n" } : {}),
+    ...((materials.value.branchPolicy as { createBranch: boolean }).createBranch
+      ? { newBranch: "docs/pr" }
+      : {}),
+  });
+  assert.equal(pending.exit, 0, JSON.stringify(pending.value));
+  if (pending.value.phase !== "materials") return pending;
+  return f.cli("plan", {
+    reference: pending.value.reference,
+    pr: {
+      title: "docs: fixed title $HOME",
+      body: "## Summary\n\nExact 'bytes' `code` 日本語\n\n",
+    },
+  });
+}
+function fixturePr(f: ReturnType<typeof prFixture>, state = "OPEN") {
+  return {
+    number: 1,
+    url: `https://${fixtureRepository}/pull/1`,
+    state,
+    isCrossRepository: false,
+    headRefName: "docs/pr",
+    baseRefName: "main",
+  };
+}
+function setPrState(
+  f: ReturnType<typeof prFixture>,
+  value: Record<string, unknown>,
+) {
+  writeFileSync(join(f.owned, "pr-state.json"), JSON.stringify(value));
+}
+for (const kind of ["new", "existing-head", "pr-only"] as const) {
+  await test(`PR public CLI ${kind} preserves branch history, exact text, outside scope and only necessary mutations`, (t) => {
+    const f = prFixture(t);
+    const main = f.git("rev-parse", "HEAD");
+    f.git("switch", "-c", "docs/pr");
+    writeFileSync(join(f.repo, "prior.txt"), "earlier branch purpose\n");
+    f.git("add", "prior.txt");
+    f.git("commit", "-m", "docs: earlier branch change");
+    writeFileSync(join(f.repo, "example.txt"), "new example\n");
+    if (kind !== "new") {
+      f.git("add", "example.txt");
+      f.git("commit", "-m", "docs: existing head");
+    }
+    if (kind === "pr-only") f.git("push", "origin", "docs/pr");
+    writeFileSync(join(f.repo, "outside.txt"), "keep outside\n");
+    const before = f.git("rev-parse", "HEAD");
+    const materials = prepare(f, {
+      mode: "pr",
+      scope: { kind: "paths", paths: ["example.txt"] },
+      push: { remote: "origin" },
+      pr: { repository: fixtureRepository, draft: true },
+    });
+    assert.equal(materials.exit, 0, JSON.stringify(materials.value));
+    assert.match(
+      (materials.value.prHistory as { text: string }).text,
+      /earlier branch change/,
+    );
+    assert.match(
+      (materials.value.prDiff as { text: string }).text,
+      /earlier branch purpose/,
+    );
+    assert.deepEqual(
+      (materials.value.pr as { reusableStagedPathBytes: string[] })
+        .reusableStagedPathBytes,
+      kind === "new" ? [Buffer.from("example.txt").toString("base64")] : [],
+    );
+    const pending = f.cli("plan", {
+      reference: materials.value.reference,
+      ...(kind === "new" ? { message: "docs: fixed\n\n" } : {}),
+    });
+    assert.equal(pending.exit, 0, JSON.stringify(pending.value));
+    assert.equal(pending.value.executable, false);
+    assert.deepEqual(pending.value.requiredInputs, ["pr.title", "pr.body"]);
+    const pendingRef = pending.value.reference as {
+      directory: string;
+      files: Record<string, unknown>;
+    };
+    assert.equal(
+      Object.keys(pendingRef.files).some((name) => name.endsWith(".bin")),
+      false,
+    );
+    const planned = f.cli("plan", {
+      reference: pendingRef,
+      pr: { title: "docs: fixed 'title'", body: "$HOME `code` 日本語\n\n" },
+    });
+    assert.equal(planned.exit, 0, JSON.stringify(planned.value));
+    assert.equal(f.git("rev-parse", "HEAD"), before);
+    const executed = f.cli("execute", { reference: planned.value.reference });
+    assert.equal(executed.exit, 0, JSON.stringify(executed.value));
+    assert.equal(executed.value.phase, "pr_created");
+    assert.equal(executed.value.commitCreated, kind === "new");
+    assert.equal(executed.value.pushSent, kind !== "pr-only");
+    assert.equal(executed.value.prVerified, true);
+    assert.equal(f.git("rev-parse", "main"), main);
+    assert.equal(f.bareGit("rev-parse", "docs/pr"), f.git("rev-parse", "HEAD"));
+    assert.equal(
+      readFileSync(join(f.repo, "outside.txt"), "utf8"),
+      "keep outside\n",
+    );
+    const state = JSON.parse(
+      readFileSync(join(f.owned, "pr-state.json"), "utf8"),
+    ) as { prs: { title: string; body: string; isDraft: boolean }[] };
+    assert.equal(state.prs.length, 1);
+    assert.deepEqual(
+      [state.prs[0].title, state.prs[0].body, state.prs[0].isDraft],
+      ["docs: fixed 'title'", "$HOME `code` 日本語\n\n", true],
+    );
+  });
+}
+await test("PR pending plan cannot execute, retains branch/message without resending and rejects stale reference", (t) => {
+  const f = prFixture(t);
+  writeFileSync(join(f.repo, "example.txt"), "pending\n");
+  const materials = prepare(f, {
+    mode: "pr",
+    push: { remote: "origin" },
+    pr: { repository: fixtureRepository },
+  });
+  const pending = f.cli("plan", {
+    reference: materials.value.reference,
+    newBranch: "docs/pr",
+    message: "docs: retain\n",
+  });
+  assert.equal(pending.exit, 0, JSON.stringify(pending.value));
+  assert.equal(
+    f.cli("execute", { reference: materials.value.reference }).exit,
+    1,
+  );
+  // A rejected execute cleans up its own pending plan; it cannot create an unconfirmed PR.
+  const rejected = f.cli("execute", { reference: pending.value.reference });
+  assert.equal(rejected.exit, 1);
+  assert.equal(rejected.value.error, "execute_accepts_reference_only");
+  assert.equal(f.git("rev-list", "--count", "HEAD"), "1");
+});
+for (const state of ["OPEN", "CLOSED", "MERGED"]) {
+  await test(`PR ${state} existing report needs no PR text, commit or re-push`, (t) => {
+    const f = prFixture(t);
+    f.git("switch", "-c", "docs/pr");
+    writeFileSync(join(f.repo, "example.txt"), "history\n");
+    f.git("add", "example.txt");
+    f.git("commit", "-m", "docs: history");
+    f.git("push", "-u", "origin", "docs/pr");
+    setPrState(f, { prs: [fixturePr(f, state)], fault: null });
+    const before = readFileSync(join(f.owned, "pr-state.json"));
+    const planned = preparePrPlan(f);
+    assert.equal(planned.exit, 0, JSON.stringify(planned.value));
+    assert.equal(planned.value.phase, "existing_pr");
+    assert.equal(planned.value.commitCreated, false);
+    assert.equal(planned.value.pushSent, false);
+    assert.deepEqual(readFileSync(join(f.owned, "pr-state.json")), before);
+  });
+}
+for (const fault of [
+  "disappeared",
+  "conflict",
+  "commit-drift",
+  "push-drift",
+  "create-response",
+  "readback",
+] as const) {
+  await test(`PR ${fault} stops subsequent mutations and retains preceding success`, (t) => {
+    const f = prFixture(t);
+    writeFileSync(join(f.repo, "example.txt"), "pending\n");
+    if (fault === "disappeared")
+      setPrState(f, { prs: [fixturePr(f)], fault: null });
+    const planned = preparePrPlan(f);
+    assert.equal(planned.exit, 0, JSON.stringify(planned.value));
+    if (fault === "disappeared") setPrState(f, { prs: [], fault: null });
+    if (fault === "conflict")
+      setPrState(f, { prs: [fixturePr(f)], fault: null });
+    if (fault === "create-response" || fault === "readback")
+      setPrState(f, { prs: [], fault });
+    if (fault === "commit-drift") {
+      writeFileSync(
+        join(f.repo, ".git/hooks/post-commit"),
+        "#!/bin/sh\ngit remote set-url origin https://other.example.invalid/wrong/repo.git\n",
+      );
+      chmodSync(join(f.repo, ".git/hooks/post-commit"), 0o700);
+    }
+    if (fault === "push-drift") {
+      writeFileSync(
+        join(f.repo, ".git/hooks/pre-push"),
+        "#!/bin/sh\ngit update-ref refs/heads/unplanned HEAD\n",
+      );
+      chmodSync(join(f.repo, ".git/hooks/pre-push"), 0o700);
+    }
+    const executed = f.cli("execute", { reference: planned.value.reference });
+    assert.equal(
+      executed.exit,
+      fault === "conflict" ? 0 : 1,
+      JSON.stringify(executed.value),
+    );
+    const calls = readFileSync(join(f.owned, "gh.jsonl"), "utf8");
+    const creates = calls
+      .split("\n")
+      .filter((row) => row.startsWith('["pr","create"')).length;
+    assert.equal(
+      creates,
+      ["create-response", "readback"].includes(fault) ? 1 : 0,
+    );
+    if (fault === "disappeared") {
+      assert.equal(executed.value.error, "prepared_pr_disappeared");
+      assert.equal(executed.value.commitSucceeded, false);
+    }
+    if (fault === "commit-drift") {
+      assert.equal(executed.value.commitVerified, true);
+      assert.equal(executed.value.pushAttempted, false);
+    }
+    if (fault === "push-drift") {
+      assert.equal(executed.value.commitVerified, true);
+      assert.equal(executed.value.pushSucceeded, true);
+      assert.equal(executed.value.prAttempted, false);
+    }
+    if (["create-response", "readback"].includes(fault)) {
+      assert.equal(executed.value.pushVerified, true);
+      assert.equal(executed.value.prAttempted, true);
+      assert.equal(executed.value.prVerified, false);
+    }
+  });
+}
+await test("PR base setting change requires explicit cleanup and fresh preparations without committing", (t) => {
+  const f = prFixture(t);
+  f.git("push", "origin", "HEAD:refs/heads/release");
+  writeFileSync(join(f.repo, "example.txt"), "pending\n");
+  const first = preparePrPlan(f);
+  assert.equal(first.exit, 0, JSON.stringify(first.value));
+  assert.equal(f.cli("cleanup", { reference: first.value.reference }).exit, 0);
+  const second = preparePrPlan(f, { base: "release", draft: true });
+  assert.equal(second.exit, 0, JSON.stringify(second.value));
+  assert.equal((second.value.pr as { base: string }).base, "release");
+  assert.equal((second.value.pr as { draft: boolean }).draft, true);
+  assert.equal(f.git("rev-list", "--count", "HEAD"), "1");
+});
+await test("PR large fixed materials support batched reads and never reuse same path with different old blob", (t) => {
+  const f = prFixture(t);
+  f.git("switch", "-c", "docs/pr");
+  writeFileSync(join(f.repo, "example.txt"), "existing branch change\n");
+  f.git("add", "example.txt");
+  f.git("commit", "-m", "docs: branch history");
+  writeFileSync(join(f.repo, "example.txt"), "pending\n".repeat(6000));
+  const materials = prepare(f, {
+    mode: "pr",
+    push: { remote: "origin" },
+    pr: { repository: fixtureRepository },
+  });
+  assert.equal(materials.exit, 0, JSON.stringify(materials.value));
+  assert.equal(materials.value.displayed, false);
+  assert.deepEqual(
+    (materials.value.pr as { reusableStagedPathBytes: string[] })
+      .reusableStagedPathBytes,
+    [],
+  );
+  const read = f.cli("read", {
+    reference: materials.value.reference,
+    parts: [
+      { name: "pr-diff", offset: 0, length: 1500 },
+      {
+        name: "pr-history",
+        offset: 0,
+        length: Number(materials.value.prHistoryBytes),
+      },
+    ],
+  });
+  assert.equal(read.exit, 0, JSON.stringify(read.value));
+  assert.equal(read.value.fixed, true);
+  assert.equal((read.value.parts as unknown[]).length, 2);
+});
+for (const response of ["missing", "empty", "null"] as const) {
+  await test(`PR template field ${response} response ${response === "missing" ? "stops" : "allows"} public materials with Stage retained and no commit/push/PR`, (t) => {
+    const f = prFixture(t);
+    writeFileSync(join(f.repo, "example.txt"), "pending template check\n");
+    setPrState(f, { prs: [], fault: `templates-${response}` });
+    const refs = f.git("show-ref");
+    const bareRefs = f.bareGit("show-ref");
+    const inspected = f.cli("inspect", {
+      mode: "pr",
+      push: { remote: "origin" },
+      pr: { repository: fixtureRepository },
+    });
+    assert.equal(inspected.exit, 0, JSON.stringify(inspected.value));
+    const materials = f.cli("materials", {
+      reference: inspected.value.reference,
+    });
+    assert.equal(materials.exit, response === "missing" ? 1 : 0);
+    if (response === "missing")
+      assert.equal(materials.value.error, "invalid_template_response");
+    else {
+      assert.equal(materials.value.phase, "materials");
+      assert.deepEqual(materials.value.prTemplates, {
+        encoding: "utf8",
+        text: "[]",
+      });
+      assert.equal(
+        f.cli("cleanup", { reference: materials.value.reference }).exit,
+        0,
+      );
+    }
+    assert.equal(f.git("show", ":example.txt"), "pending template check");
+    assert.equal(f.git("diff"), "");
+    assert.equal(f.git("show-ref"), refs);
+    assert.equal(f.git("symbolic-ref", "HEAD"), "refs/heads/main");
+    assert.equal(f.git("rev-list", "--count", "HEAD"), "1");
+    assert.equal(f.bareGit("show-ref"), bareRefs);
+    assert.deepEqual(
+      JSON.parse(readFileSync(join(f.owned, "pr-state.json"), "utf8")).prs,
+      [],
+    );
+    const ghCalls = readFileSync(join(f.owned, "gh.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((row) => JSON.parse(row) as string[]);
+    assert.equal(
+      ghCalls.some((args) => args[0] === "pr"),
+      false,
+    );
+    const sshCalls = readFileSync(join(f.owned, "ssh.jsonl"), "utf8");
+    assert.equal(sshCalls.includes("git-receive-pack"), false);
+  });
+}
+await test("PR mismatched repository fails preparation before commit without disclosing child output", (t) => {
+  const f = prFixture(t);
+  writeFileSync(join(f.repo, "example.txt"), "pending\n");
+  const inspected = f.cli("inspect", {
+    mode: "pr",
+    push: { remote: "origin" },
+    pr: { repository: "github.example.invalid/other/repo" },
+  });
+  assert.equal(inspected.exit, 0, JSON.stringify(inspected.value));
+  const materials = f.cli("materials", {
+    reference: inspected.value.reference,
+  });
+  assert.equal(materials.exit, 1);
+  assert.equal(materials.value.error, "github_remote_mismatch");
+  assert.equal(f.git("rev-list", "--count", "HEAD"), "1");
+});
+await test("PR disappearance from intermediate preparation stops before generating missing commit text", (t) => {
+  const f = prFixture(t);
+  writeFileSync(join(f.repo, "example.txt"), "pending\n");
+  setPrState(f, { prs: [fixturePr(f)], fault: null });
+  const materials = prepare(f, {
+    mode: "pr",
+    push: { remote: "origin" },
+    pr: { repository: fixtureRepository },
+  });
+  const pending = f.cli("plan", {
+    reference: materials.value.reference,
+    newBranch: "docs/pr",
+  });
+  assert.equal(pending.exit, 0, JSON.stringify(pending.value));
+  assert.deepEqual(pending.value.requiredInputs, ["message"]);
+  setPrState(f, { prs: [], fault: null });
+  const planned = f.cli("plan", {
+    reference: pending.value.reference,
+    message: "docs: supplied\n",
+  });
+  assert.equal(planned.exit, 1);
+  assert.equal(planned.value.error, "prepared_pr_disappeared");
+  assert.equal(f.git("rev-list", "--count", "HEAD"), "1");
+});
+await test("PR materials preserve non-UTF8 path bytes and use shared escaped display", (t) => {
+  const f = prFixture(t);
+  const name = Buffer.from([0xff]);
+  const blob = f.git("hash-object", "-w", "example.txt");
+  const staged = spawnSync("git", ["update-index", "-z", "--index-info"], {
+    cwd: f.repo,
+    env: f.env,
+    input: Buffer.concat([
+      Buffer.from(`100644 ${blob}\t`),
+      name,
+      Buffer.from([0]),
+    ]),
+  });
+  assert.equal(staged.status, 0);
+  const materials = prepare(f, {
+    mode: "pr",
+    scope: { kind: "staged" },
+    push: { remote: "origin" },
+    pr: { repository: fixtureRepository },
+  });
+  assert.equal(materials.exit, 0, JSON.stringify(materials.value));
+  const files = (
+    materials.value.pr as { files: { path: string; pathBytes: string }[] }
+  ).files;
+  assert.deepEqual(
+    files.map(({ path, pathBytes }) => ({ path, pathBytes })),
+    [{ path: "[path bytes: ff]", pathBytes: "/w==" }],
+  );
+});
+await test("PR pending preparation retains supplied PR bytes when only missing commit text is supplied", (t) => {
+  const f = prFixture(t);
+  writeFileSync(join(f.repo, "example.txt"), "pending\n");
+  const materials = prepare(f, {
+    mode: "pr",
+    push: { remote: "origin" },
+    pr: { repository: fixtureRepository },
+  });
+  const body = "Keep $HOME `code` 日本語\n\n";
+  const pending = f.cli("plan", {
+    reference: materials.value.reference,
+    newBranch: "docs/pr",
+    pr: { title: "docs: exact title", body },
+  });
+  assert.equal(pending.exit, 0, JSON.stringify(pending.value));
+  assert.deepEqual(pending.value.requiredInputs, ["message"]);
+  const complete = f.cli("plan", {
+    reference: pending.value.reference,
+    message: "docs: supplied later\n",
+  });
+  assert.equal(complete.exit, 0, JSON.stringify(complete.value));
+  assert.equal(complete.value.phase, "plan");
+  assert.equal((complete.value.pr as { body: string }).body, body);
 });
