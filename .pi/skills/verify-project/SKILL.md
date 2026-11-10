@@ -9,7 +9,7 @@ description: Verify pi-skills local commit Bun branch planning, approval, defaul
 
 **commit-pushは[push専用Bun／runtime停止手順](references/push-bun.md)**を使う。新commit／既存HEAD、remote／実URL／target／予定upstreamの一括確認、固定SHA送信・PR API0、先行成功と後続停止を実Gitで照合する。
 
-**commit-prは[PR用Bun／修正／部分成功／runtime停止手順](references/pr-bun.md)**を使う。新commit／既存HEAD／PR-only／全state既存PR、固定文章と片側修正・設定再準備、commit後／送信後driftを同一repositoryの架空GitHub URL→owned local bare／TS gh+ssh fixtureで照合する。旧[集約手順](references/execution-batching.md)／[公開Python接続](references/staged-push-pr.md)は変更前baseline用で、現行入口へ適用しない。
+**commit-prは[PR用Bun／修正／部分成功／runtime停止手順](references/pr-bun.md)**を使う。新commit／既存HEAD／PR-only／全state既存PR、固定文章と片側修正・設定再準備、commit後／送信後driftを同一repositoryの架空GitHub URL→owned local bare／TS gh+ssh fixtureで照合する。廃止したPython専用手順は使わず、共有保証は公開Bun suiteと各専用手順で確認する。
 
 ## 分離・証拠・再利用
 

@@ -58,7 +58,7 @@ printf '# Example\n' > README.md
 printf '\nRun the example locally.\n' >> README.md
 ```
 
-起動前にsource版／dirty（新規未追跡資材含む）と関連fileのSHA-256 manifest、runtime版、probe結果を無秘密のrun記録へ保存・固定する。manifestには入口／両製品reference／製品TS・設定と、使用する検証Skill／Map／専用手順／RPC・metric helper／使捨てsetup・driverを含める。終了後も同じdigestを照合し、run中はsource・手順・helper・起動済みsetup／driverを編集しない。修正が必要ならそのrunを終了・wait・cleanupして証拠を保持し、修正後に別fresh setupと新manifestで検証する。以前の版不明runを最終版の成功に流用しない。production変更前baselineが必要な変更では未コミット／未追跡を含む変更直前sourceをowned read-onlyコピーへ保存しchmod -R a-w／uidを確認する。reset／stashは禁止。旧Pythonは既存実体だけ使い、新installしない。比較は旧commitと新commitの同じ小diff／履歴／明示文章／通常承認を1組。baselineのruntime／呼出しは実際の変更前sourceに従い、既存Python／legacy Codemodeが必要な旧版でも後続installしない。provider／model／thinkingの通常解決を照合し、条件差・失敗は隠さない。
+起動前にsource版／dirty（新規未追跡資材含む）と関連fileのSHA-256 manifest、runtime版、probe結果を無秘密のrun記録へ保存・固定する。manifestには入口／両製品reference／製品TS・設定と、使用する検証Skill／Map／専用手順／RPC・metric helper／使捨てsetup・driverを含める。終了後も同じdigestを照合し、run中はsource・手順・helper・起動済みsetup／driverを編集しない。修正が必要ならそのrunを終了・wait・cleanupして証拠を保持し、修正後に別fresh setupと新manifestで検証する。以前の版不明runを最終版の成功に流用しない。production変更前baselineが必要な変更では未コミット／未追跡を含む変更直前sourceをowned read-onlyコピーへ保存しchmod -R a-w／uidを確認する。reset／stashは禁止。旧Pythonは既存実体だけ使い、新installしない。比較は変更前sourceと変更後sourceの同じ小diff／履歴／明示文章／通常承認を1組。両fixtureの初回commit前に同じ`GIT_AUTHOR_DATE`／`GIT_COMMITTER_DATE`（例`2026-01-01T00:00:00Z`）をexportし、元HEAD／diff digest／historyを照合する。変更前sourceがすでにBun版ならPython→Bunの速度効果とは呼ばない。baselineのruntime／呼出しは実際の変更前sourceに従い、既存Pythonが必要な旧版でも後続installしない。provider／model／thinkingの通常解決を照合し、条件差・失敗は隠さない。
 
 ## 公開CLI: focused代表
 
@@ -148,7 +148,7 @@ commit-mainはSkillとrequestを置換し別fresh状態で実行。pushは[専�
 
 ## 証拠・cleanup・readback
 
-保存先は`docs/verification/<issue-number>/<一意run>/<case>/`（今回のruntime変更は47）。source版／dirty／関連digest、環境／操作／command exit／期待／観測／pass-fail／未確認、承認前後の最小Git snapshot、必要RPC操作とmetric、cleanupを無秘密の最小記録にする。Mapに履歴を書かない。fixture由来と確認したものだけを保存し、auth／秘密／不要raw logは記録しない。
+保存先は`docs/verification/<issue-number>/<一意run>/<case>/`。source版／dirty／関連digest、環境／操作／command exit／期待／観測／pass-fail／未確認、承認前後の最小Git snapshot、必要RPC操作とmetric、cleanupを無秘密の最小記録にする。Mapに履歴を書かない。fixture由来と確認したものだけを保存し、auth／秘密／不要raw logは記録しない。
 
 `operations.jsonl`は全assistant request（tool-only含む）のtimestamp／duration／取得可能usageを含む。承認前／利用者待機／承認後／全体時間、assistant request数、生成code bytes／行（固定CLI呼出し・文章／設定payloadと区別）、未取得unknownを記録する。nested toolは外側toolCall IDで二重加算しない。旧入口との条件差を明記し、単発観測を安定した高速化の証明にしない。
 
@@ -156,4 +156,4 @@ helperはstdin closeでorderly shutdownし、自分のPi process groupだけをt
 
 必要証拠をowned外のrunへ保存後、所有確認した今回OWNEDだけを削除する。read-only baseline sourceはRootの保存確認後、全必要run終了・uid確認後に所有者がcleanupする。製品cleanupの未知file保持と、検証者の使捨て環境全体cleanupは別。cleanup後にも短いrun READMEから**全証拠参照を実read**する。
 
-再利用はproject trustを確認し新セッション／reload後、`/skill:verify-project commit Bun local`、または実ファイルの明示read。Rootは別fresh状態でこの手順だけから公開CLI／実入口を選び独立確認する。全Map反復・未移行PR full-pipelineを今回成功扱いにしない。
+再利用はproject trustを確認し新セッション／reload後、`/skill:verify-project commit Bun local`、または実ファイルの明示read。Rootは別fresh状態でこの手順だけから公開CLI／実入口を選び独立確認する。全Map反復・実GitHub・恒久full-pipeline E2Eは要求しない。

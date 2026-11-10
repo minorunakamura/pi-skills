@@ -17,7 +17,7 @@ setupはpush-fixtureの実Git/local bare・wrapper・観測を再利用。remote
 
 既存履歴＋今回diffはseed後、READMEを変更する前に`git switch -c feature/ready`→`prior.txt`を追加commit→README pendingにする（setup newのREADMEは一旦そのまま保持し、git add prior.txtだけ）。PR既存HEADはsetupをexisting、PR-onlyはさらに`git push -u origin feature/ready`してから観測logを開始する。outside.txtは対象外untrackedのまま。旧履歴は今回Gitleaks検査済みと呼ばない。
 
-source版／dirty・関連SHA256 manifestをdocs/verification/48/<一意run>/<case>/へrun前固定する。全製品TS／設定／Skill／共有手順、検証Skill／Map／関連手順／fixture／RPC／metric／使捨てdriverを含める。run中は編集せず、修正は終了wait／cleanup後に新fresh runへ。run終了時digest不変を照合する。
+source版／dirty・関連SHA256 manifestをdocs/verification/<issue-number>/<一意run>/<case>/へrun前固定する。全製品TS／設定／Skill／共有手順、検証Skill／Map／関連手順／fixture／RPC／metric／使捨てdriverを含める。run中は編集せず、修正は終了wait／cleanup後に新fresh runへ。run終了時digest不変を照合する。
 
 ## 公開CLI: 実Gitのfocused代表
 

@@ -16,7 +16,7 @@ export PATH="$OWNED/bin:$(dirname "$VERIFY_BUN"):/usr/bin:/bin"
 
 既存HEAD代表はfresh OWNEDでsetupの`new`を`existing`へ置換。newはmainにbase1件、READMEだけpending、bare main=base。existingはfeature/readyに2件の既存commit、bareはbase mainだけ。両方ともoutside.txtは未追跡。Git wrapperは引数をgit.jsonlに記録して実Gitをそのまま実行、ghは呼ばれればmarkerを作り非0にする（成功mockなし）。fixture setupのseed pushは観測log開始前で製品送信と区別する。
 
-起動前にsource版／dirty（新規未追跡資材含む）／関連SHA256 manifestを`docs/verification/47/<一意run>/<case>/`へ固定する。入口／製品全TS・設定／参照、検証Skill／Map／本手順／fixture／RPC／metric／使捨てsetup・driverを含める。driver完成後、実行前にdigest固定し、run中のsource／手順／helper／driver編集禁止。修正は終了・wait・cleanup後、別fresh runへ。終了後manifest一致も照合する。証拠はowned外へ保存し、auth／秘密／不要raw logを含めない。
+起動前にsource版／dirty（新規未追跡資材含む）／関連SHA256 manifestを`docs/verification/<issue-number>/<一意run>/<case>/`へ固定する。入口／製品全TS・設定／参照、検証Skill／Map／本手順／fixture／RPC／metric／使捨てsetup・driverを含める。driver完成後、実行前にdigest固定し、run中のsource／手順／helper／driver編集禁止。修正は終了・wait・cleanup後、別fresh runへ。終了後manifest一致も照合する。証拠はowned外へ保存し、auth／秘密／不要raw logを含めない。
 
 ## 公開Bun CLIの代表
 
@@ -26,7 +26,7 @@ export PATH="$OWNED/bin:$(dirname "$VERIFY_BUN"):/usr/bin:/bin"
 
 同梱Bun保護起動の公開JSONと実Git／local bareを通す。新commit／既存HEAD、main→未存在branch・元ref／scope外保持、文章なし／commitなし、同SHA no-op、明示初回main新commit／既存HEAD成功とtagのみ非空／既存remote／送信元・宛先違い拒否、通常main／通信default保護、必要object不足の非fetch、URL資格情報／複数URL／customSSH拒否、local default疑義をpushに転用しないことを確認する。
 
-通常pre-push hookが受け取るSHA refspec／通常hook有効、followTags／mirror／submodule設定があっても余分refsなし、最初のpositive fetch mapping先だけが元値のままか予定SHAとなることを確認する。negative等のrefspecにより未更新の場合もあるので、wildcard更新／exact＋negative未更新（後続local-head mappingの有無）／予定upstreamの正常対照と、任意SHA／他ref変更の拒否を選ぶ。mapping先がlocal branch／tagまたはsymbolic ref（未解決含む）ならcommit／branch／push前に拒否し、元ref／HEAD／全refs／設定／Stageを保持する。plan後のsymbolic化も操作前拒否、正常custom mapping／mappingなしは成功する対照を選ぶ。準備後宛先／remote drift、commit後URL変更停止、hook非0、送信後local drift／upstream失敗の先行成功と後続停止を選ぶ。内部handler成功固定で実操作を消さない。local2入口75件の無通信等の回帰も保持する。
+通常pre-push hookが受け取るSHA refspec／通常hook有効、followTags／mirror／submodule設定があっても余分refsなし、最初のpositive fetch mapping先だけが元値のままか予定SHAとなることを確認する。negative等のrefspecにより未更新の場合もあるので、wildcard更新／exact＋negative未更新（後続local-head mappingの有無）／予定upstreamの正常対照と、任意SHA／他ref変更の拒否を選ぶ。mapping先がlocal branch／tagまたはsymbolic ref（未解決含む）ならcommit／branch／push前に拒否し、元ref／HEAD／全refs／設定／Stageを保持する。plan後のsymbolic化も操作前拒否、正常custom mapping／mappingなしは成功する対照を選ぶ。準備後宛先／remote drift、commit後URL変更停止、hook非0、送信後local drift／upstream失敗の先行成功と後続停止を選ぶ。内部handler成功固定で実操作を消さない。local2入口の無通信等の回帰も保持する。
 
 ## fresh Pi通常一括承認
 

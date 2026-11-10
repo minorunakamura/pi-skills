@@ -11,7 +11,6 @@
     "extensions/",
     "skills/*/SKILL.md",
     "skills/*/references/*.md",
-    "skills/*/scripts/*.py",
     "skills/*/scripts/*.ts",
     "skills/*/scripts/*.toml",
     "skills/*/scripts/*.json"
@@ -25,12 +24,12 @@
     ]
   },
   "scripts": {
-    "test": "node --test 'tests/**/*.test.js' 'tests/**/*.test.ts' '.pi/skills/verify-project/scripts/*.test.ts' && mise exec -- uv run --locked --python python python -B -m pytest",
-    "lint": "oxlint --type-aware --deny-warnings skills tests extensions .pi/skills/verify-project/scripts && mise exec -- ruff check skills/commit",
-    "typecheck": "tsc --noEmit && mise exec -- uv run --locked --python python ty check skills/commit",
-    "lint:fix": "oxlint --type-aware --deny-warnings --fix skills tests extensions .pi/skills/verify-project/scripts && mise exec -- ruff check --fix skills/commit",
-    "format": "biome format --write . && mise exec -- ruff format skills/commit",
-    "format:check": "biome format . && mise exec -- ruff format --check skills/commit"
+    "test": "node --test 'tests/**/*.test.js' 'tests/**/*.test.ts' '.pi/skills/verify-project/scripts/*.test.ts'",
+    "lint": "oxlint --type-aware --deny-warnings skills tests extensions .pi/skills/verify-project/scripts",
+    "typecheck": "tsc --noEmit",
+    "lint:fix": "oxlint --type-aware --deny-warnings --fix skills tests extensions .pi/skills/verify-project/scripts",
+    "format": "biome format --write .",
+    "format:check": "biome format ."
   },
   "keywords": [
     "pi-package"
