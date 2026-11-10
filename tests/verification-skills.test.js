@@ -3,7 +3,7 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 await test("migrated commit entries require Bun and remove only their dedicated compatibility routes", async () => {
-  for (const name of ["commit", "commit-main", "commit-push"]) {
+  for (const name of ["commit", "commit-main", "commit-push", "commit-pr"]) {
     const source = await readFile(
       new URL(`../skills/${name}/SKILL.md`, import.meta.url),
       "utf8",
@@ -13,7 +13,7 @@ await test("migrated commit entries require Bun and remove only their dedicated 
       /^compatibility: .*Bun 1\.3\.0\+.*before any Git mutation.*no-confirm.*No fallback/m,
     );
   }
-  for (const route of ["local", "push"]) {
+  for (const route of ["local", "push", "pr"]) {
     const source = await readFile(
       new URL(`../skills/commit/references/${route}-bun.md`, import.meta.url),
       "utf8",
@@ -32,8 +32,11 @@ await test("migrated commit entries require Bun and remove only their dedicated 
       { code: "ENOENT" },
     );
   }
-  await access(
-    new URL("../skills/commit/references/compatibility.md", import.meta.url),
+  await assert.rejects(
+    access(
+      new URL("../skills/commit/references/compatibility.md", import.meta.url),
+    ),
+    { code: "ENOENT" },
   );
 });
 

@@ -1,6 +1,6 @@
 # commit / commit-main: Bun標準手順
 
-両ローカル入口の手順。commit-pushは[push用Bun手順](push-bun.md)、commit-prは[旧workflow](workflow.md)を使う。push手順から共通部分を参照する場合だけ、push側のmode／default／branch／空diff／通信規則を優先する。この手順を全文読んでから停止／操作する。Git状態・default判断・Stage・検査・private保持・実操作は同梱CLI、自由文・意味理解・文章・質問・承認はassistant／利用者が担当する。処理コード・旧schema互換adapterを毎回生成しない。Codemodeは不要。
+両ローカル入口の手順。commit-pushは[push用Bun手順](push-bun.md)、commit-prは[PR用Bun手順](pr-bun.md)を使う。push／PR手順から共通部分を参照する場合だけ、各入口側のmode／default／branch／空diff／通信規則を優先する。この手順を全文読んでから停止／操作する。Git状態・default判断・Stage・検査・private保持・実操作は同梱CLI、自由文・意味理解・文章・質問・承認はassistant／利用者が担当する。処理コード・旧schema互換adapterを毎回生成しない。Codemodeは不要。
 
 ## 起動: Git対象とtrusted scripts cwdを分ける
 

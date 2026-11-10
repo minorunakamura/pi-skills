@@ -1,3 +1,5 @@
+> 現行commit-pr／PR-onlyは[PR用Bun手順](pr-bun.md)を使う。以下は旧Python製品の変更前baseline用であり、現行入口の実装／互換経路／検証成功には使わない。旧資材の整理は#49。
+
 > 現行commit-pushは[push専用Bun／Bun不足停止手順](push-bun.md)。以下のPython接続は未移行PRと変更前baseline用であり、現行push入口へ適用しない。
 
 # 公開script: staged → local bare push → fixture PR

@@ -36,10 +36,17 @@
 
 公開CLIは`tests/commit-workflow.test.ts`、fixture自己検査は`push-fixture.test.ts`、RPC／metricは既存TSを再利用。通常テキスト承認はTUI実証でない。証拠保存先・group終了wait／不存在／owned cleanup／全参照readbackは専用手順どおり。全正式checksと受入はRoot担当。
 
-## 未移行PR: 新commit承認後集約と停止・部分成功
+## commit-pr Bun必須／修正／部分成功（現行）
 
-[旧集約手順](execution-batching.md)でfresh Piのcommit-pr通常承認を選ぶ。専用HOME/PATH/Git設定と架空identity、local bareとgh/ssh fixture、導入済みPython/Codemodeのみを使う。承認前Stage以外のmutationなし、承認後の公開CLI直列接続、保持文章、実Git/bare/fixture PRを照合する。commit後verify driftとpush後PR check driftは後続mutation0と先行成功保持を確認する。[実commit後の明示中断限定例](interruption.md)、[既存PR／競合／push終点／開始前Codemode不在の限定例](limited-branches.md)は必要時だけ選ぶ。後者の固定Python例や制御traceをfresh Pi全入口通過と呼ばない。旧3run性能条件は移行済みローカル入口に流用しない。
+[PR専用手順](pr-bun.md)でfresh setup→操作→期待照合→証拠→cleanup/readbackを再実行する。共有local sandbox・正常認証・起動前manifest固定と既存RPC／metric／push fixtureの観測を再利用し、TS gh/ssh fixtureで架空GitHub URLをowned bareへ接続する。
 
-## 公開Python script: staged → local bare push → fixture PR
+| 機能と入口 | 前提・実操作 | 期待・観測 |
+| --- | --- | --- |
+| 新commit・通常PR／Draft | 既存branch履歴＋今回README diff、fresh Pi commit-pr、固定特殊文字文章、通常一括承認 | base全体固定diff/history/templateとremote／PR準備を新commit前に完了。branch名との循環なし。元ref／scope外保持・必要commit/push/PRだけ、全文bytes・Draft/head/base/SHA readback、承認後参照だけexecute |
+| 片側修正／設定再準備 | 同sessionへcommitのみ修正→Draft／base設定修正→最終一式承認の実follow-up | 他方bytes保持、旧参照失効。未確定materialsはexecute不可。設定はcleanup→影響準備再取得→再提示・再確認、driftは吸収しない |
+| 既存HEAD／PR-only | 公開CLI existing head／push済み、fresh Pi runtime停止は別fresh | commitなし、同SHA再pushなし、存在しない文章／修正選択肢なし。既存履歴を今回scanner済みと呼ばない |
+| 既存PR／競合 | 公開CLI OPEN/CLOSED/MERGED、準備後消失／create前競合 | 非重複・非編集。既存PR消失なら追加文章生成せず停止。残操作なしなら不要承認なし |
+| commit後／送信後drift・異常応答 | 公開Git hooks／TS gh faultとfresh Pi代表 | commit／送信先行成功を保持し後続PR0、異常create応答は作成済み可能性・readback失敗を区別。Python／手書き代替／install／retry／rollbackなし |
+| Bun不足停止 | 起動前からowned PATHにBunなし、絶対Nodeでfresh Pi PR／PR-only別状態。共有経路の非対応／不正probe代表 | Bun1.3.0以上案内、index bytes／HEAD／全refs／branch／upstream／worktree／bare不変、Stage/commit/push/PR0、代替経路未試行。version応答fixtureはAgent停止分岐だけ |
 
-[公開script手順](staged-push-pr.md)で既存fixtureを使い、staged-commit.py→guarded-push.py→github-pr.pyへ到達する。prepare非変更、commit時だけ予定branch作成、PR準備のcommit前完了、予定SHA／bare／PR全文・Draft/readback、既存PR非重複／非編集、禁止操作なしを時点ごとに確認する。Python起動保護は確認済み実体の-E -Sと人工PYTHONPATH/sitecustomize marker非生成を同じ実Git接続で確認する。これは未移行PRのscript経路であり、現行commit／commit-mainのAgent branch判断を代行しない。証拠／cleanup／readbackは各手順へ従う。
+小diff一括／大diffの複数固定範囲読取・未表示明示、全Staged検査、private・秘密非出力・未知file保持は共通公開Bun suiteの対応代表で確認する。新PR helper／fixtureにもsource-named testsを持つ。旧[execution-batching](execution-batching.md)／[staged-push-pr](staged-push-pr.md)は変更前baseline資材で、現行入口に使わない。Python残存checksの一括撤去は#49。証拠／metric／cleanup／全参照実readはPR手順どおり、Rootは別fresh状態で独立確認する。
