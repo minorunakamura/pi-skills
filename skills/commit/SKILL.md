@@ -1,8 +1,8 @@
 ---
 name: commit
-description: Review and stage repository changes, then create a local commit without remote operations.
+description: Review and stage changes with bundled Bun TypeScript, then commit locally on the current work branch or a planned new branch after approval.
 disable-model-invocation: true
-compatibility: Requires Git and shell access. Python 3.14+ enables shared commit scripts; without it, use the documented Python-free route. Gitleaks is optional. No remote or gh preparation.
+compatibility: Requires Git and shell access. Bun 1.3.0+ runs the bundled TypeScript; only when Bun is absent at startup, use the separate Python-free local compatibility reference. Gitleaks is optional. No network operations.
 ---
 
 # commit
@@ -13,6 +13,6 @@ default相当への直接commit指示でbranch作成を迂回しない。矛盾�
 
 自由文の対象・文章・言語・明示タイトル・branch・宛先・Draft指定を保持するが、到達点は上書きしない。到達点と矛盾する明示指示は**Git変更前**に止め、対応する`/skill:commit`（作業branchでcommit）、`/skill:commit-main`（default相当で直接commit）、`/skill:commit-push`（pushまで）、`/skill:commit-pr`（PRまで）を案内する。同じ到達点の再指定は矛盾ではない。
 
-この到達点とbranch方針を確定して共有手順へ引き継いでから[共有手順](references/workflow.md)を**全文**読み、開始時のruntime選択から順に実行する。scriptsとreferencesの基準は共有資材を持つ`skills/commit/`であり、対象repositoryをcwdのまま使う。本文を省略・独自実装しない。
+この到達点とbranch方針を確定して共有手順へ引き継いでから[Bun標準手順](references/local-bun.md)を**全文**読む。切断された場合は残りのtailも読む。矛盾による終了を含む停止判断は全文read後に行う。inspectに`mode:"commit"`を渡し、明示新branch名だけを`newBranch`へ渡す。default相当で名前未指定なら固定Staged材料の意味から未存在の作業branch名を作りplanへ渡す。branch作成はexecute内だけ。旧Python workflow・CLI・Codemode生成例を使わない。
 
 無指定では全変更をStageする。キャンセル・失敗でもStageは残り得る。`--no-confirm`は通常承認のみ省略し、検査・疑義解消・停止条件は維持する。従来のcommit入口はPRまで進んだが、現在はcommitで停止する。到達点の異なる操作は別Skillを呼ぶ。

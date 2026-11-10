@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { accessSync, constants, readFileSync, statSync } from "node:fs";
-import { delimiter, resolve } from "node:path";
+import {
+  accessSync,
+  constants,
+  lstatSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
+import { delimiter, join, resolve } from "node:path";
 import {
   cleanSubmodules,
   indexEntries,
@@ -31,8 +38,16 @@ import {
 } from "./private-files.ts";
 import { repository } from "./local-git.ts";
 
-type Inspection = { phase: "inspect"; state: Snapshot; scope: Scope };
-type Materials = {
+type BranchPolicy = {
+  mode: "commit" | "commit-main";
+  requestedBranch: string | null;
+};
+type Inspection = BranchPolicy & {
+  phase: "inspect";
+  state: Snapshot;
+  scope: Scope;
+};
+type Materials = BranchPolicy & {
   phase: "materials";
   state: Snapshot;
   scope: Scope;
@@ -41,12 +56,19 @@ type Materials = {
   diffDigest: string;
   scanner: "passed" | "unavailable";
   defaultAnswer: string | null;
+  createBranch: boolean;
 };
-type Plan = Omit<Materials, "phase"> & { phase: "plan"; message: string };
+type Plan = Omit<Materials, "phase"> & {
+  phase: "plan";
+  message: string;
+  newBranch: string | null;
+};
 type HeldState = Inspection | Materials | Plan;
 let owned: Reference | undefined;
 let operationMayHaveSucceeded = false;
 let commitSucceeded = false;
+let branchMayHaveChanged = false;
+let branchCreated = false;
 let observed: { branch: string | null; head: string | null } | undefined;
 let activeRepository: string | undefined;
 function unchangedPolicy(before: Snapshot, after: Snapshot) {
@@ -61,6 +83,114 @@ function unchangedPolicy(before: Snapshot, after: Snapshot) {
       JSON.stringify(before.default) === JSON.stringify(after.default),
     "repository_drift",
   );
+}
+
+function validateNewBranch(
+  repo: string,
+  state: Snapshot,
+  value: unknown,
+): asserts value is string {
+  requireThat(
+    typeof value === "string" &&
+      value.length > 0 &&
+      value !== "HEAD" &&
+      !value.startsWith("-") &&
+      !value.includes("\0") &&
+      Buffer.from(value).toString() === value,
+    "invalid_branch",
+  );
+  const checked = command(repo, "git", [
+    "check-ref-format",
+    `refs/heads/${value}`,
+  ]);
+  requireThat(!checked.error && checked.status === 0, "invalid_branch");
+  const target = `refs/heads/${value}`;
+  const refs = state.refs
+    .split("\n")
+    .filter(Boolean)
+    .map((entry) => entry.split(" ")[0]);
+  // for-each-ref omits dangling symbolic refs, which switch -c can follow.
+  const common = line(
+    git(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"]),
+  );
+  const walk = (directory: string, prefix: string) => {
+    if (!lstatSync(directory, { throwIfNoEntry: false })) return;
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const ref = `${prefix}${entry.name}`;
+      if (entry.isDirectory()) walk(join(directory, entry.name), `${ref}/`);
+      else refs.push(ref);
+    }
+  };
+  walk(join(common, "refs/heads"), "refs/heads/");
+  requireThat(
+    state.branchRef !== target &&
+      !refs.some(
+        (ref) =>
+          ref === target ||
+          ref.startsWith(`${target}/`) ||
+          target.startsWith(`${ref}/`),
+      ),
+    "branch_exists",
+  );
+  const classification = state.default.classification;
+  requireThat(
+    !(classification.kind === "unique"
+      ? classification.candidates.includes(value)
+      : classification.kind === "absent" && ["main", "master"].includes(value)),
+    "new_branch_is_default_use_commit_main",
+  );
+  const config = Buffer.from(state.branchConfig, "base64")
+    .toString()
+    .split("\0");
+  const values = (key: string) =>
+    config
+      .filter((entry) => entry.startsWith(`${key}\n`))
+      .map((entry) => entry.slice(key.length + 1));
+  const remote = values(`branch.${value}.remote`).at(-1);
+  const merges = values(`branch.${value}.merge`);
+  const fetch =
+    state.default.evidence.remotes.find((item) => item.name === remote)
+      ?.fetch ?? [];
+  // --no-track does not remove pre-existing upstream settings for a ref-less branch.
+  const hasUpstream = merges.some(
+    (merge) =>
+      merge.length > 0 &&
+      (remote === "." ||
+        fetch.some((spec) => {
+          if (spec.startsWith("^")) return false;
+          const [source, destination] = spec.replace(/^\+/, "").split(":");
+          if (!source || !destination) return false;
+          const [prefix, suffix] = source.split("*");
+          return suffix === undefined
+            ? source === merge
+            : merge.startsWith(prefix) &&
+                merge.endsWith(suffix) &&
+                merge.length >= prefix.length + suffix.length;
+        })),
+  );
+  requireThat(!hasUpstream, "branch_upstream_exists");
+}
+function branchSnapshot(state: Snapshot, name: string): Snapshot {
+  const ref = `refs/heads/${name}`;
+  return {
+    ...state,
+    branch: name,
+    branchRef: ref,
+    refs:
+      [
+        ...state.refs.split("\n").filter(Boolean),
+        ...(state.head ? [`${ref} ${state.head} `] : []),
+      ]
+        .sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)))
+        .join("\n") + (state.head || state.refs ? "\n" : ""),
+    default: {
+      ...state.default,
+      classification: {
+        ...state.default.classification,
+        currentIsDefault: false,
+      },
+    },
+  };
 }
 
 function held(ref: Reference): { name: string; data: HeldState } {
@@ -135,6 +265,11 @@ function materialView(ref: Reference, data: Materials) {
     phase: "materials",
     branch: data.state.branch,
     head: data.state.head,
+    branchPolicy: {
+      mode: data.mode,
+      createBranch: data.createBranch,
+      newBranch: data.requestedBranch,
+    },
     tree: data.tree,
     scanner: data.scanner,
     diffDigest: data.diffDigest,
@@ -179,20 +314,36 @@ function main() {
   );
   if (operation === "inspect") {
     requireThat(
-      Object.keys(input).every((key) => key === "scope"),
+      Object.keys(input).every((key) =>
+        ["scope", "mode", "newBranch"].includes(key),
+      ),
       "invalid_input",
     );
     const selected = scope(input.scope, repo);
     const state = snapshot(repo);
+    const mode = input.mode ?? "commit-main";
+    requireThat(mode === "commit" || mode === "commit-main", "invalid_mode");
+    requireThat(
+      mode === "commit" || input.newBranch === undefined,
+      "branch_policy_conflict",
+    );
+    if (input.newBranch !== undefined)
+      validateNewBranch(repo, state, input.newBranch);
+    const policy: BranchPolicy = {
+      mode,
+      requestedBranch: (input.newBranch as string | undefined) ?? null,
+    };
     owned = createPrivate(repo);
     saveJson(owned, `state-${randomUUID()}.json`, {
       phase: "inspect",
+      ...policy,
       state,
       scope: selected,
     } satisfies Inspection);
     return {
       reference: owned,
       branch: state.branch,
+      branchPolicy: policy,
       head: state.head,
       changes: state.changes,
       default: state.default.classification,
@@ -285,18 +436,25 @@ function main() {
       git(repo, ["check-ref-format", `refs/heads/${input.defaultBranch}`]);
       defaultAnswer = input.defaultBranch;
       requireThat(
-        defaultAnswer === data.state.branch,
-        "current_branch_is_not_default",
-      );
-      requireThat(
         !data.state.default.evidence.observationFailed,
         "default_observation_failed",
       );
-    } else
+    }
+    const currentIsDefault =
+      defaultAnswer !== null
+        ? defaultAnswer === data.state.branch
+        : classification.currentIsDefault;
+    requireThat(
+      data.mode !== "commit-main" || currentIsDefault,
+      "current_branch_is_not_default",
+    );
+    if (data.requestedBranch !== null) {
+      validateNewBranch(repo, data.state, data.requestedBranch);
       requireThat(
-        classification.currentIsDefault,
-        "current_branch_is_not_default",
+        data.requestedBranch !== defaultAnswer,
+        "new_branch_is_default_use_commit_main",
       );
+    }
     const pending = questions(data.state, data.scope);
     requireThat(
       !pending.outsideStaged.length || input.includeOutsideStaged === true,
@@ -359,6 +517,11 @@ function main() {
       : Buffer.alloc(0);
     const materials: Materials = {
       phase: "materials",
+      mode: data.mode,
+      requestedBranch: data.requestedBranch,
+      createBranch:
+        data.mode === "commit" &&
+        (currentIsDefault || data.requestedBranch !== null),
       state: after,
       scope: data.scope,
       tree,
@@ -376,7 +539,8 @@ function main() {
     requireThat(
       (data.phase === "materials" || data.phase === "plan") &&
         Object.keys(input).every(
-          (key) => key === "reference" || key === "message",
+          (key) =>
+            key === "reference" || key === "message" || key === "newBranch",
         ),
       "invalid_plan_input",
     );
@@ -393,14 +557,43 @@ function main() {
         indexEntries(repo) === data.entries,
       "repository_drift",
     );
+    const newBranch =
+      input.newBranch ??
+      (data.phase === "plan" ? data.newBranch : data.requestedBranch);
+    if (data.createBranch) {
+      requireThat(
+        newBranch !== null && newBranch !== undefined,
+        "new_branch_required",
+      );
+      validateNewBranch(repo, data.state, newBranch);
+      requireThat(
+        newBranch !== data.defaultAnswer,
+        "new_branch_is_default_use_commit_main",
+      );
+      requireThat(
+        data.requestedBranch === null || data.requestedBranch === newBranch,
+        "branch_policy_conflict",
+      );
+      requireThat(
+        data.phase !== "plan" || newBranch === data.newBranch,
+        "branch_policy_conflict",
+      );
+    } else requireThat(newBranch === null, "branch_policy_conflict");
     release(ref);
-    const plan: Plan = { ...data, phase: "plan", message: input.message };
+    const plan: Plan = {
+      ...data,
+      phase: "plan",
+      message: input.message,
+      newBranch: newBranch as string | null,
+    };
     transition(ref, current.name, plan);
     return {
       reference: ref,
       phase: "plan",
       message: plan.message,
-      branch: plan.state.branch,
+      branch: plan.newBranch ?? plan.state.branch,
+      sourceBranch: plan.state.branch,
+      newBranch: plan.newBranch,
       parent: plan.state.head,
       tree: plan.tree,
       scope: plan.scope,
@@ -408,7 +601,12 @@ function main() {
       default: plan.state.default.classification,
       defaultAnswer: plan.defaultAnswer,
       operations: [
-        "commit directly on current branch",
+        ...(plan.newBranch
+          ? [
+              "create planned branch without tracking",
+              "commit on planned branch",
+            ]
+          : ["commit directly on current branch"]),
         "verify commit",
         "cleanup",
       ],
@@ -430,6 +628,33 @@ function main() {
       "repository_drift",
     );
     sameSnapshot(repo, data.state);
+    let expectedState = data.state;
+    if (data.newBranch !== null) {
+      validateNewBranch(repo, data.state, data.newBranch);
+      branchMayHaveChanged = true;
+      operationMayHaveSucceeded = true;
+      const switched = command(repo, "git", [
+        "switch",
+        "--no-track",
+        "-c",
+        data.newBranch,
+      ]);
+      requireThat(
+        !switched.error && switched.status === 0,
+        "branch_creation_failed",
+      );
+      branchCreated = true;
+      expectedState = branchSnapshot(data.state, data.newBranch);
+      sameSnapshot(repo, expectedState);
+      cleanSubmodules(repo);
+      requireThat(
+        digest(stagedDiff(repo)) === data.diffDigest &&
+          indexEntries(repo) === data.entries &&
+          line(git(repo, ["write-tree"])) === data.tree,
+        "repository_drift",
+      );
+      sameSnapshot(repo, expectedState);
+    }
     operationMayHaveSucceeded = true;
     const result = command(
       repo,
@@ -462,12 +687,13 @@ function main() {
         .filter((ref) => ref && !ref.startsWith(`${state.branchRef} `))
         .join("\n");
     requireThat(
-      after.branchRef === data.state.branchRef &&
+      after.branchRef === expectedState.branchRef &&
         after.gitDir === data.state.gitDir &&
-        after.branchConfig === data.state.branchConfig &&
-        otherRefs(after) === otherRefs(data.state) &&
+        after.branchConfig === expectedState.branchConfig &&
+        otherRefs(after) === otherRefs(expectedState) &&
         after.refsDiagnostics === data.state.refsDiagnostics &&
-        JSON.stringify(after.default) === JSON.stringify(data.state.default) &&
+        JSON.stringify(after.default) ===
+          JSON.stringify(expectedState.default) &&
         line(git(repo, ["rev-parse", "--verify", after.branchRef ?? ""])) ===
           after.head &&
         tree === data.tree &&
@@ -486,6 +712,7 @@ function main() {
       parents,
       messageDigest: digest(message),
       scanner: data.scanner,
+      branchCreated,
       cleanup: cleanup(ref),
     };
   }
@@ -507,6 +734,8 @@ try {
     error: commitSucceeded ? "commit_verification_failed" : code,
     operationMayHaveSucceeded,
     commitSucceeded,
+    branchMayHaveChanged,
+    branchCreated,
     ...(observed ? { observed } : {}),
     stagedChangesPreserved: true,
     ...(owned ? { cleanup: cleanup(owned) } : {}),

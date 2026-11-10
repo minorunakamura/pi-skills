@@ -1,6 +1,6 @@
-# 未移行3入口: 新commit承認後のCodemode集約と停止・部分成功
+# 未移行push／PR入口: 新commit承認後のCodemode集約と停止・部分成功
 
-commit-mainの現行入口は[専用Bun手順](commit-main-bun.md)。以下のPython資材はcommit／commit-push／commit-pr用として保持する。
+commit／commit-mainの現行入口は[専用Bun手順](local-bun.md)。以下のPython資材はcommit-push／commit-pr用として保持する。
 
 初期対象は標準経路の新commit、一括承認後の公開CLI接続。実Agentの`commit-pr`通常承認と、ローカル2入口の直前default根拠照合を選ぶ。既存HEAD・Python-free・全入口full pipeline・全異常条件・実GitHub・将来のAgent遵守率は対象外。文言assertやscript単体成功でAgentの操作遵守を代用しない。[Feature Map](feature-map.md)の既存branch/script入口も維持する。
 
@@ -138,7 +138,7 @@ cat "$OWNED/exit"  # 正常代表は0。0だけで機能成功とはしない。
 | --- | --- | --- |
 | commit後verify drift | gh fixtureのapi user境界で、実HEADがsetup.firstから変わった後だけfixture accountを別の架空accountへ変えるadapter | `pr_preparation_changed`、commit保持、push/create0。部分成功と停止段階を報告 |
 | push後PR check drift | 同じ境界でproduct push.log作成後だけaccountを変える | verify/push成功、PR checkで`pr_preparation_changed`、bare SHA保持、create0 |
-| ローカル直前照合 | 既存Mapのmain fallback→commitとdefault直接commit-main。少なくとも一方no-confirm | 集約内で保持したdefault根拠を**別途完全再取得/比較してから**commit。前者は新branch/元main保持、後者はbranch作成切替なし。両方通信なし、push/PR API0 |
+| ローカル直前照合 | [共有local手順](local-bun.md)の両入口。少なくとも一方no-confirm | 共有Bun CLIの保持根拠と実Gitを照合。旧Codemode集約経路で代用しない |
 | 無秘密大容量 | [限定Codemode例のfresh手順](large-json.md)。公開PR prepare/check双方の実JSONをfileへ完全保持。store単一値上限超かつbash戻り値1MiB超のASCII diff | 独立processで0700/0600・各write umask077・非symlink/uid/完全bytes/digestと後段入力/実Git/bare/fixture照合。小summaryだけ返し、所有外sentinelを保持。2MiB制限不変。Skill全文/通常承認の実証ではない |
 | 不正応答 | [exit0・非objectのfresh限定例](invalid-json.md)。無秘密の公開CLI応答破損adapterで非object代表を返す。実CLI成功とadapter破損を区別 | 段階固有の解析/型検査で停止し後続0。exit0だけでは成功にしない |
 | 1段階後全体中断 | [実commit後のfresh限定例](interruption.md)。次のread-only gh api user境界で所有PID/group/handleを記録して待機。観測者がcommit実成功と境界到達を照合して公開RPC abortを明示送信（外部60秒より前） | commit保持、push/create0。残るbounded出力/結果/実状態から部分成功/成否不明を区別。製品のfinally/report/cleanup必達は期待せず、別groupのCLI/adapterも所有者が終了・wait/不存在確認してから削除 |
@@ -177,9 +177,9 @@ PY
 
 期待errorの名称だけでなく、adapterが承認前には未発火、対象時点で発火したこと、実commit/送信SHA保持、後続push/create回数とAgentの部分成功報告を確認する。
 
-### 未移行commitのfresh実行
+### ローカル入口のfresh実行
 
-commit-mainは[専用Bun手順](commit-main-bun.md)を使う。未移行commitだけは[共通setup](feature-map.md#共通setupと観測)のremoteなしmainで、Node24の共有RPC helperに旧Skillを明示し、`--legacy-codemode --request '/skill:commit --no-confirm'`を付ける。承認前snapshot／default根拠を保持し、元mainを進めず未存在作業branchだけ作成・commitすること、raw本文／親／tree／index・通信0を実Gitと照合する。通常承認baselineにはno-confirmを混ぜない。
+commit／commit-mainの現行検証と同条件の旧commit baselineは[共有local手順](local-bun.md)を使う。現行Skillに旧Python／Codemode起動を強制しない。以下の旧性能3runは移行済みローカル入口に適用しない。
 
 既存PR（check.diff=null正常）、create競合の`existing`非重複/非編集、新規文章が未確定のままPR消失時create禁止、commit-pushのPR API非呼出し、Codemode開始前から不在の場合だけの逐次script fallbackは、[共有文書＋同じ呼出し例の限定実行＋既存回帰](limited-branches.md)で選ぶ。通常Pythonの固定例で実公開CLIの元準備/checkと文章有無を入力にし、push終点/fallbackの制御traceは実Agent/runtime境界と区別する。これらをfresh Pi全入口full pipeline通過と呼ばない。Codemode開始後の失敗からfallback・再試行・rollback・準備更新はしない。公開境界を通さない限定例の範囲はrun記録へ明示する。
 

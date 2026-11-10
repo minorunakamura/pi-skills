@@ -12,8 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-await test("commit-main-compatibility private capture example works in Bash and stops on Git failure", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "commit-main-compatibility-"));
+await test("local-compatibility private capture example works in Bash and stops on Git failure", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "local-compatibility-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const temporary = join(directory, "tmp");
   const repo = join(directory, "repo");
@@ -37,7 +37,7 @@ await test("commit-main-compatibility private capture example works in Bash and 
   }
   const reference = await readFile(
     new URL(
-      "../skills/commit/references/commit-main-compatibility.md",
+      "../skills/commit/references/local-compatibility.md",
       import.meta.url,
     ),
     "utf8",
