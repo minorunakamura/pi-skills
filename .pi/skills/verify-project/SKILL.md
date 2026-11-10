@@ -1,11 +1,13 @@
 ---
 name: verify-project
-description: Verify pi-skills commit-main Bun approval, default ambiguity and local compatibility through fresh Pi, or legacy Python commit, push and PR procedures in disposable environments.
+description: Verify pi-skills local commit Bun branch planning, approval, default ambiguity and compatibility through fresh Pi, or legacy Python push and PR procedures in disposable environments.
 ---
 
 # pi-skills の対象機能を直接確認する
 
-今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。起動前に関連source／手順／helperと使捨てdriverのdigestを固定し、起動中は編集しない。観測者は起動した同じ親shellでPIDを記録してwaitする（具体例は専用手順）。**commit-mainの現行Bun入口／通常承認／cancel／default疑義／暗黙fetch・merge拒否／scanner起動失敗／root scope／Bunなしは[専用手順](references/commit-main-bun.md)**を使う。以下と旧集約文書にあるcommit-mainのPython例は移行前の記述であり、現行入口へ適用しない。他3入口のPython資材は未移行のため保持する。新commit承認後のCodemode集約と停止・部分成功は[専用手順](references/execution-batching.md)を使い、fresh Piの実入口・通常承認・request timingと実Git/local bare/fixture PRを照合する。Issue #28・#29の`/skill:commit`と`/skill:commit-main`のAgent branch判断と、Issue #31の公開scriptによるstaged → local bare push → fixture PRを別の入口として扱う。Issue #34のPython起動保護はMapの限定確認を選び、公開script接続とfresh Piの作業branch代表を照合する。script単体テスト・文言assert・Pi起動成功をAgentの判断成功としない。全runtime／refspec／OSの網羅は対象外。製品修正・本repositoryのcommit・独自runner・installはしない。正式チェックとRootの受入判断を代替しない。
+今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。**commit／commit-mainの現行Bun入口・branch方針・通常承認／cancel／no-confirm・default実質問の未回答Stage0・Bunなしlocal互換は[共有local手順](references/local-bun.md)**を使う。起動前に関連source／手順／helperと使捨てdriverのdigestを固定し、run中は編集しない。観測者のPIDを同じ親shellで記録しwaitする。実Gitの元ref／予定branch／親／tree／raw本文／index／upstream、全tool操作・Git子processの通信0、小diff一括、質問前の不要payload削除を照合する。script単体・文言assert・Pi起動成功だけでAgent判断を保証しない。RPCの通常テキスト承認はTUI実証でない。
+
+以下のPython／Codemode setupは**未移行push／PR入口と変更前baselineだけ**に使う。現行ローカル入口へ旧Python判定／生成例を適用しない。新commitのcommit-pr通常承認・停止／部分成功は[旧集約手順](references/execution-batching.md)、公開Python接続は[staged → push → fixture PR](references/staged-push-pr.md)。全runtime／refspec／OS・実GitHub・任意中断保証は対象外。製品修正・本repositoryのcommit・独自runner・installはしない。正式チェック・独立Review・Root受入は代替しない。
 
 ## 公開scriptの接続を選んだ場合
 
@@ -13,7 +15,7 @@ description: Verify pi-skills commit-main Bun approval, default ambiguity and lo
 
 Piで利用する場合はrepositoryをcwdにproject trustを確認し、新セッションまたは`/reload`後、`/skill:verify-project 公開scriptのstagedからfixture PRまで`、またはこの実ファイルの明示読み込みで選ぶ。自動選択自体は保証しない。実行分担・対象テストは[CONTRIBUTING](../../../CONTRIBUTING.md)に従う。
 
-## Agent branch判断: 前提と分離
+## 旧push／PR・baseline: 前提と分離
 
 - repositoryルートをcwdにし、Git、Python 3.14、導入済みPiを確認する。Pi 1.4.0の公開RPCを使う。現在のhelperはmacOSの`/usr/bin/sandbox-exec`が必要。他OSやsandbox不成立なら無制限実行へ逃げず不足を報告する。
 - `skills/commit/tests/conftest.py`、`CONTRIBUTING.md`、変更後の`skills/commit/SKILL.md`・`skills/commit-main/SKILL.md`と共有手順を読む。既存fixtureと同様、専用一時repository・HOME・Git設定・架空identityを使う。read/bashはcwdやHOMEだけでは隔離されない。
@@ -88,11 +90,11 @@ Mapのsetupで新しいrepoを作る。Git identityは`Test User <test@example.i
 
 ```bash
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.ts" \
-  "$OWNED/repo" "$SOURCE/skills/commit/SKILL.md" "$OWNED/evidence" \
-  --legacy-codemode --request '/skill:commit --no-confirm'
+  "$OWNED/repo" "$SOURCE/skills/commit-pr/SKILL.md" "$OWNED/evidence" \
+  --legacy-codemode --fixture-remote --request '/skill:commit-pr --no-confirm'
 ```
 
-この例は未移行commitの確認。commit-mainは専用Bun手順を使う。通常承認では`--request '/skill:commit' --answer '提示内容で実行'`、cancelでは`--answer 'キャンセル'`を使う。初回settledの実際の提示・承認待ちを記録で確認する。helperは`ask_user_question`を偽装しない。read/bash/codemodeだけのPiなので質問専用toolはなく、Skillの通常テキストによる確認と、同じRPC sessionへの実follow-up回答を使う。Codemodeはbuilt-inだけを明示有効にし、ambient Extensions/MCPは使わない。候補競合・壊れたHEADでは`--no-confirm`でも候補／理由の表示後に実際の質問と選択肢・自由回答の要求があることを確認し、回答を与えず待機／停止状態を観測する。「確認が必要」という報告や再実行案内だけなら確認対話は不成立とする。矛盾指示も共有workflow全文read（切断時のtailを含む）の後に停止判断したことをread操作と照合する。`--answer`は疑義への承認ではないので、想定外の質問ならそのrunを成功にしない。
+この例はowned local bareとgh/ssh fixtureを[旧集約手順](references/execution-batching.md)で準備した後だけ実行する。通常承認はanswer-fileを使い、実際の提示・承認質問を読んでから同じsessionへ回答する。想定外の疑義へ実行回答を送らない。helperはask_user_questionを偽装せず、built-in Codemode以外のambient Extensions／MCPを使わない。ローカル2入口／default疑義／Bunなしは[共有local手順](references/local-bun.md)だけを使う。
 
 helperは`get_commands`で指定Skillの名前を検出、prompt応答成功、assistantのerror／abortなし、settled、process終了0をself-checkする。ただしこれだけでは機能成功ではない。Mapの期待結果を実Gitで別途照合する。必要なら新しいcaseでやり直し、失敗runを成功として置き換えない。
 

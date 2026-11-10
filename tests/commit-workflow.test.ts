@@ -881,3 +881,359 @@ await test("missing promisor blob stops the public CLI without lazy fetch even w
     0,
   );
 });
+
+function workPlan(
+  f: ReturnType<typeof fixture>,
+  branch?: string,
+  explicit = false,
+) {
+  const materials = prepare(f, {
+    mode: "commit",
+    ...(explicit ? { newBranch: branch } : {}),
+  });
+  assert.equal(materials.value.phase, "materials");
+  const planned = f.cli("plan", {
+    reference: materials.value.reference,
+    message: "docs: local example\n\nFixed 'bytes' $HOME.\n\n",
+    ...(!explicit && branch !== undefined ? { newBranch: branch } : {}),
+  });
+  assert.equal(planned.exit, 0, JSON.stringify(planned.value));
+  return planned;
+}
+
+for (const unborn of [false, true]) {
+  await test(`commit plans a branch from materials and creates it only at execute (${unborn ? "unborn" : "parent"})`, (t) => {
+    const f = fixture(t, unborn);
+    const parent = unborn ? null : f.git("rev-parse", "HEAD");
+    f.git("config", "branch.autoSetupMerge", "inherit");
+    f.git("config", "branch.main.remote", "origin");
+    f.git("config", "branch.main.merge", "refs/heads/main");
+    const config = f.git("config", "--get-regexp", "^branch\\.");
+    writeFileSync(join(f.repo, "example.txt"), "approved\n");
+    writeFileSync(join(f.repo, "outside.txt"), "keep outside\n");
+    const materials = prepare(f, {
+      mode: "commit",
+      scope: { kind: "paths", paths: ["example.txt"] },
+    });
+    assert.deepEqual(materials.value.branchPolicy, {
+      mode: "commit",
+      createBranch: true,
+      newBranch: null,
+    });
+    assert.equal(materials.value.displayed, true);
+    assert.match((materials.value.diff as { text: string }).text, /approved/);
+    const planned = f.cli("plan", {
+      reference: materials.value.reference,
+      newBranch: "docs/日本語",
+      message: "docs: exact 'bytes' $HOME\n\n",
+    });
+    assert.equal(planned.exit, 0, JSON.stringify(planned.value));
+    assert.equal(planned.value.branch, "docs/日本語");
+    assert.equal(f.git("branch", "--show-current"), "main");
+    assert.equal(
+      f.git("for-each-ref", "--format=%(refname)", "refs/heads/docs/"),
+      "",
+    );
+    const revised = f.cli("plan", {
+      reference: planned.value.reference,
+      message: "docs: revised 'bytes' $HOME\n\n",
+    });
+    assert.equal(revised.exit, 0);
+    assert.equal(revised.value.branch, "docs/日本語");
+    const result = f.cli("execute", { reference: revised.value.reference });
+    assert.equal(result.exit, 0, JSON.stringify(result.value));
+    assert.equal(result.value.branchCreated, true);
+    assert.equal(result.value.branch, "docs/日本語");
+    assert.deepEqual(result.value.parents, parent ? [parent] : []);
+    assert.equal(f.git("rev-parse", "HEAD^{tree}"), planned.value.tree);
+    assert.equal(f.git("write-tree"), planned.value.tree);
+    assert.equal(f.git("config", "--get-regexp", "^branch\\."), config);
+    assert.equal(
+      f.git("for-each-ref", "--format=%(upstream)", "refs/heads/docs/日本語"),
+      "",
+    );
+    const raw = spawnSync("git", ["cat-file", "commit", "HEAD"], {
+      cwd: f.repo,
+      env: f.env,
+    }).stdout;
+    assert.equal(
+      raw.subarray(raw.indexOf("\n\n") + 2).toString(),
+      revised.value.message,
+    );
+    if (parent) assert.equal(f.git("rev-parse", "main"), parent);
+    else
+      assert.equal(
+        f.git("for-each-ref", "--format=%(refname)", "refs/heads/main"),
+        "",
+      );
+    assert.equal(
+      readFileSync(join(f.repo, "outside.txt"), "utf8"),
+      "keep outside\n",
+    );
+    assert.equal(f.git("ls-tree", "--name-only", "HEAD"), "example.txt");
+  });
+}
+
+for (const explicit of [false, true]) {
+  await test(`commit on a work branch ${explicit ? "honors an explicit new branch" : "keeps the current branch even when named main"}`, (t) => {
+    const f = fixture(t);
+    f.git("remote", "add", "origin", "https://example.invalid/fixture.git");
+    f.git("update-ref", "refs/remotes/origin/develop", "HEAD");
+    f.git(
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/develop",
+    );
+    const parent = f.git("rev-parse", "HEAD");
+    writeFileSync(join(f.repo, "example.txt"), "work\n");
+    const planned = workPlan(
+      f,
+      explicit ? "docs/explicit" : undefined,
+      explicit,
+    );
+    const result = f.cli("execute", { reference: planned.value.reference });
+    assert.equal(result.exit, 0, JSON.stringify(result.value));
+    assert.equal(result.value.branch, explicit ? "docs/explicit" : "main");
+    assert.equal(result.value.branchCreated, explicit);
+    if (explicit) assert.equal(f.git("rev-parse", "main"), parent);
+    assert.equal(f.git("rev-parse", "refs/remotes/origin/develop"), parent);
+  });
+}
+
+for (const branch of [
+  "bad..name",
+  "-option",
+  "@{-1}",
+  "line\nname",
+  "",
+  "HEAD",
+  "main",
+  "topic",
+  "topic/child",
+]) {
+  await test(`commit rejects explicit invalid or colliding branch ${JSON.stringify(branch)} before Stage`, (t) => {
+    const f = fixture(t);
+    f.git("branch", branch === "topic" ? "topic/child" : "topic");
+    writeFileSync(join(f.repo, "example.txt"), "pending\n");
+    const before = f.git("for-each-ref", "--format=%(refname) %(objectname)");
+    const result = f.cli("inspect", { mode: "commit", newBranch: branch });
+    assert.equal(result.exit, 1);
+    assert.equal(f.git("branch", "--show-current"), "main");
+    assert.equal(f.git("diff", "--cached"), "");
+    assert.equal(
+      f.git("for-each-ref", "--format=%(refname) %(objectname)"),
+      before,
+    );
+  });
+}
+
+for (const [existing, planned] of [
+  ["planned", "planned"],
+  ["planned", "planned/child"],
+  ["planned/child", "planned"],
+]) {
+  for (const boundary of ["inspect", "plan"]) {
+    await test(`commit rejects dangling ${existing} collision with ${planned} at ${boundary}`, (t) => {
+      const f = fixture(t);
+      const parent = f.git("rev-parse", "HEAD");
+      f.git("symbolic-ref", `refs/heads/${existing}`, "refs/heads/missing");
+      writeFileSync(join(f.repo, "example.txt"), "pending\n");
+      const materials =
+        boundary === "plan" ? prepare(f, { mode: "commit" }) : null;
+      const index = readFileSync(join(f.repo, ".git/index"));
+      const config = readFileSync(join(f.repo, ".git/config"));
+      const raw = readFileSync(join(f.repo, ".git/refs/heads", existing));
+      const result = f.cli(
+        boundary,
+        materials
+          ? {
+              reference: materials.value.reference,
+              newBranch: planned,
+              message: "docs: fixed\n",
+            }
+          : { mode: "commit", newBranch: planned },
+      );
+      assert.equal(result.exit, 1);
+      assert.equal(result.value.error, "branch_exists");
+      assert.equal(f.git("symbolic-ref", "HEAD"), "refs/heads/main");
+      assert.equal(f.git("rev-parse", "HEAD"), parent);
+      assert.deepEqual(readFileSync(join(f.repo, ".git/index")), index);
+      assert.deepEqual(readFileSync(join(f.repo, ".git/config")), config);
+      assert.deepEqual(
+        readFileSync(join(f.repo, ".git/refs/heads", existing)),
+        raw,
+      );
+      assert.equal(existsSync(join(f.repo, ".git/refs/heads/missing")), false);
+      assert.equal(
+        f.git("for-each-ref", "--format=%(refname)"),
+        "refs/heads/main",
+      );
+    });
+  }
+}
+
+await test("commit rejects a dangling branch introduced after plan before execute mutation", (t) => {
+  const f = fixture(t);
+  const parent = f.git("rev-parse", "HEAD");
+  writeFileSync(join(f.repo, "example.txt"), "pending\n");
+  const planned = workPlan(f, "planned");
+  f.git("symbolic-ref", "refs/heads/planned", "refs/heads/missing");
+  const index = readFileSync(join(f.repo, ".git/index"));
+  const config = readFileSync(join(f.repo, ".git/config"));
+  const raw = readFileSync(join(f.repo, ".git/refs/heads/planned"));
+  const result = f.cli("execute", { reference: planned.value.reference });
+  assert.equal(result.exit, 1);
+  assert.equal(result.value.error, "branch_exists");
+  assert.equal(result.value.branchMayHaveChanged, false);
+  assert.equal(result.value.operationMayHaveSucceeded, false);
+  assert.equal(result.value.commitSucceeded, false);
+  assert.equal(f.git("symbolic-ref", "HEAD"), "refs/heads/main");
+  assert.equal(f.git("rev-parse", "HEAD"), parent);
+  assert.deepEqual(readFileSync(join(f.repo, ".git/index")), index);
+  assert.deepEqual(readFileSync(join(f.repo, ".git/config")), config);
+  assert.deepEqual(readFileSync(join(f.repo, ".git/refs/heads/planned")), raw);
+  assert.equal(existsSync(join(f.repo, ".git/refs/heads/missing")), false);
+  assert.equal(f.git("for-each-ref", "--format=%(refname)"), "refs/heads/main");
+});
+
+await test("commit new branch preserves unstaged remainder with staged-only scope", (t) => {
+  const f = fixture(t);
+  const parent = f.git("rev-parse", "HEAD");
+  writeFileSync(join(f.repo, "example.txt"), "staged\n");
+  f.git("add", "example.txt");
+  writeFileSync(join(f.repo, "example.txt"), "unstaged\n");
+  const materials = prepare(f, { mode: "commit", scope: { kind: "staged" } });
+  const stagedPlan = f.cli("plan", {
+    reference: materials.value.reference,
+    newBranch: "planned",
+    message: "docs: staged only\n",
+  });
+  assert.equal(stagedPlan.exit, 0);
+  const result = f.cli("execute", { reference: stagedPlan.value.reference });
+  assert.equal(result.exit, 0, JSON.stringify(result.value));
+  assert.equal(result.value.branchCreated, true);
+  assert.equal(f.git("rev-parse", "main"), parent);
+  assert.equal(f.git("branch", "--show-current"), "planned");
+  assert.equal(f.git("show", "HEAD:example.txt"), "staged");
+  assert.equal(readFileSync(join(f.repo, "example.txt"), "utf8"), "unstaged\n");
+  assert.equal(f.git("diff", "--cached"), "");
+});
+
+await test("commit rejects a generated branch collision at plan and branch/config drift before execute", (t) => {
+  const f = fixture(t);
+  f.git("branch", "existing");
+  writeFileSync(join(f.repo, "example.txt"), "pending\n");
+  const materials = prepare(f, { mode: "commit" });
+  const stopped = f.cli("plan", {
+    reference: materials.value.reference,
+    newBranch: "existing",
+    message: "docs: fixed\n",
+  });
+  assert.equal(stopped.value.error, "branch_exists");
+  for (const drift of ["branch", "config"]) {
+    const planned = workPlan(f, "planned");
+    if (drift === "branch") f.git("branch", "planned");
+    else f.git("config", "branch.planned.remote", "origin");
+    const result = f.cli("execute", { reference: planned.value.reference });
+    assert.equal(result.value.error, "repository_drift");
+    assert.equal(result.value.branchMayHaveChanged, false);
+    assert.equal(f.git("branch", "--show-current"), "main");
+    assert.equal(f.git("rev-list", "--count", "--all"), "1");
+    if (drift === "branch") f.git("branch", "-d", "planned");
+  }
+});
+
+await test("commit empty diff never requires a branch plan and cleanup cancels without branch creation", (t) => {
+  const f = fixture(t);
+  const empty = prepare(f, { mode: "commit" });
+  assert.equal(empty.value.phase, "empty");
+  assert.equal(empty.value.commitCreated, false);
+  writeFileSync(join(f.repo, "example.txt"), "pending\n");
+  const planned = workPlan(f, "planned");
+  const result = f.cli("cleanup", { reference: planned.value.reference });
+  assert.equal(result.value.phase, "cancelled");
+  assert.equal(f.git("branch", "--show-current"), "main");
+  assert.equal(
+    f.git("for-each-ref", "--format=%(refname)", "refs/heads/planned"),
+    "",
+  );
+  assert.match(f.git("diff", "--cached"), /pending/);
+});
+
+for (const mutation of ["branch", "index", "ref", "failure"]) {
+  await test(`post-checkout hook ${mutation} stops before commit without rollback`, (t) => {
+    const f = fixture(t);
+    writeFileSync(join(f.repo, "example.txt"), "approved\n");
+    const parent = f.git("rev-parse", "HEAD");
+    const planned = workPlan(f, "planned");
+    const hook = join(f.repo, ".git/hooks/post-checkout");
+    const action =
+      mutation === "branch"
+        ? "git symbolic-ref HEAD refs/heads/main"
+        : mutation === "index"
+          ? "printf changed > example.txt\ngit add example.txt"
+          : mutation === "ref"
+            ? "git tag 'x\u2028y' HEAD"
+            : "echo DO-NOT-EXPOSE-HOOK >&2\nexit 1";
+    writeFileSync(hook, `#!/bin/sh\n${action}\n`);
+    chmodSync(hook, 0o700);
+    const result = f.cli("execute", { reference: planned.value.reference });
+    assert.equal(result.exit, 1);
+    assert.equal(
+      result.value.error,
+      mutation === "failure" ? "branch_creation_failed" : "repository_drift",
+    );
+    assert.equal(result.value.branchMayHaveChanged, true);
+    assert.equal(result.value.branchCreated, mutation !== "failure");
+    assert.equal(result.value.commitSucceeded, false);
+    assert.equal(f.git("rev-parse", "planned"), parent);
+    assert.equal(f.git("rev-list", "--count", "--all"), "1");
+    assert.equal(
+      JSON.stringify(result.value).includes("DO-NOT-EXPOSE-HOOK"),
+      false,
+    );
+  });
+}
+
+for (const settings of ["remote", "merge", "empty-merge", "upstream"]) {
+  await test(`ref-less new branch with ${settings} settings ${settings === "upstream" ? "is rejected without changing config or Stage" : "is allowed without upstream"}`, (t) => {
+    const f = fixture(t);
+    f.git("remote", "add", "origin", "https://example.invalid/fixture.git");
+    f.git("update-ref", "refs/remotes/origin/main", "HEAD");
+    if (settings !== "merge")
+      f.git(
+        "config",
+        "branch.planned.remote",
+        settings === "empty-merge" ? "." : "origin",
+      );
+    if (settings !== "remote")
+      f.git(
+        "config",
+        "branch.planned.merge",
+        settings === "empty-merge" ? "" : "refs/heads/main",
+      );
+    const config = f.git("config", "--get-regexp", "^branch\\.");
+    writeFileSync(join(f.repo, "example.txt"), "pending\n");
+    if (settings === "upstream") {
+      const result = f.cli("inspect", { mode: "commit", newBranch: "planned" });
+      assert.equal(result.value.error, "branch_upstream_exists");
+      assert.equal(f.git("diff", "--cached"), "");
+      const materials = prepare(f, { mode: "commit" });
+      const rejected = f.cli("plan", {
+        reference: materials.value.reference,
+        newBranch: "planned",
+        message: "docs: fixed\n",
+      });
+      assert.equal(rejected.value.error, "branch_upstream_exists");
+    } else {
+      const planned = workPlan(f, "planned", true);
+      const result = f.cli("execute", { reference: planned.value.reference });
+      assert.equal(result.exit, 0, JSON.stringify(result.value));
+      assert.equal(
+        f.git("for-each-ref", "--format=%(upstream)", "refs/heads/planned"),
+        "",
+      );
+    }
+    assert.equal(f.git("config", "--get-regexp", "^branch\\."), config);
+  });
+}

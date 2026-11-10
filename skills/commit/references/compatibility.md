@@ -1,6 +1,6 @@
 # 未移行3入口の互換経路（Python不要）
 
-commit-mainの開始時Bun不在は[専用local互換手順](commit-main-compatibility.md)を使う。この文書はcommit／commit-push／commit-pr用として保持し、現行commit-mainへ旧Python判定を適用しない。
+commit／commit-mainの開始時Bun不在は[共有local互換手順](local-compatibility.md)を使う。この文書はcommit-push／commit-pr用として保持し、現行ローカル入口へ旧Python判定を適用しない。
 
 この文書は、[workflow.md](workflow.md)の開始時probeでPython未導入または3.14未満を確認した場合だけ使い、手順1より前に全文を読む。同梱scriptの失敗を迂回する経路ではない。LLMが既存のGit・shell・ghを直接使う。Python・Node.js・外部jqの追加導入、新しい代替script、承認DBは不要。標準経路のcheck JSONを捏造せず、観測値は呼出し元で保持する。
 

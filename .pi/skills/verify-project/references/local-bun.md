@@ -1,6 +1,6 @@
-# commit-main: Bun公開CLIとfresh Pi入口
+# commit / commit-main: Bun公開CLIとfresh Pi入口
 
-対象はcommit-mainだけ。製品手順は[同梱Bun手順](../../../../skills/commit/references/commit-main-bun.md)。他3入口は未移行で[旧集約手順](execution-batching.md)／[既存公開Python接続](staged-push-pr.md)を維持する。旧3run／Codemode回数／性能閾値を今回へ流用しない。以下だけでfresh setupから再実行する。正式checks・独立Review・受入はRootの担当。
+対象は両ローカル入口。製品手順は[同梱Bun手順](../../../../skills/commit/references/local-bun.md)。push／PR入口は未移行で[旧集約手順](execution-batching.md)／[既存公開Python接続](staged-push-pr.md)を維持する。旧3run／Codemode回数／性能閾値を今回へ流用しない。以下だけでfresh setupから再実行する。正式checks・独立Review・受入はRootの担当。
 
 ## 前提・fresh setup
 
@@ -58,30 +58,34 @@ printf '# Example\n' > README.md
 printf '\nRun the example locally.\n' >> README.md
 ```
 
-起動前にsource版／dirty（新規未追跡資材含む）と関連fileのSHA-256 manifest、runtime版、probe結果を無秘密のrun記録へ保存・固定する。manifestには入口／両製品reference／製品TS・設定と、使用する検証Skill／Map／専用手順／RPC・metric helper／使捨てsetup・driverを含める。終了後も同じdigestを照合し、run中はsource・手順・helper・起動済みsetup／driverを編集しない。修正が必要ならそのrunを終了・wait・cleanupして証拠を保持し、修正後に別fresh setupと新manifestで検証する。以前の版不明runを最終版の成功に流用しない。production変更前baselineが必要な変更ではclean HEADの`git archive`をowned read-onlyコピーへ保存しchmod -R a-w／uidを確認する。reset／stashは禁止。旧Pythonは既存実体だけ使い、新installしない。今回の比較は旧commitと新commit-mainの入口／branch差があることを明記する。
+起動前にsource版／dirty（新規未追跡資材含む）と関連fileのSHA-256 manifest、runtime版、probe結果を無秘密のrun記録へ保存・固定する。manifestには入口／両製品reference／製品TS・設定と、使用する検証Skill／Map／専用手順／RPC・metric helper／使捨てsetup・driverを含める。終了後も同じdigestを照合し、run中はsource・手順・helper・起動済みsetup／driverを編集しない。修正が必要ならそのrunを終了・wait・cleanupして証拠を保持し、修正後に別fresh setupと新manifestで検証する。以前の版不明runを最終版の成功に流用しない。production変更前baselineが必要な変更ではclean HEADの`git archive`をowned read-onlyコピーへ保存しchmod -R a-w／uidを確認する。reset／stashは禁止。旧Pythonは既存実体だけ使い、新installしない。比較は旧commitと新commitの同じ小diff／履歴／明示文章／通常承認を1組。baselineだけ既存Pythonとlegacy Codemodeが必要で、後続installしない。provider／model／thinkingの通常解決を照合し、条件差・失敗は隠さない。
 
 ## 公開CLI: focused代表
 
 `"$VERIFY_NODE" --test "$SOURCE/tests/commit-workflow.test.ts"`で実Git fixtureとBun公開JSONを通す。`VERIFY_BUN`を上でexportしておく。default一意／なし／競合／broken／orphan／non-symbolic／逆mapping／負除外、必要checkpoint drift、固定文章／旧参照／execute上書き拒否、scope／部分Stage／純Stage削除／特殊名、scanner／hooks／private／所有外保持を選ぶ。追加のfocused代表はliteral `.`の全ルート対象、scanner真不在／実在scannerのinterpreter欠落停止、MERGE_HEADのinspect／Stage前／plan後execute直前の拒否（HEAD／refs／index不変、Stage保持）を確認する。partial cloneはownedの`file://` bareにallowFilterを設定し、`clone --filter=blob:none --no-checkout`と`read-tree HEAD`で必要blob欠落を作る。ambient `GIT_NO_LAZY_FETCH=0`でも公開CLIは非0、trace2のfetch起動0、終了後blob不在を確認する。実remoteを使わない。testsは自分のfixtureだけを削除する。
 
-手作業で公開CLIを独立確認する場合は[製品手順](../../../../skills/commit/references/commit-main-bun.md)の起動からinspect→materials→plan→executeへ進む。本文／設定はplan前だけ渡し、executeは参照だけ。実Gitの親／tree／全refs／branch／index／raw本文と照合する。内部handlerや成功mockで代用しない。
+commitの追加代表は、inspect(mode=commit)→materials→plan(newBranch)→execute(参照のみ)。default／unbornからの新branch作成、作業branch維持（local default=developならmainも作業branch）／明示新branch、元ref保持・upstream非継承、形式／namespace衝突のStage前拒否、planの生成名衝突、直前branch/config drift、空diff・cancel、post-checkout hookのbranch／index／他ref変更／非0でcommitへ進まないことを公開JSONと実Gitで照合する。dangling symbolic branchは`git symbolic-ref refs/heads/planned refs/heads/missing`で作り、同名と親子namespaceを明示時Stage0／生成時planで拒否する。plan後に同名danglingを追加する代表もexecuteがbranch作成前に拒否し、HEAD／branch／index bytes／既存raw symref／config不変・不要referent missing未存在を照合する。通常作成とstaged-onlyの部分Stage残り保持を正常対照にする。残存remote＋merge設定からupstreamが付く名は明示時Stage前／生成時planで拒否し、設定は保持する。片方だけの無関係な設定は正常対照とする。
 
-## fresh Pi: 通常承認とcancel
+手作業で公開CLIを独立確認する場合は[製品手順](../../../../skills/commit/references/local-bun.md)の起動からinspect→materials→plan→executeへ進む。本文／設定はplan前だけ渡し、executeは参照だけ。実Gitの親／tree／全refs／branch／index／raw本文と照合する。内部handlerや成功mockで代用しない。
+
+## fresh Pi: commit通常承認とcancel
+
+下の標準例はdefault上のcommit。commit-main代表はSkillとrequestをcommit-mainへ置換し、新branchなし・main前進を期待する。作業branch維持no-confirmはbase commit後に`git switch -c feature/docs`してから同じ追記を行う。対象外保持を組み合わせる場合は`printf 'keep outside\n' > outside.txt`を追加し、requestを「README.mdだけを対象」とする。比較baselineも同じfixture／scopeにする。
 
 各caseで上記setupを新規に行う。標準はread,bashだけ、Codemode／追加extensionなし。共有RPC helperは接続・入力・観測だけで、Git操作や判断を代行しない。
 
 ```bash
 "$VERIFY_NODE" --test "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.test.ts"
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.ts" \
-  "$OWNED/repo" "$SOURCE/skills/commit-main/SKILL.md" "$OWNED/evidence" \
-  --request '/skill:commit-main commit messageは正確に docs: explain local example と末尾LF。' \
+  "$OWNED/repo" "$SOURCE/skills/commit/SKILL.md" "$OWNED/evidence" \
+  --request '/skill:commit README.mdだけを対象。commit messageは正確に docs: explain local example と末尾LF。' \
   --answer-file "$OWNED/answer" > "$OWNED/driver.out" 2> "$OWNED/driver.err" &
 DRIVER_PID=$!
 ```
 
 `DRIVER_PID=$!`はNode観測者のPID。同じ親Bashを終了させず保持し、その親の`$$`と`DRIVER_PID`を起動直後に記録する。別tool invocationのshellから`wait`しても子でないため待てない。上の起動から下の`wait`までを同一の親shell（対話shell、または起動前に完成・digest固定した使捨てdriver）で実行する。driverならanswer-fileを別shellから作成し、driver自身が`wait "$DRIVER_PID"`のexitを保存する。起動済みdriverの編集・再利用は禁止。no-confirmはforeground実行でもよく、backgroundなら同じ親でPID記録・waitする。
 
-別shellで`operations.jsonl`の`waiting_for_answer`と実際の完成文章／操作一式／一括承認質問を読む。get_commandsは明示Skill1つ、get_stateの正常provider/model/thinkingを確認する。比較時はbaselineとの一致を記録し、不一致なら無断変更しない。承認前HEAD／全refsは元mainだけ、commit数1、Stage後treeは予定tree、branch作成／切替／通信0を実Gitで確認する。owned/tmp内の今回private directoryには必要stateだけあり、diff.bin／history.binが質問前に削除済みで0700／0600であることを確認する。
+別shellで`operations.jsonl`の`waiting_for_answer`と実際の完成文章／操作一式／一括承認質問を読む。get_commandsは明示Skill1つ、get_stateの正常provider/model/thinkingを確認する。比較時はbaselineとの一致を記録し、不一致なら無断変更しない。承認前HEAD／全refsは元mainだけ、commit数1、Stage後treeは予定tree、予定branch未存在・branch作成／切替／通信0を実Gitで確認する。owned/tmp内の今回private directoryには必要stateだけあり、diff.bin／history.binが質問前に削除済みで0700／0600であることを確認する。
 
 想定した承認質問でなければ実行回答を送らない。同じsessionへ本当の回答を送る。
 
@@ -90,7 +94,7 @@ printf '提示内容で実行\n' > "$OWNED/answer" # cancel代表は「キャン
 wait "$DRIVER_PID"
 ```
 
-正常はmainだけ前進し、新branch／切替／通信なし。親=元HEAD、tree=承認時index tree、index=実tree、raw本文=`docs: explain local example\n`を`git cat-file commit HEAD`からbytesで照合する（trim／整形log不可）。cancelはHEAD／refs不変でStage残存、reset／unstageなし。通常assistantの結果報告と実状態を照合し、script成功だけで承認を推定しない。RPC通常テキスト承認はask_user_questionのTUI通過実証ではない。
+正常は意味から計画した作業branchを1件だけ作成してcommitし、元main ref不変・upstream未設定・通信なし。作業branch維持代表は現在feature/docsだけ前進し、新branchなし。親=元HEAD、tree=承認時index tree、index=実tree、raw本文=`docs: explain local example\n`を`git cat-file commit HEAD`からbytesで照合する（trim／整形log不可）。限定scopeのoutside.txtは未追跡bytes不変。cancelはHEAD／refs不変・予定branch未存在でStage残存、reset／unstageなし。通常assistantの結果報告と実状態を照合し、script成功だけで承認を推定しない。RPC通常テキスト承認はask_user_questionのTUI通過実証ではない。
 
 `--no-confirm`代表ではanswer-fileなし、requestに明示`--no-confirm`。通常承認だけ省略し、予定表示／plan保持／検査／直前照合は同じ。独立したfresh状態で行う。
 
@@ -108,7 +112,7 @@ fresh setupのbase commit後、README追記前にfixtureを追加する。通信
 # broken代表ならbackupを作らずorigin HEAD targetを未存在refs/remotes/origin/missingへ。
 ```
 
-request=`/skill:commit-main --no-confirm`、answer-fileなしで起動する。候補／理由、実際のdefault質問、選択肢＋自由回答要求を通常assistantで観測する。回答は与えない。HEAD／全refs／index bytesがbeforeと同じ、Stage0と通信0を確認する。「確認が必要」や再実行案内だけの報告なら不成立。既知作業branchは疑義質問で押し通さず拒否し、回答後の作業branch拒否は公開CLIで別途確認する。
+request=`/skill:commit --no-confirm`、answer-fileなしで起動する。候補／理由、実際のdefault質問、選択肢＋自由回答要求を通常assistantで観測する。回答は与えない。HEAD／全refs／index bytesがbeforeと同じ、Stage0と通信0を確認する。「確認が必要」や再実行案内だけの報告なら不成立。commit-mainの既知作業branchは疑義質問で押し通さず拒否し、回答後の作業branch拒否は公開CLIで別途確認する。commitは回答でdefaultを確定後、現在が作業branchなら維持する。
 
 ## Bunなしlocal互換
 
@@ -123,17 +127,21 @@ done
 export PATH="$OWNED/bin"
 ! command -v bun && ! command -v python3 || exit 1
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.ts" \
-  "$OWNED/repo" "$SOURCE/skills/commit-main/SKILL.md" "$OWNED/evidence" \
-  --request '/skill:commit-main --no-confirm commit messageは正確に docs: explain local example と末尾LF。'
+  "$OWNED/repo" "$SOURCE/skills/commit/SKILL.md" "$OWNED/evidence" \
+  --request '/skill:commit --no-confirm README.mdだけを対象。commit messageは正確に docs: explain local example と末尾LF。'
 ```
 
 起動・親PID・wait・manifest固定は通常承認と同じ。互換referenceの直接`mktemp`代入／捕捉／実体照合の短例は`"$VERIFY_NODE" --test "$SOURCE/tests/verification-skills.test.js"`でもBashと実Gitを使ってself-checkする。Bash 3.2を使う場合は版も記録し、成功だけでなく捕捉コマンド非0で後続停止することも確認する。
 
-開始時Bun不在の観測→別互換ref全文read→現在mainへの直接commitをtool操作と実Gitで確認する。同梱TS／旧Pythonの製品CLI未試行、通常承認だけ省略、安全照合／raw本文／親／tree／ref／index保持と通信0を確認する。最初のGit観測前の`GIT_NO_LAZY_FETCH=1`設定、Stage前／commit直前のMERGE_HEAD不在確認もtool操作で照合する。同じ機械的ガード／速度の実証とは呼ばない。
+開始時Bun不在の観測→別互換ref全文read→mainから意味に基づく新作業branchへのcommitをtool操作と実Gitで確認する。元main ref保持／新branchのupstream未設定／対象外保持も照合する。同梱TS／旧Pythonの製品CLI未試行、通常承認だけ省略、安全照合／raw本文／親／tree／ref／index保持と通信0を確認する。最初のGit観測前の`GIT_NO_LAZY_FETCH=1`設定、Stage前／commit直前のMERGE_HEAD不在確認もtool操作で照合する。同じ機械的ガード／速度の実証とは呼ばない。
+
+## 通信と小diff一括の観測
+
+正常Pi認証通信と製品Git通信を混同しない。local操作のGit子processをowned PATHの小さいlogging wrapperで観測する場合は、引数をowned/git.logへ追記して確認済み実Gitへ`exec`するだけにする（成功値やGit内容を置換しない）。起動前にwrapperもmanifest固定。trace2も利用できる。全tool操作と子processでfetch／push／ls-remote／gh等の通信コマンド0、必要object欠落時fetch0を確認する。hooks等任意外部process全般の通信sandbox保証とは呼ばない。材料がdisplayed=trueで一覧・diff・必要履歴の一括1応答、不要なread再取得なし、承認質問前にdiff.bin/history.bin削除・private0700/0600を操作記録＋実fileで照合する。
 
 ## 証拠・cleanup・readback
 
-保存先は`docs/verification/45/<一意run>/<case>/`。source版／dirty／関連digest、環境／操作／command exit／期待／観測／pass-fail／未確認、承認前後の最小Git snapshot、必要RPC操作とmetric、cleanupを無秘密の最小記録にする。Mapに履歴を書かない。fixture由来と確認したものだけを保存し、auth／秘密／不要raw logは記録しない。
+保存先は`docs/verification/<issue-number>/<一意run>/<case>/`（commit移行は46、commit-mainは45）。source版／dirty／関連digest、環境／操作／command exit／期待／観測／pass-fail／未確認、承認前後の最小Git snapshot、必要RPC操作とmetric、cleanupを無秘密の最小記録にする。Mapに履歴を書かない。fixture由来と確認したものだけを保存し、auth／秘密／不要raw logは記録しない。
 
 `operations.jsonl`は全assistant request（tool-only含む）のtimestamp／duration／取得可能usageを含む。承認前／利用者待機／承認後／全体時間、assistant request数、生成code bytes／行（固定CLI呼出し・文章／設定payloadと区別）、未取得unknownを記録する。nested toolは外側toolCall IDで二重加算しない。旧入口との条件差を明記し、単発観測を安定した高速化の証明にしない。
 
@@ -141,4 +149,4 @@ helperはstdin closeでorderly shutdownし、自分のPi process groupだけをt
 
 必要証拠をowned外のrunへ保存後、所有確認した今回OWNEDだけを削除する。read-only baseline sourceはRootの保存確認後、全必要run終了・uid確認後に所有者がcleanupする。製品cleanupの未知file保持と、検証者の使捨て環境全体cleanupは別。cleanup後にも短いrun READMEから**全証拠参照を実read**する。
 
-再利用はproject trustを確認し新セッション／reload後、`/skill:verify-project commit-main Bun`、または実ファイルの明示read。Rootは別fresh状態でこの手順だけから公開CLI／実入口を選び独立確認する。全Map反復・旧3入口full-pipelineを今回成功扱いにしない。
+再利用はproject trustを確認し新セッション／reload後、`/skill:verify-project commit Bun local`、または実ファイルの明示read。Rootは別fresh状態でこの手順だけから公開CLI／実入口を選び独立確認する。全Map反復・未移行push／PR full-pipelineを今回成功扱いにしない。
