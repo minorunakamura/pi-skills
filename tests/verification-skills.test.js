@@ -1,67 +1,40 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import {
-  access,
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
-await test("local-compatibility private capture example works in Bash and stops on Git failure", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "local-compatibility-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const temporary = join(directory, "tmp");
-  const repo = join(directory, "repo");
-  const outside = join(directory, "outside");
-  for (const path of [temporary, repo, outside]) await mkdir(path);
-  const env = {
-    ...Object.fromEntries(
-      Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
-    ),
-    GIT_CONFIG_NOSYSTEM: "1",
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    TMPDIR: temporary,
-  };
-  await writeFile(join(repo, "README.md"), "# Example\n");
-  for (const args of [
-    ["init", "-b", "main"],
-    ["add", "--", "README.md"],
-  ]) {
-    const result = spawnSync("git", args, { cwd: repo, env });
-    assert.equal(result.status, 0);
+await test("migrated commit entries require Bun and remove only their dedicated compatibility routes", async () => {
+  for (const name of ["commit", "commit-main", "commit-push"]) {
+    const source = await readFile(
+      new URL(`../skills/${name}/SKILL.md`, import.meta.url),
+      "utf8",
+    );
+    assert.match(
+      source,
+      /^compatibility: .*Bun 1\.3\.0\+.*before any Git mutation.*no-confirm.*No fallback/m,
+    );
   }
-  const reference = await readFile(
-    new URL(
-      "../skills/commit/references/local-compatibility.md",
-      import.meta.url,
-    ),
-    "utf8",
+  for (const route of ["local", "push"]) {
+    const source = await readFile(
+      new URL(`../skills/commit/references/${route}-bun.md`, import.meta.url),
+      "utf8",
+    );
+    assert.match(source, /Stageを含むGit変更前に停止/);
+    assert.match(source, /確認不能/);
+    assert.match(source, /旧Python/);
+    assert.doesNotMatch(source, /(?:local|push)-compatibility\.md/);
+    await assert.rejects(
+      access(
+        new URL(
+          `../skills/commit/references/${route}-compatibility.md`,
+          import.meta.url,
+        ),
+      ),
+      { code: "ENOENT" },
+    );
+  }
+  await access(
+    new URL("../skills/commit/references/compatibility.md", import.meta.url),
   );
-  const example = reference.match(/```bash\n([\s\S]*?)\n```/);
-  assert.ok(example, "Expected the private capture example");
-  const success = spawnSync(
-    "/bin/bash",
-    [
-      "-c",
-      `${example[1]}\ntest -n "$diff_file"\ntest -s "$diff_file"\ntest ! -s "$error_file"\ntest "$diff_digest" = "$(shasum -a 256 "$diff_file" | awk '{print $1}')"\nprintf 'capture-verified\\n'`,
-    ],
-    { cwd: repo, env, encoding: "utf8" },
-  );
-  assert.equal(success.status, 0, success.stderr);
-  assert.equal(success.stdout, "capture-verified\n");
-  const failure = spawnSync(
-    "/bin/bash",
-    ["-c", `${example[1]}\nprintf 'must-not-continue\\n'`],
-    { cwd: outside, env, encoding: "utf8" },
-  );
-  assert.equal(failure.status, 1);
-  assert.equal(failure.stdout, "");
-  assert.equal(failure.stderr, "", "Git diagnostics must remain private");
 });
 
 const repository = new URL("../", import.meta.url);

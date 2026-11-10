@@ -1,6 +1,8 @@
-# 未移行3入口の互換経路（Python不要）
+> 現行commit-pushはBun 1.3.0以上必須の[push用Bun手順](push-bun.md)を使う。不足／非対応／確認不能はGit変更前に停止し、旧経路へ切り替えない。この旧Python資材は未移行commit-prと変更前baseline用。以下のpush単独例を現行入口へ振り戻さない。
 
-commit／commit-mainの開始時Bun不在は[共有local互換手順](local-compatibility.md)を使う。この文書はcommit-push／commit-pr用として保持し、現行ローカル入口へ旧Python判定を適用しない。
+# 未移行commit-prの互換経路（Python不要）
+
+commit／commit-mainも[共有Bun手順](local-bun.md)のBun必須・Git変更前停止に従う。この文書は未移行commit-prと変更前baseline用であり、移行済み3入口への利用許可ではない。
 
 この文書は、[workflow.md](workflow.md)の開始時probeでPython未導入または3.14未満を確認した場合だけ使い、手順1より前に全文を読む。同梱scriptの失敗を迂回する経路ではない。LLMが既存のGit・shell・ghを直接使う。Python・Node.js・外部jqの追加導入、新しい代替script、承認DBは不要。標準経路のcheck JSONを捏造せず、観測値は呼出し元で保持する。
 

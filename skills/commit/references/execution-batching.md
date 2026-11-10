@@ -1,6 +1,8 @@
-# 未移行3入口の新commit承認後の実行集約（Python標準経路）
+> 現行commit-pushはBun 1.3.0以上必須の[push用Bun手順](push-bun.md)を使う。不足／非対応／確認不能はGit変更前に停止し、旧経路へ切り替えない。この旧Python資材は未移行commit-prと変更前baseline用。以下のpush単独例を現行入口へ振り戻さない。
 
-commit／commit-mainは[共有Bun手順](local-bun.md)で保持参照だけをexecuteするため、この生成例を使わない。commit-push／commit-prの未移行Python経路と既存保証は維持する。
+# 未移行commit-prの新commit承認後の実行集約（Python標準経路）
+
+commit／commit-mainは[共有Bun手順](local-bun.md)で保持参照だけをexecuteするため、この生成例を使わない。未移行commit-prのPython経路と既存保証は維持する。
 
 [workflow](workflow.md)の手順9〜11から全文を読む。これは当該実行の呼出しコードを生成するための指示で、別のrunnerではない。API・branch規則・承認前工程はworkflowのまま。対象は**新commitあり・標準経路・Codemode利用可能**だけ。対象差分なし、既存HEAD、push済みからPRだけ、Python-freeは従来どおり。Codemodeが**集約開始前から利用不可**の場合だけ手順9〜11の逐次script経路を使い、Python-freeへは切り替えない。開始後の非0・例外・timeout・中断・不正応答ではfallbackしない。
 

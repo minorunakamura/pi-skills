@@ -1,6 +1,8 @@
-# 未移行push／PR入口: 新commit承認後のCodemode集約と停止・部分成功
+> 現行commit-pushは[push専用Bun／Bun不足停止手順](push-bun.md)。以下のPython接続は未移行PRと変更前baseline用であり、現行push入口へ適用しない。
 
-commit／commit-mainの現行入口は[専用Bun手順](local-bun.md)。以下のPython資材はcommit-push／commit-pr用として保持する。
+# 未移行PR入口: 新commit承認後のCodemode集約と停止・部分成功
+
+commit／commit-mainの現行入口は[専用Bun手順](local-bun.md)。以下のPython資材はcommit-pr用として保持する。
 
 初期対象は標準経路の新commit、一括承認後の公開CLI接続。実Agentの`commit-pr`通常承認と、ローカル2入口の直前default根拠照合を選ぶ。既存HEAD・Python-free・全入口full pipeline・全異常条件・実GitHub・将来のAgent遵守率は対象外。文言assertやscript単体成功でAgentの操作遵守を代用しない。[Feature Map](feature-map.md)の既存branch/script入口も維持する。
 

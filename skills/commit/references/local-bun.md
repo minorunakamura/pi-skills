@@ -1,14 +1,14 @@
 # commit / commit-main: Bun標準手順
 
-両ローカル入口の手順。commit-push／commit-prは[旧workflow](workflow.md)のPython経路を維持しており、ここでは扱わない。この手順を全文読んでから停止／操作する。Git状態・default判断・Stage・検査・private保持・実操作は同梱CLI、自由文・意味理解・文章・質問・承認はassistant／利用者が担当する。処理コード・旧schema互換adapterを毎回生成しない。Codemodeは不要。
+両ローカル入口の手順。commit-pushは[push用Bun手順](push-bun.md)、commit-prは[旧workflow](workflow.md)を使う。push手順から共通部分を参照する場合だけ、push側のmode／default／branch／空diff／通信規則を優先する。この手順を全文読んでから停止／操作する。Git状態・default判断・Stage・検査・private保持・実操作は同梱CLI、自由文・意味理解・文章・質問・承認はassistant／利用者が担当する。処理コード・旧schema互換adapterを毎回生成しない。Codemodeは不要。
 
 ## 起動: Git対象とtrusted scripts cwdを分ける
 
 対象repositoryの実ルート絶対pathを`REPOSITORY`、このreferenceに隣接する`../scripts`の**信頼済み配布元実体の絶対path**を`SCRIPTS`とする。対象が欠落したら停止し、scripts側のrepositoryへfallbackしない。対象内の設定・`.env`・preloadをBun起動に混ぜない。
 
-開始時だけ`command -v bun`で存在確認する。存在しない場合だけ[別互換手順](local-compatibility.md)を全文読み、Bun／Python不要の経路と機械的ガードの差を明示する。Bunがある標準経路では互換referenceを読まない。runtime自動install・PATH／利用者設定の変更は禁止。
+開始時だけ`command -v bun`で存在確認する。**Bun 1.3.0以上は必須**。不在なら必要条件「Bun 1.3.0以上」を案内し、Stageを含むGit変更前に停止する。`--no-confirm`でもこの確認は省略しない。手書きBash・旧Python・互換手順へのfallbackはなく、runtime自動install・PATH／利用者設定の変更は禁止。
 
-Bunがある場合はsymlinkを解決した絶対実体を確定する。shimしか確認できなければ停止する。probeも以下のtrusted cwdと引数を使い、Bun 1.3.0以上であることを確認する。非対応version・起動失敗・不正応答は停止し、互換へ切り替えない。
+Bunがある場合はsymlinkを解決した絶対実体を確定する。shimしか確認できなければ停止する。probeも以下のtrusted cwdと引数を使い、Bun 1.3.0以上であることを確認する。非対応version・起動失敗・不正応答・実体やversionの確認不能も「確認可能なBun 1.3.0以上が必要」と案内し、Stageを含むGit変更前に停止する。開始後の失敗を含め別経路へ切り替えない。
 
 ```bash
 # REPOSITORY / SCRIPTS / BUN は実際に確認した絶対path。例の値を推測しない。
