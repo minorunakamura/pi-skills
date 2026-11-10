@@ -1,4 +1,6 @@
-# 新commit承認後のCodemode集約と停止・部分成功
+# 未移行3入口: 新commit承認後のCodemode集約と停止・部分成功
+
+commit-mainの現行入口は[専用Bun手順](commit-main-bun.md)。以下のPython資材はcommit／commit-push／commit-pr用として保持する。
 
 初期対象は標準経路の新commit、一括承認後の公開CLI接続。実Agentの`commit-pr`通常承認と、ローカル2入口の直前default根拠照合を選ぶ。既存HEAD・Python-free・全入口full pipeline・全異常条件・実GitHub・将来のAgent遵守率は対象外。文言assertやscript単体成功でAgentの操作遵守を代用しない。[Feature Map](feature-map.md)の既存branch/script入口も維持する。
 
@@ -33,7 +35,7 @@ spec.loader.exec_module(module)
 # Only these non-secret values survive; setup_tools adds the owned fixture paths.
 keys = ('PATH', 'HOME', 'TMPDIR', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL',
         'PI_CODING_AGENT_DIR', 'PI_OFFLINE', 'PI_SKIP_VERSION_CHECK', 'PI_TELEMETRY',
-        'VERIFY_PI', 'VERIFY_SANDBOX')
+        'VERIFY_PI', 'VERIFY_SANDBOX', 'VERIFY_NODE')
 env = {k: os.environ[k] for k in keys}
 env.update(LC_ALL='C', PYTHONDONTWRITEBYTECODE='1')
 tools = module.RemoteTools()
@@ -86,19 +88,19 @@ source版/dirty、選択sourceの関連ファイルdigest、Pi/Git/Python版、�
 ## Pi入口・承認前観測・実回答
 
 ```bash
-"$PYTHON" "$SOURCE/.pi/skills/verify-project/scripts/check-commit-rpc.py"
-"$PYTHON" "$SOURCE/.pi/skills/verify-project/scripts/summarize-commit-rpc.py" --self-check
+"$VERIFY_NODE" --test "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.test.ts"
 "$PYTHON" -E -S - "$SOURCE" "$OWNED" <<'PY' > "$OWNED/driver.out" 2> "$OWNED/driver.err" &
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 source, owned = map(Path, sys.argv[1:])
 setup = json.loads((owned / 'setup.json').read_text())
 env = json.loads((owned / 'env.json').read_text())
-command = [sys.executable, str(source / '.pi/skills/verify-project/scripts/commit-rpc.py'),
+command = [os.environ['VERIFY_NODE'], str(source / '.pi/skills/verify-project/scripts/commit-rpc.ts'),
     str(owned / 'repo'), str(Path(setup['source']) / 'skills/commit-pr/SKILL.md'),
-    str(owned / 'evidence'), '--fixture-remote', '--request', setup['request'],
+    str(owned / 'evidence'), '--fixture-remote', '--legacy-codemode','--request', setup['request'],
     '--answer-file', str(owned / 'answer')]
 result = subprocess.run(command, env=env)
 (owned / 'exit').write_text(str(result.returncode))
@@ -107,7 +109,7 @@ PY
 DRIVER_PID=$!
 ```
 
-helperは公開RPCの接続・入力・観測のみで、Git操作・branch判断・実行コード生成はしない。`get_commands`で指定Skillのみ、`get_state`で`openai/gpt-6.1-sol high`を確認してからpromptを送る。不一致ならmodelを変更して押し通さず停止する。`operations.jsonl`の`waiting_for_answer`を待ち、実際の提示・一括承認待ちを読む。想定外の質問なら`提示内容で実行`を送らない。待機中もhelperはstdoutを継続読取りする。`--timeout SECONDS`を明示する場合は承認待ちも含む**観測者の期限**であり、製品の各外部コマンド60秒やCodemodeのdeadlineとは別。既定の観測者deadlineはない。
+helperは公開RPCの接続・入力・観測のみで、Git操作・branch判断・実行コード生成はしない。`get_commands`で指定Skillのみ、`get_state`の通常provider/model/thinking解決を記録する。同条件比較ではbaselineとの一致を観測してから続け、diagnosticや意図しない別modelへのfallbackを成功扱いしない。`operations.jsonl`の`waiting_for_answer`を待ち、実際の提示・一括承認待ちを読む。想定外の質問なら`提示内容で実行`を送らない。待機中もhelperはstdoutを継続読取りする。`--timeout SECONDS`を明示する場合は承認待ちも含む**観測者の期限**であり、製品の各外部コマンド60秒やCodemodeのdeadlineとは別。既定の観測者deadlineはない。
 
 別途、実Gitで承認前のHEAD=setup.first、headsはfeature=first/main=baseだけ、index tree=予定tree、bareはmain=baseだけ、push.logなし、gh.json.prs空、`pr create`記録0を確認して保存する。Stageとcheck/prepareのtree object作成は許可する。承認前にbranch作成・commit・push・PR作成があれば失敗。確認した文章・設定・diff理解・一時diff質問前削除をtool操作と照合してから、この同じsessionへ実回答を送る。
 
@@ -115,7 +117,7 @@ helperは公開RPCの接続・入力・観測のみで、Git操作・branch判�
 printf '提示内容で実行\n' > "$OWNED/answer"
 wait "$DRIVER_PID"
 cat "$OWNED/exit"  # 正常代表は0。0だけで機能成功とはしない。
-"$PYTHON" "$SOURCE/.pi/skills/verify-project/scripts/summarize-commit-rpc.py" \
+"$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/summarize-commit-rpc.ts" \
   "$OWNED/evidence/operations.jsonl" > "$OWNED/metrics.json"
 ```
 
@@ -126,7 +128,7 @@ cat "$OWNED/exit"  # 正常代表は0。0だけで機能成功とはしない。
 - 実commit親はsetup.first、treeは承認時index tree、raw本文は`feat: pending\n`。HEAD/planned refだけがそのSHAへ進む。元feature/mainとindex treeは保持。明示upstream=origin/planned、bare planned=実SHA/main=base、余分なrefsなし。
 - fixture gh.jsonのPRは1件、title/bodyはsetupの特殊文字と末尾LFが完全一致、Draft=true、head=planned/実SHA、base=main/base SHA。repo/unwantedは未存在。
 - product Git/gh操作とRPC記録を読む。commit→verify→push check/push→PR check/create→最終確認/cleanup。push/create各1回、fetch/reset/amend/force/rebase/merge/release/deployなし。承認後の集約は外側Codemode1回・中継LLM0・assistant生成＋報告2回。内部bashの回数は集約回数ではない。正常結果のJSON全量受渡し・型/期待値検査、所有privateファイルのmode/digestと削除を生成コード/操作/実状態で照合する。
-- `operations.jsonl`は本文のないtool-onlyを含む全assistant requestのtimestamp/durationMsを保存する。`summarize-commit-rpc.py`は実回答後のuser受領境界〜最終assistant完了をwall、全assistant durationMs合計をrequest時間、assistantが直接要求したtoolCall IDに一致するtool時間だけを外側時間として集計する（boundedなnestedCallsが不完全でも二重加算しない）。Codemode内部bashとの二重加算はしない。不明なmetadataは成功や0に補完しない。
+- `operations.jsonl`は本文のないtool-onlyを含む全assistant requestのtimestamp/durationMsを保存する。`summarize-commit-rpc.ts`は実回答後のuser受領境界〜最終assistant完了をwall、全assistant durationMs合計をrequest時間、assistantが直接要求したtoolCall IDに一致するtool時間だけを外側時間として集計する（boundedなnestedCallsが不完全でも二重加算しない）。Codemode内部bashとの二重加算はしない。不明なmetadataは成功や0に補完しない。
 
 ## 停止代表と限定例
 
@@ -175,26 +177,9 @@ PY
 
 期待errorの名称だけでなく、adapterが承認前には未発火、対象時点で発火したこと、実commit/送信SHA保持、後続push/create回数とAgentの部分成功報告を確認する。
 
-### ローカル2入口のfresh実行
+### 未移行commitのfresh実行
 
-PR用setupやdriftを流用しない。各caseで[Skillの隔離setup](../SKILL.md)から新しい`OWNED`を作り、[Mapの共通setup](feature-map.md#共通setupと観測)のmain/README追記を実行する。`commit`はremoteなしのmain fallback、`commit-main`は同じsetupのbase commit後・追記前に[通信なしremote HEAD fixture](feature-map.md#通信なしのremote-head-fixture)を`REMOTE=origin DEFAULT=main`で追加し、判別済みdefaultへの直接commitを確認する。fixture URLは接続せず、fetchしない。
-
-両caseともPi起動前のbranch/HEAD/全refs（symbolic target含む）/index bytes/tree/branch設定を保存する。通常承認の`commit-main`は次のように起動し、別shellで`waiting_for_answer`と実提示を読んでから、承認前にも同じref/HEADと新branch/commit/push/createが0であることを確認してanswer fileを作る。Stage後のindex更新は許容する。
-
-```bash
-umask 077
-"$PYTHON" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.py" \
-  "$OWNED/repo" "$SOURCE/skills/commit-main/SKILL.md" "$OWNED/evidence" \
-  --request '/skill:commit-main' --answer-file "$OWNED/answer" &
-DRIVER_PID=$!
-# 別shellで承認前観測後、同じowned answer fileへ実回答する。
-# printf '提示内容で実行\n' > "$OWNED/answer"
-wait "$DRIVER_PID"
-```
-
-`commit`はSkill/requestをともにcommitへ変え、`--request '/skill:commit --no-confirm'`とし、`--answer-file`を付けない。通常承認がないので起動前snapshotと操作順序を用いて、予定表示より前のbranch/commitなしとStage/check後だけのcommitを照合する。いずれも`--fixture-remote`を付けず、push/PR用prepareやgh fixtureは不要。
-
-生成Codemodeと内側bashの完全な引数を読み、Stage前に保持したrepository/gitDir・現在branch・全local remote HEADの有無/symbolic target/解決OID・対応remote/順序付きfetch設定・候補/理由/回答を、集約内で**別途同じ方法で完全再取得して比較した後**にcommitしたことを確認する。単なるscript snapshot比較を成功としない。実Gitでcommit親=base、tree=Stage後予定tree、raw本文=提示値（既存LF規則）、元main保持/新branch1件（commit）、mainだけ前進/branch作成切替0（commit-main）、index treeと他refs/設定保持を照合する。Git操作記録からls-remote/fetch/push/gh/remote APIなし、commit終点・不要後続API0を確認する。通常承認のmetricには既存summarizerを使えるが、no-confirmを承認後性能3runへ混ぜない。cleanup/readbackは共通のまま。
+commit-mainは[専用Bun手順](commit-main-bun.md)を使う。未移行commitだけは[共通setup](feature-map.md#共通setupと観測)のremoteなしmainで、Node24の共有RPC helperに旧Skillを明示し、`--legacy-codemode --request '/skill:commit --no-confirm'`を付ける。承認前snapshot／default根拠を保持し、元mainを進めず未存在作業branchだけ作成・commitすること、raw本文／親／tree／index・通信0を実Gitと照合する。通常承認baselineにはno-confirmを混ぜない。
 
 既存PR（check.diff=null正常）、create競合の`existing`非重複/非編集、新規文章が未確定のままPR消失時create禁止、commit-pushのPR API非呼出し、Codemode開始前から不在の場合だけの逐次script fallbackは、[共有文書＋同じ呼出し例の限定実行＋既存回帰](limited-branches.md)で選ぶ。通常Pythonの固定例で実公開CLIの元準備/checkと文章有無を入力にし、push終点/fallbackの制御traceは実Agent/runtime境界と区別する。これらをfresh Pi全入口full pipeline通過と呼ばない。Codemode開始後の失敗からfallback・再試行・rollback・準備更新はしない。公開境界を通さない限定例の範囲はrun記録へ明示する。
 

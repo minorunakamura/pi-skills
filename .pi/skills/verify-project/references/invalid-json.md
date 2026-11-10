@@ -10,7 +10,7 @@ repository rootから[共通隔離setup](../SKILL.md#隔離環境の準備)を�
 
 ```bash
 umask 077
-export SOURCE OWNED PYTHON GIT VERIFY_PI VERIFY_SANDBOX
+export SOURCE OWNED PYTHON GIT VERIFY_PI VERIFY_SANDBOX VERIFY_NODE
 export EVIDENCE="$SOURCE/docs/verification/36/worker-invalid-json-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 "$PYTHON" -E -S - <<'PY'
 import hashlib, json, os, stat, subprocess
@@ -19,7 +19,7 @@ os.umask(0o077)
 source, owned, evidence = (Path(os.environ[k]).resolve() for k in ('SOURCE','OWNED','EVIDENCE'))
 evidence.mkdir(parents=True, exist_ok=False, mode=0o700)
 keys = ('PATH','HOME','TMPDIR','GIT_CONFIG_NOSYSTEM','GIT_CONFIG_GLOBAL','PI_CODING_AGENT_DIR',
-        'PI_OFFLINE','PI_SKIP_VERSION_CHECK','PI_TELEMETRY','VERIFY_PI','VERIFY_SANDBOX')
+        'PI_OFFLINE','PI_SKIP_VERSION_CHECK','PI_TELEMETRY','VERIFY_PI','VERIFY_SANDBOX','VERIFY_NODE')
 env = {k:os.environ[k] for k in keys}
 env.update(LC_ALL='C', PYTHONDONTWRITEBYTECODE='1')
 real_git, python = os.environ['GIT'], os.environ['PYTHON']
@@ -56,7 +56,7 @@ assert a.returncode == 0 and b.returncode != 0 and not probe.exists()
 (evidence/'sandbox.json').write_text(json.dumps({'ownedWriteExit':a.returncode,'sourceCreateExit':b.returncode,
     'sourceAbsent':not probe.exists(),'sharedConfigWriteDeniedByProfile':True})+'\n')
 assets = ['.pi/skills/verify-project/references/invalid-json.md',
-          '.pi/skills/verify-project/scripts/commit-rpc.py','skills/commit/references/execution-batching.md',
+          '.pi/skills/verify-project/scripts/commit-rpc.ts','skills/commit/references/execution-batching.md',
           *['skills/commit/scripts/'+p for p in ('staged-commit.py','git-status.py','git_guard.py')]]
 def sg(*args): return subprocess.check_output([real_git,*args],cwd=source,env=env)
 (evidence/'source.json').write_text(json.dumps({'head':sg('rev-parse','HEAD').decode().strip(),
@@ -180,10 +180,10 @@ request = ('verify-project invalid-JSON LIMITED calling example, NOT product Ski
 (o/'request.txt').write_text(request)
 # Seal the known fixture inventory before Pi; unexpected paths later stop cleanup.
 (o/'inventory.json').write_text(json.dumps([str(p.relative_to(o)) for p in o.rglob('*')]))
-cmd = [s['python'],str(source/'.pi/skills/verify-project/scripts/commit-rpc.py'),str(o/'repo'),
-       str(source/'.pi/skills/verify-project/SKILL.md'),str(o/'rpc'),'--request',request]
+cmd = [env['VERIFY_NODE'],str(source/'.pi/skills/verify-project/scripts/commit-rpc.ts'),str(o/'repo'),
+       str(source/'.pi/skills/verify-project/SKILL.md'),str(o/'rpc'),'--legacy-codemode','--request',request]
 r = subprocess.run(cmd,env=env)
-(o/'command-exit.json').write_text(json.dumps({'command':['commit-rpc.py','--request','<fixed limited example>'],'exit':r.returncode}))
+(o/'command-exit.json').write_text(json.dumps({'command':['commit-rpc.ts','--legacy-codemode','--request','<fixed limited example>'],'exit':r.returncode}))
 print('RPC helper exit:',r.returncode,'(not alone acceptance)')
 PY
 ```

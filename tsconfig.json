@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "skills/**/*.ts",
+    "tests/**/*.ts",
+    "tests/**/*.js",
+    "extensions/**/*.js",
+    ".pi/skills/verify-project/scripts/*.ts"
+  ]
+}

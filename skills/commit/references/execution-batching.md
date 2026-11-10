@@ -1,4 +1,6 @@
-# 新commit承認後の実行集約（標準script経路）
+# 未移行3入口の新commit承認後の実行集約（Python標準経路）
+
+commit-mainは[専用Bun手順](commit-main-bun.md)で保持参照だけをexecuteするため、この生成例を使わない。他3入口の未移行Python経路と既存保証は維持する。
 
 [workflow](workflow.md)の手順9〜11から全文を読む。これは当該実行の呼出しコードを生成するための指示で、別のrunnerではない。API・branch規則・承認前工程はworkflowのまま。対象は**新commitあり・標準経路・Codemode利用可能**だけ。対象差分なし、既存HEAD、push済みからPRだけ、Python-freeは従来どおり。Codemodeが**集約開始前から利用不可**の場合だけ手順9〜11の逐次script経路を使い、Python-freeへは切り替えない。開始後の非0・例外・timeout・中断・不正応答ではfallbackしない。
 

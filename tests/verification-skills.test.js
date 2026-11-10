@@ -1,13 +1,75 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+
+await test("commit-main-compatibility private capture example works in Bash and stops on Git failure", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "commit-main-compatibility-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const temporary = join(directory, "tmp");
+  const repo = join(directory, "repo");
+  const outside = join(directory, "outside");
+  for (const path of [temporary, repo, outside]) await mkdir(path);
+  const env = {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+    ),
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    TMPDIR: temporary,
+  };
+  await writeFile(join(repo, "README.md"), "# Example\n");
+  for (const args of [
+    ["init", "-b", "main"],
+    ["add", "--", "README.md"],
+  ]) {
+    const result = spawnSync("git", args, { cwd: repo, env });
+    assert.equal(result.status, 0);
+  }
+  const reference = await readFile(
+    new URL(
+      "../skills/commit/references/commit-main-compatibility.md",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const example = reference.match(/```bash\n([\s\S]*?)\n```/);
+  assert.ok(example, "Expected the private capture example");
+  const success = spawnSync(
+    "/bin/bash",
+    [
+      "-c",
+      `${example[1]}\ntest -n "$diff_file"\ntest -s "$diff_file"\ntest ! -s "$error_file"\ntest "$diff_digest" = "$(shasum -a 256 "$diff_file" | awk '{print $1}')"\nprintf 'capture-verified\\n'`,
+    ],
+    { cwd: repo, env, encoding: "utf8" },
+  );
+  assert.equal(success.status, 0, success.stderr);
+  assert.equal(success.stdout, "capture-verified\n");
+  const failure = spawnSync(
+    "/bin/bash",
+    ["-c", `${example[1]}\nprintf 'must-not-continue\\n'`],
+    { cwd: outside, env, encoding: "utf8" },
+  );
+  assert.equal(failure.status, 1);
+  assert.equal(failure.stdout, "");
+  assert.equal(failure.stderr, "", "Git diagnostics must remain private");
+});
 
 const repository = new URL("../", import.meta.url);
 const skillNames = ["create-verification-skill", "maintain-verification-skill"];
 const skillDirectories = skillNames.map((name) => `skills/${name}/`);
 
 for (const name of skillNames) {
-  test(`${name} frontmatter declares its explicit MIT skill`, async () => {
+  await test(`${name} frontmatter declares its explicit MIT skill`, async () => {
     const source = await readFile(
       new URL(`skills/${name}/SKILL.md`, repository),
       "utf8",
@@ -21,7 +83,7 @@ for (const name of skillNames) {
   });
 }
 
-test("verification skills Markdown relative references resolve", async () => {
+await test("verification skills Markdown relative references resolve", async () => {
   let checked = 0;
   for (const path of [
     ...skillDirectories.map((directory) => `${directory}SKILL.md`),

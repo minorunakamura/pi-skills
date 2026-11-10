@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   check:
-    name: lint, types, format, tests
+    name: TypeScript and legacy Python checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -22,7 +22,7 @@ jobs:
           version: 2026.10.17
       - name: Install Node dependencies
         run: pnpm install --frozen-lockfile
-      - name: Install Python dependencies
+      - name: Install Python dependencies for unmigrated entrypoints
         run: mise exec -- uv sync --locked --python python
       - name: Lint
         run: pnpm lint

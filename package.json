@@ -11,7 +11,10 @@
     "extensions/",
     "skills/*/SKILL.md",
     "skills/*/references/*.md",
-    "skills/*/scripts/*.py"
+    "skills/*/scripts/*.py",
+    "skills/*/scripts/*.ts",
+    "skills/*/scripts/*.toml",
+    "skills/*/scripts/*.json"
   ],
   "pi": {
     "extensions": [
@@ -22,10 +25,10 @@
     ]
   },
   "scripts": {
-    "test": "node --test tests/*.test.js && mise exec -- uv run --locked --python python python -B -m pytest",
-    "lint": "mise exec -- ruff check skills/commit && biome lint extensions tests",
-    "typecheck": "mise exec -- uv run --locked --python python ty check skills/commit",
-    "lint:fix": "mise exec -- ruff check --fix skills/commit && biome lint --write extensions tests",
+    "test": "node --test 'tests/**/*.test.js' 'tests/**/*.test.ts' '.pi/skills/verify-project/scripts/*.test.ts' && mise exec -- uv run --locked --python python python -B -m pytest",
+    "lint": "oxlint --type-aware --deny-warnings skills tests extensions .pi/skills/verify-project/scripts && mise exec -- ruff check skills/commit",
+    "typecheck": "tsc --noEmit && mise exec -- uv run --locked --python python ty check skills/commit",
+    "lint:fix": "oxlint --type-aware --deny-warnings --fix skills tests extensions .pi/skills/verify-project/scripts && mise exec -- ruff check --fix skills/commit",
     "format": "biome format --write . && mise exec -- ruff format skills/commit",
     "format:check": "biome format . && mise exec -- ruff format --check skills/commit"
   },
@@ -48,6 +51,10 @@
     }
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.9"
+    "@biomejs/biome": "2.5.9",
+    "@types/node": "24.19.2",
+    "oxlint": "1.92.0",
+    "oxlint-tsgolint": "7.0.2006",
+    "typescript": "7.0.2"
   }
 }

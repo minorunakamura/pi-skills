@@ -12,7 +12,7 @@ repository rootで[Skillの隔離setup](../SKILL.md#隔離環境の準備)と[�
 
 ```bash
 umask 077
-export SOURCE OWNED PYTHON GIT VERIFY_PI VERIFY_SANDBOX
+export SOURCE OWNED PYTHON GIT VERIFY_PI VERIFY_SANDBOX VERIFY_NODE
 export EVIDENCE="$SOURCE/docs/verification/36/worker-interruption-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 "$SOURCE/.venv/bin/python" -B - <<'PY'
 import hashlib, json, os, shlex, stat, subprocess, time
@@ -172,8 +172,8 @@ print(json.dumps({'head':g('rev-parse','HEAD').decode().strip(),'branch':g('symb
 (o/'snapshot.py').write_text(snapshot)
 (o/'before.json').write_bytes(subprocess.check_output([s['python'],'-E','-S',str(o/'snapshot.py')],env=env))
 def sg(*a): return subprocess.check_output([s['git'],*a],cwd=source,env=env)
-assets=['.pi/skills/verify-project/references/interruption.md','.pi/skills/verify-project/scripts/commit-rpc.py',
- '.pi/skills/verify-project/scripts/check-commit-rpc.py','skills/commit/tests/test_remote_scripts.py','skills/commit/tests/fixtures/remote_tools.py',
+assets=['.pi/skills/verify-project/references/interruption.md','.pi/skills/verify-project/scripts/commit-rpc.ts',
+ '.pi/skills/verify-project/scripts/commit-rpc.test.ts','skills/commit/tests/test_remote_scripts.py','skills/commit/tests/fixtures/remote_tools.py',
  'skills/commit/references/execution-batching.md',*['skills/commit/scripts/'+n for n in ('staged-commit.py','guarded-push.py','github-pr.py','git_guard.py')]]
 (evidence/'source.json').write_text(json.dumps({'head':sg('rev-parse','HEAD').decode().strip(),'dirty':sg('status','--short').decode(),
  'diffSha256':hashlib.sha256(sg('diff','--binary','HEAD')).hexdigest(),'assetsSha256':{p:hashlib.sha256((source/p).read_bytes()).hexdigest() for p in assets},
@@ -197,9 +197,9 @@ from pathlib import Path
 os.umask(0o077)
 o,source,evidence=(Path(os.environ[k]).resolve() for k in ('OWNED','SOURCE','EVIDENCE'))
 s=json.loads((o/'setup.json').read_text()); env=json.loads((o/'env.json').read_text())
-command=[s['python'],str(source/'.pi/skills/verify-project/scripts/commit-rpc.py'),str(o/'repo'),
+command=[env['VERIFY_NODE'],str(source/'.pi/skills/verify-project/scripts/commit-rpc.ts'),str(o/'repo'),
  str(source/'.pi/skills/verify-project/SKILL.md'),str(o/'rpc'),'--fixture-remote','--abort-file',str(o/'abort'),
- '--request',(o/'request.txt').read_text()]
+ '--legacy-codemode','--request',(o/'request.txt').read_text()]
 def table():
  rows=subprocess.check_output(['/bin/ps','-axo','pid=,ppid=,pgid=,uid=']).decode().splitlines()
  return {int(x[0]):dict(zip(('pid','ppid','pgid','uid'),map(int,x))) for row in rows if len(x:=row.split())==4}
@@ -286,7 +286,7 @@ with (o/'driver.out').open('xb') as out,(o/'driver.err').open('xb') as err:
   assert not any(exists(pid) for pid in owned_pids), 'owned PID remains; no fixture deletion'
   (o/'owner-cleanup.json').write_text(json.dumps({'driverWaited':True,'driverExit':driver.returncode,'ownedPids':sorted(owned_pids),
     'ownedGroups':sorted(groups),'allAbsent':True,'failure':failure}))
-  (o/'command-exit.json').write_text(json.dumps({'command':['commit-rpc.py','--fixture-remote','--abort-file','<owned marker>','--request','<fixed limited example>'],
+  (o/'command-exit.json').write_text(json.dumps({'command':['commit-rpc.ts','--fixture-remote','--abort-file','<owned marker>','--legacy-codemode','--request','<fixed limited example>'],
     'exit':driver.returncode,'explicitAbort':explicit,'failure':failure}))
 print('observer completed; inspect partial results, not helper exit alone')
 PY

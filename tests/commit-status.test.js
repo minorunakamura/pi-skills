@@ -57,7 +57,7 @@ function render(result, prefix = "") {
   ).text;
 }
 
-test("colors only dots and preserves original status metadata", async () => {
+await test("colors only dots and preserves original status metadata", async () => {
   const input = state([
     change(" ", "M"),
     change("?", "?"),
@@ -84,7 +84,7 @@ test("colors only dots and preserves original status metadata", async () => {
   assert.equal(tool.renderCall({}, {}, { outputPad: 1 }).text, "Git status");
 });
 
-test("shows partial stages, renames, copies, and conflicts accurately", async () => {
+await test("shows partial stages, renames, copies, and conflicts accurately", async () => {
   const result = await execute(
     state([
       change("M", "M"),
@@ -106,7 +106,7 @@ test("shows partial stages, renames, copies, and conflicts accurately", async ()
   assert.equal((text.match(/Unmerged/g) ?? []).length, 2);
 });
 
-test("escapes terminal controls and preserves special path boundaries", async () => {
+await test("escapes terminal controls and preserves special path boundaries", async () => {
   const path = "space | [name]\n\t\u001b[31m\u009b31m\u202efile.txt";
   const result = await execute({
     branch: "topic\u202e",
@@ -123,14 +123,14 @@ test("escapes terminal controls and preserves special path boundaries", async ()
 });
 
 for (const mode of ["rpc", "json", "print"]) {
-  test(`${mode} mode receives a plain-text list without ANSI`, async () => {
+  await test(`${mode} mode receives a plain-text list without ANSI`, async () => {
     const result = await execute(state([change("?", "?")]), mode);
     assert.match(result.content[0].text, /● Untracked.*"file.txt"/);
     assert.equal(result.content[0].text.includes("\u001b"), false);
   });
 }
 
-test("handles clean and detached states and uses the current renderer theme", async () => {
+await test("handles clean and detached states and uses the current renderer theme", async () => {
   const clean = await execute({ branch: null, changes: [] });
   assert.match(render(clean), /detached HEAD.*0 files\nNo changes/);
   const result = await execute(state([change("?", "?")]));
@@ -142,7 +142,7 @@ test("handles clean and detached states and uses the current renderer theme", as
   );
 });
 
-test("disables only this tool's colored shell and preserves output padding", async () => {
+await test("disables only this tool's colored shell and preserves output padding", async () => {
   assert.equal(tool.renderShell, "self");
   assert.equal(tool.renderCall({}, {}, { outputPad: 2 }).paddingX, 2);
   const result = await execute(state([change("?", "?")]));
@@ -156,7 +156,7 @@ test("disables only this tool's colored shell and preserves output padding", asy
   assert.equal(rendered.paddingY, 0);
 });
 
-test("rejects malformed metadata without echoing invalid JSON", async () => {
+await test("rejects malformed metadata without echoing invalid JSON", async () => {
   for (const input of [
     null,
     {},
