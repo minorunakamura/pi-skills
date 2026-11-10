@@ -112,18 +112,20 @@ def test_four_explicit_entries_pin_endpoint_and_branch_policy_and_load_shared_wo
     assert description.isascii()
     assert "disable-model-invocation: true" in text
     assert f"到達点は **{endpoint}**" in text
+    reference = "commit-main-bun.md" if name == "commit-main" else "workflow.md"
     relative = (
-        "references/workflow.md"
+        f"references/{reference}"
         if name == "commit"
-        else "../commit/references/workflow.md"
+        else f"../commit/references/{reference}"
     )
     assert f"({relative})" in text and "全文" in text
-    assert (
-        path.parent / relative
-    ).resolve() == SKILL_DIR / "references" / "workflow.md"
+    assert (path.parent / relative).resolve() == SKILL_DIR / "references" / reference
     assert (path.parent / relative).is_file()
     assert "矛盾" in text and "Git変更前" in text
-    assert "到達点とbranch方針を確定して共有手順へ引き継" in text
+    if name != "commit-main":
+        assert "到達点とbranch方針を確定して共有手順へ引き継" in text
+    else:
+        assert "他3入口の旧Python workflow" in text
     for entry in ("commit", "commit-main", "commit-push", "commit-pr"):
         assert f"`/skill:{entry}`" in text
     assert "### Stage実行" not in text
@@ -186,7 +188,29 @@ def test_commit_main_entry_pins_direct_default_commit_without_branch_switching()
         assert contract in text
     assert "切断された場合は残りのtailも読む" in text
     assert "矛盾による終了を含む停止判断は全文read後" in text
-    assert text.index("[共有手順]") < text.index("作業branch上、")
+    assert text.index("[Bun標準手順]") < text.index("作業branch上、")
+    workflow = (SKILL_DIR / "references" / "commit-main-bun.md").read_text()
+    for contract in (
+        "BUN_OPTIONS",
+        "NODE_OPTIONS",
+        "--env-file=/dev/null",
+        "--no-install",
+        "--config=",
+        "commit-workflow.ts",
+        "inspect",
+        "materials",
+        "plan",
+        "execute",
+        "execute",
+        "参照",
+        "途中LLM",
+        "実際に質問",
+        "Stage0",
+        "commit-main-compatibility.md",
+        "Python不要",
+        "承認token",
+    ):
+        assert contract in workflow
 
 
 @pytest.mark.parametrize("route", ["workflow.md", "compatibility.md"])

@@ -57,7 +57,7 @@ Pi を作業対象のプロジェクトで起動し、`/skill:<スキル名>` �
 
 defaultへの直接commitは`/skill:commit-main`を選びます。同じ共通判定でmain／master／その他のdefault相当と確認できた現在branchだけにcommitし、作業branch上や新branch作成・切替・push／PRの矛盾指示ではStageを含むGit変更前に停止します。defaultへ自動切替せず、未commit変更も持ち運びません。両ローカル入口ともremote準備・通信は追加せず、対象差分がなければbranch・commitを作りません。`--no-confirm`でもbranch条件は維持します。
 
-標準script経路で新commitがありCodemodeを使える場合、一括承認後の操作と最終確認・後始末を原則1回にまとめます。開始前からCodemodeが利用不可の場合だけ従来の逐次経路を使い、開始後の失敗から切り替えません。安全照合と各入口の終了位置は維持します。部分成功・中断の限界と検証方法は[実行集約の詳細](CONTRIBUTING.md#新commit承認後の実行集約)を参照してください。
+`commit-main`は同梱TypeScriptをBun 1.3.0以上で直接実行します。完成文章を承認前にprivate保持し、承認後は参照だけでcommit・事後確認・cleanupまで進みます。Codemodeは不要です。他3入口は未移行で、既存Python／Codemode経路を維持しています。起動・互換経路・停止条件は[詳細仕様](CONTRIBUTING.md#commit-mainのbun標準経路)を参照してください。
 
 対象や文章への要望も指定できます。
 
@@ -73,7 +73,7 @@ defaultへの直接commitは`/skill:commit-main`を選びます。同じ共通�
 - Stage は最終確認より先に実行するため、キャンセルや失敗でも Stage が残ることがあります。勝手に reset／unstage はしません。
 - 通常は実行内容をまとめて確認します。`--no-confirm` は通常の確認だけを省略し、安全検査や異常時の停止は省略しません。
 - PR 作成には認証済みの `gh` が必要です。同一リポジトリ内の PR に対応します。
-- Python 3.14 以上があれば同梱 script を使います。未導入・旧バージョンなら Python 不要の互換手順を使いますが、script と同等の機械的ガードは保証しません。
+- `commit-main`は開始時にBunがない場合だけPython不要のlocal互換手順を使います。他3入口はPython 3.14以上の同梱script、開始時Python不足なら既存互換手順です。開始後の失敗で切り替えず、自動installしません。互換手順は標準scriptと同等の機械的ガード／速度を保証しません。
 - Gitleaks があれば秘密情報を検査し、未導入なら未検査と報告します。
 - reset、amend、force push、rebase、PR の自動 merge は行いません。
 

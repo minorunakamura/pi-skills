@@ -1,6 +1,12 @@
 # Feature Map: commit の承認後集約・branch判断と公開script接続
 
-今回の変更に関係する入口だけを選ぶ。全OS／全refspec／LLM判断精度全般は対象外。[準備・起動・安全性・cleanup](../SKILL.md)に従う。runの成否や一時パスはこのMapに書かず、`docs/verification/<issue-number>/<run>/`の実行記録へ分離する。
+今回の変更に関係する入口だけを選ぶ。
+
+## commit-main Bun標準入口（現行）
+
+[専用手順](commit-main-bun.md)で公開CLI／fresh Pi通常承認・cancel・default実質問の未回答Stage0・no-confirm・開始時Bunなしlocal互換を選ぶ。固定文章の承認前private保持、参照だけexecute、branch作成切替／通信なし（必要object欠落でも暗黙fetchなし）、進行中mergeの操作前拒否、scanner未発見と起動失敗の分離、literal `.`の全ルート対象、実Git raw本文／全親／tree／ref／index、失敗／cleanupの区別を照合する。互換の直接private確保／捕捉例は`tests/verification-skills.test.js`で実行確認し、fresh Piは起動前manifest固定・同じ親shellのPID記録／waitを専用手順どおり行う。証拠は`docs/verification/45/<一意run>/`。未移行3入口のPython／Codemode手順は以下に保持し、旧性能条件を新入口へ適用しない。
+
+全OS／全refspec／LLM判断精度全般は対象外。[準備・起動・安全性・cleanup](../SKILL.md)に従う。runの成否や一時パスはこのMapに書かず、`docs/verification/<issue-number>/<run>/`の実行記録へ分離する。
 
 ## 新commit承認後のCodemode集約と停止・部分成功
 
@@ -56,7 +62,7 @@ git config --local --get-regexp '^branch\.'
 
 ## 代表case
 
-全直積にせず、標準経路で次を選ぶ。下のcommit代表は先行Issueの既存保証と照合し、共有手順を変えたbranch方針は変更後に代表を再実行する。過去の成功を変更後の成功として流用しない。実際の`/skill:commit`呼出しと確認用follow-upは[RPC接続helper](../scripts/commit-rpc.py)を使う。
+全直積にせず、標準経路で次を選ぶ。下のcommit代表は先行Issueの既存保証と照合し、共有手順を変えたbranch方針は変更後に代表を再実行する。過去の成功を変更後の成功として流用しない。実際の`/skill:commit`呼出しと確認用follow-upは[RPC接続helper](../scripts/commit-rpc.ts)を使う。
 
 | case | setup／操作 | 期待・観測 |
 | --- | --- | --- |
@@ -72,19 +78,7 @@ git config --local --get-regexp '^branch\.'
 
 ### commit-mainの代表case
 
-上の共通setup／観測と同じfixtureを使い、helperのSkillパスとrequestをともにcommit-mainへ変える。通常承認・cancel・no-confirmを代表caseへ組み合わせ、全直積にはしない。
-
-| case | setup／操作 | 期待・観測 |
-| --- | --- | --- |
-| main／master fallback | remoteなし、対応branch、説明追加 | branch作成・切替なし。現在branchへ直接commit、親はbase、対象tree一致、他refs／branch設定不変 |
-| local HEAD master／develop | 対応default上、下のlocal remote HEAD setup、説明追加 | mappingで判別した現在defaultへ直接commit。tracking refs不変、通信なし |
-| 作業branch／default優先 | feature/docs・remoteなし、またはmain上でlocal HEAD=develop、説明追加、no-confirm | Stage前に停止し対応入口を案内、HEAD／全refs／index bytes不変。main fallbackでdevelopを上書きしない |
-| 候補競合／壊れた情報 | origin/masterとbackup/develop、またはHEADのsymbolic targetを未存在refへ設定、説明追加、no-confirm。疑義に回答しない | 情報なしとせず候補／理由を表示し、実際に明示質問して選択肢・自由回答を求める。回答を与えず終了しHEAD／refs／index bytes不変を照合。報告・再実行案内だけなら不成立 |
-| 矛盾指示 | default相当上で新branch作成・別branch切替・push・PRの代表指示、no-confirm | 共有workflow全文read（切断時tailも）の後にGit変更前停止。read操作と停止判断の順序を照合。自動切替・変更持ち運びなし、HEAD／refs／index bytes不変 |
-| 空diff／初回commit | 対応branch、空diffまたはunbornでREADME追加 | 空ならbranch／commitなし、初回なら現在branchに親0個のcommitのみ |
-| 限定対象／既存Staged | README以外にも安全な自作diffを用意、READMEだけ指定。またはREADMEだけStage後に既存Stagedだけ指定 | 対象だけcommit、対象外worktree変更保持。範囲外既存Stagedは勝手にunstageせず確認停止 |
-| 通常cancel | default相当上、説明追加、通常呼出し→実提示後にキャンセル | branch／commitなし、Stageだけ残り得る。HEAD／refs不変 |
-| 互換master | master fallback、開始前からPythonなしPATH、説明追加 | 互換経路明示・script未試行で現在masterに直接commit。同じ親／tree／ref保護 |
+現行入口は[専用Bun手順](commit-main-bun.md)へ移行済み。上記Python／Codemode／Pythonなしcaseをcommit-mainへ適用しない。
 
 ### 通信なしのremote HEAD fixture
 

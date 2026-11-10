@@ -10,7 +10,7 @@ repository rootから[Skillの隔離環境](../SKILL.md#隔離環境の準備)�
 
 ```bash
 umask 077
-export SOURCE OWNED PYTHON GIT VERIFY_PI VERIFY_SANDBOX
+export SOURCE OWNED PYTHON GIT VERIFY_PI VERIFY_SANDBOX VERIFY_NODE
 RUN="worker-large-json-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 export EVIDENCE="$SOURCE/docs/verification/36/$RUN"
 "$SOURCE/.venv/bin/python" -B - <<'PY'
@@ -23,7 +23,7 @@ clean = {'PATH':'/usr/bin:/bin', 'GIT_CONFIG_NOSYSTEM':'1', 'GIT_CONFIG_GLOBAL':
 def git(*args):
     return subprocess.check_output([os.environ['GIT'], *args], cwd=source, env=clean)
 assets = ['.pi/skills/verify-project/references/large-json.md',
-          '.pi/skills/verify-project/scripts/commit-rpc.py',
+          '.pi/skills/verify-project/scripts/commit-rpc.ts',
           'skills/commit/tests/test_remote_scripts.py', 'skills/commit/tests/fixtures/remote_tools.py',
           *['skills/commit/scripts/'+p for p in ('staged-commit.py','guarded-push.py','github-pr.py','git_guard.py')]]
 (evidence/'source.json').write_text(json.dumps({
@@ -38,7 +38,7 @@ spec = importlib.util.spec_from_file_location('remote_tests',source/'skills/comm
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 keys = ('PATH','HOME','TMPDIR','GIT_CONFIG_NOSYSTEM','GIT_CONFIG_GLOBAL',
-        'PI_CODING_AGENT_DIR','PI_OFFLINE','PI_SKIP_VERSION_CHECK','PI_TELEMETRY','VERIFY_PI','VERIFY_SANDBOX')
+        'PI_CODING_AGENT_DIR','PI_OFFLINE','PI_SKIP_VERSION_CHECK','PI_TELEMETRY','VERIFY_PI','VERIFY_SANDBOX','VERIFY_NODE')
 env = {k:os.environ[k] for k in keys}
 env.update(LC_ALL='C', PYTHONDONTWRITEBYTECODE='1')
 tools = m.RemoteTools()
@@ -326,11 +326,11 @@ request = ('This is the verify-project large-JSON limited calling example, NOT a
     'Preliminary public verification-document reads required by the supplied Skill are allowed BEFORE Codemode. '
     'All operations are restricted to the owned local fixture. Then give only a bounded success/failure report.\n'+js)
 (owned/'request.txt').write_text(request)
-command = [os.environ['PYTHON'],str(source/'.pi/skills/verify-project/scripts/commit-rpc.py'),
+command = [env['VERIFY_NODE'],str(source/'.pi/skills/verify-project/scripts/commit-rpc.ts'),
     str(owned/'repo'),str(source/'.pi/skills/verify-project/SKILL.md'),str(owned/'rpc'),
-    '--fixture-remote','--request',request]
+    '--fixture-remote','--legacy-codemode','--request',request]
 result = subprocess.run(command,env=env)
-(owned/'command-exit.json').write_text(json.dumps({'command':['commit-rpc.py','--fixture-remote','--request','<fixed inline example>'],
+(owned/'command-exit.json').write_text(json.dumps({'command':['commit-rpc.ts','--fixture-remote','--legacy-codemode','--request','<fixed inline example>'],
     'exit':result.returncode}))
 assert result.returncode == 0
 PY

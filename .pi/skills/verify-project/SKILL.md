@@ -1,11 +1,11 @@
 ---
 name: verify-project
-description: Verify pi-skills post-approval Codemode batching, stopping and partial success through fresh Pi, or local branch policy and public scripts in disposable Git and fixture PR environments.
+description: Verify pi-skills commit-main Bun approval, default ambiguity and local compatibility through fresh Pi, or legacy Python commit, push and PR procedures in disposable environments.
 ---
 
 # pi-skills の対象機能を直接確認する
 
-今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。新commit承認後のCodemode集約と停止・部分成功は[専用手順](references/execution-batching.md)を使い、fresh Piの実入口・通常承認・request timingと実Git/local bare/fixture PRを照合する。Issue #28・#29の`/skill:commit`と`/skill:commit-main`のAgent branch判断と、Issue #31の公開scriptによるstaged → local bare push → fixture PRを別の入口として扱う。Issue #34のPython起動保護はMapの限定確認を選び、公開script接続とfresh Piの作業branch代表を照合する。script単体テスト・文言assert・Pi起動成功をAgentの判断成功としない。全runtime／refspec／OSの網羅は対象外。製品修正・本repositoryのcommit・独自runner・installはしない。正式チェックとRootの受入判断を代替しない。
+今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。起動前に関連source／手順／helperと使捨てdriverのdigestを固定し、起動中は編集しない。観測者は起動した同じ親shellでPIDを記録してwaitする（具体例は専用手順）。**commit-mainの現行Bun入口／通常承認／cancel／default疑義／暗黙fetch・merge拒否／scanner起動失敗／root scope／Bunなしは[専用手順](references/commit-main-bun.md)**を使う。以下と旧集約文書にあるcommit-mainのPython例は移行前の記述であり、現行入口へ適用しない。他3入口のPython資材は未移行のため保持する。新commit承認後のCodemode集約と停止・部分成功は[専用手順](references/execution-batching.md)を使い、fresh Piの実入口・通常承認・request timingと実Git/local bare/fixture PRを照合する。Issue #28・#29の`/skill:commit`と`/skill:commit-main`のAgent branch判断と、Issue #31の公開scriptによるstaged → local bare push → fixture PRを別の入口として扱う。Issue #34のPython起動保護はMapの限定確認を選び、公開script接続とfresh Piの作業branch代表を照合する。script単体テスト・文言assert・Pi起動成功をAgentの判断成功としない。全runtime／refspec／OSの網羅は対象外。製品修正・本repositoryのcommit・独自runner・installはしない。正式チェックとRootの受入判断を代替しない。
 
 ## 公開scriptの接続を選んだ場合
 
@@ -28,6 +28,8 @@ Piで利用する場合はrepositoryをcwdにproject trustを確認し、新セ�
 umask 077
 SOURCE=$(pwd -P)
 VERIFY_PI=$(command -v pi)
+VERIFY_NODE=$(command -v node) # shimでなく導入済みNode24実体を確認
+export VERIFY_NODE
 PYTHON=$(command -v python3)
 GIT=$(command -v git)
 AGENT_DIR="$HOME/.pi/agent"
@@ -38,6 +40,7 @@ OWNED=$(mktemp -d /private/tmp/pi-commit-verify.XXXXXXXX)
 OWNED=$(cd "$OWNED" && pwd -P)
 mkdir "$OWNED/home" "$OWNED/tmp" "$OWNED/bin"
 export VERIFY_PI
+"$VERIFY_NODE" --version
 export VERIFY_SANDBOX="$OWNED/sandbox.sb"
 cat > "$VERIFY_SANDBOX" <<EOF
 (version 1)
@@ -77,19 +80,19 @@ if command -v python3 >/dev/null 2>&1; then
 fi
 ```
 
-sandbox内でownedへの書込成功とsource／既存設定への書込拒否を確認する。拒否probeは既存ファイルを開いて書かず、source内の未存在の一意名に対する作成を試し、失敗と未作成を照合する。既存設定の拒否は同じprofileのルールを確認する。Piの`get_commands`で明示Skillだけ、`get_state`で通常の既存provider/model解決を確認する。lock拒否等のdiagnosticsを無視して別modelへ落ちた状態で検証しない。
+sandbox内でownedへの書込成功とsource／既存設定への書込拒否を確認する。拒否probeは既存ファイルを開いて書かず、source内の未存在の一意名に対する作成を試し、失敗と未作成を照合する。既存設定の拒否は同じprofileのルールを確認する。Piの`get_commands`で明示Skillだけ、`get_state`で通常の既存provider/model/thinking解決を確認する。helperはmodelを変更しない。比較runではbaselineとの一致を観測し、不一致／diagnostic／意図しないfallbackなら成功にしない。lock拒否等のdiagnosticsを無視して別modelへ落ちた状態で検証しない。
 
 ## 操作・観測・証拠
 
 Mapのsetupで新しいrepoを作る。Git identityは`Test User <test@example.invalid>`、署名なしとし、実remote通信はしない。証拠は既存ignore対象の`docs/verification/<issue-number>/<一意なrun>/<case>/`（今回は`29/`）を使う。sandboxはsource書込禁止なのでhelperの出力先は一時owned内、終了後に呼出し元が必要最小限を証拠先へコピーする。helperは標準RPCの接続・観測のみで、branch判断やGit操作を代行しない。
 
 ```bash
-"$PYTHON" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.py" \
-  "$OWNED/repo" "$SOURCE/skills/commit-main/SKILL.md" "$OWNED/evidence" \
-  --request '/skill:commit-main --no-confirm'
+"$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.ts" \
+  "$OWNED/repo" "$SOURCE/skills/commit/SKILL.md" "$OWNED/evidence" \
+  --legacy-codemode --request '/skill:commit --no-confirm'
 ```
 
-commitの確認ではSkillパスとrequestの両方をcommitへ変える。通常承認では`--request '/skill:commit-main' --answer '提示内容で実行'`、cancelでは`--answer 'キャンセル'`を使う。初回settledの実際の提示・承認待ちを記録で確認する。helperは`ask_user_question`を偽装しない。read/bash/codemodeだけのPiなので質問専用toolはなく、Skillの通常テキストによる確認と、同じRPC sessionへの実follow-up回答を使う。Codemodeはbuilt-inだけを明示有効にし、ambient Extensions/MCPは使わない。候補競合・壊れたHEADでは`--no-confirm`でも候補／理由の表示後に実際の質問と選択肢・自由回答の要求があることを確認し、回答を与えず待機／停止状態を観測する。「確認が必要」という報告や再実行案内だけなら確認対話は不成立とする。矛盾指示も共有workflow全文read（切断時のtailを含む）の後に停止判断したことをread操作と照合する。`--answer`は疑義への承認ではないので、想定外の質問ならそのrunを成功にしない。
+この例は未移行commitの確認。commit-mainは専用Bun手順を使う。通常承認では`--request '/skill:commit' --answer '提示内容で実行'`、cancelでは`--answer 'キャンセル'`を使う。初回settledの実際の提示・承認待ちを記録で確認する。helperは`ask_user_question`を偽装しない。read/bash/codemodeだけのPiなので質問専用toolはなく、Skillの通常テキストによる確認と、同じRPC sessionへの実follow-up回答を使う。Codemodeはbuilt-inだけを明示有効にし、ambient Extensions/MCPは使わない。候補競合・壊れたHEADでは`--no-confirm`でも候補／理由の表示後に実際の質問と選択肢・自由回答の要求があることを確認し、回答を与えず待機／停止状態を観測する。「確認が必要」という報告や再実行案内だけなら確認対話は不成立とする。矛盾指示も共有workflow全文read（切断時のtailを含む）の後に停止判断したことをread操作と照合する。`--answer`は疑義への承認ではないので、想定外の質問ならそのrunを成功にしない。
 
 helperは`get_commands`で指定Skillの名前を検出、prompt応答成功、assistantのerror／abortなし、settled、process終了0をself-checkする。ただしこれだけでは機能成功ではない。Mapの期待結果を実Gitで別途照合する。必要なら新しいcaseでやり直し、失敗runを成功として置き換えない。
 

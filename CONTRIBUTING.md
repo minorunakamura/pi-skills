@@ -1,81 +1,47 @@
 # 開発と詳細仕様
 
-利用者向けの導入・基本操作は [README.md](README.md) を参照してください。
+導入・基本操作は[README](README.md)を参照してください。
 
 ## commit 系 Skill の詳細仕様
 
+| 入口 | 終点・branch・runtime |
+| --- | --- |
+| commit | ローカルcommit。default相当上なら未存在作業branchを承認後に作成。未移行Python経路 |
+| commit-main | default相当の現在branchへ直接commit。branch作成・切替・通信なし。Bun標準経路 |
+| commit-push | 必要なcommitとpush。PR APIなし。未移行Python経路 |
+| commit-pr | 必要なcommit・pushと通常PR（明示Draft優先）。同一repository内のみ。未移行Python経路 |
 
-```text
-/skill:commit
-/skill:commit-main
-/skill:commit-push
-/skill:commit-pr
-```
+到達点・branch方針は自由文で上書きしません。矛盾はStageを含むGit変更前に停止し、対応入口を案内します。固定文章・対象・言語・形式などの明確な指定を尊重し、引数全体を固定タイトルにしません。呼出し間で過去の承認は流用しません。
 
-**到達点はSkill名で固定です。** `/skill:commit`と`/skill:commit-main`はcommit、`/skill:commit-push`はpush、`/skill:commit-pr`はcommit → push → 通常PRまで進めます。無指定ではrepository全体の全変更をStageします。 Untracked、既存Staged、部分Stageの残りも対象です（通常のignoreは維持）。従来の`commit`はPRまで進みましたが、現在はローカルcommitで止まります。Stageは最終確認より先に実行するため、**キャンセル・失敗でもStageが残り得ます**。勝手にreset／unstageしません。
+無指定はUntracked・既存Staged・部分Stageの残りを含む全変更（ignore維持）。限定literal paths／既存Stagedだけにも対応します。範囲外既存Stageを勝手にunstageせず確認し、dirty nested submodule内部を自動commitしません。Stageは最終承認前のため、**キャンセル・失敗でもStageが残り得ます**。reset／unstage／amend／force push／rebase／merge／release／deployはしません。空diffでは新commit・空commitを作りません。
 
-引数は固定タイトルではなく、対象・branch／宛先・文章・言語・Draftへの要望などの自由文です。明確な指定を聞き直さず反映します。「このタイトルをそのまま使う」と明示すれば、その文章を維持します。到達点と矛盾する自由文（例：`/skill:commit pushまで`）はGit変更前に停止し、対応Skillを案内します。同じ到達点を重ねても矛盾ではありません。
+完成文章と操作一式を通常assistantで表示し、一括承認／修正／cancelを扱います。作らない文章や操作の選択肢は出しません。明示no-confirmは通常承認だけ省略し、予定表示・検査・疑義の実質問・異常停止は維持します。ask_user_questionがなければ同じ選択肢を通常テキストで示し回答を待ちます。script成功や参照の存在は承認でありません。
 
-```text
-/skill:commit READMEの説明を整理した変更として日本語で
-/skill:commit-push 既存Stagedだけ
-/skill:commit-pr Draft。skills/commitだけを対象に、Refs #17を記載
-/skill:commit --no-confirm
-```
+### commit-mainのBun標準経路
 
-段階実行もできます。各呼出しはその時点の状態・送信履歴・PR全体を改めて確認し、過去の承認は流用しません。
+[Skill](skills/commit-main/SKILL.md)から[同梱Bun手順](skills/commit/references/commit-main-bun.md)を全文読みます。Bun1.3.0以上の確認済み絶対実体で同梱TSを直接実行し、製品npm依存・build・Codemode・Pythonは不要です。probeもtrusted scripts cwd、空の同梱TOML／env-file=/dev/null／no-install、BUN_OPTIONS／NODE_OPTIONS除去、絶対entrypoint／対象repositoryを使います。tsconfig-overrideなし、対象欠落fallbackなし。通常Git設定・hooksは維持します。
 
-```text
-/skill:commit
-/skill:commit-push
-/skill:commit-pr
-```
+開始時Bun不在の場合だけ[Python不要のlocal互換手順](skills/commit/references/commit-main-compatibility.md)を読みます。非対応version／起動異常／script開始後の失敗から切替・install・手書きmutationで迂回しません。互換は同じ利用者方針を手順で守りますが、標準CLIと同等の機械的ガードや速度を保証しません。
 
-Stage後の対象差分がなければ新commit・空commit・amendは作りません。commitとcommit-mainは実行可能なbranchであれば操作せず終了し、push／PRは既存HEADから残りへ進みます。HEADも対象差分もなければ送信なし。同SHAの重複push、OPEN/CLOSED/MERGEDの既存PRの重複作成・自動編集はしません。呼出し間に新たな対象変更があれば新commitを作ります。対象外の未Stage変更を勝手に送信へ取り込まず、既存HEADで送信する場合はbranchの既存履歴全体が対象だと示します。
+公開CLIはinspect→materials→plan→execute。必要な固定材料まとめ読取／release／cleanupだけを補います。defaultは全local remote HEADのsymbolic target／解決OIDと対応remote／順序付きfetch設定から**宛先→送信元**へ逆mappingします。一意default優先、真に情報なしの場合だけmain／master fallback。競合・broken・orphan・non-symbolic・不明mapping・観測不能を情報なしにせず、候補／理由を表示して実質問し、未回答はStage0。回答後も作業branchなら拒否します。通信・自動補修なし、Stage前／操作直前の根拠driftを拒否します。ローカル情報は古い可能性があり最新defaultを保証しません。
 
-- 必要な項目だけ通常は完成形commitメッセージ、ブランチ全体を対象にしたPR title/body、対象範囲、branch作成、remote／実push URL／target、送信する既存commit＋今回のcommit、upstream、base/head、通常／Draft、Closes/Refsを**一回の確認**で提示します。「提示内容で実行／commitのみ修正／PR・実行設定を修正／キャンセル」と自由入力を使い、片方だけの文章修正では他方を保持して最終一式を再確認します。作成しないcommit／PRの文章や存在しない項目の修正選択肢は出さず、全操作完了済みなら通常承認も求めません。
-- `--no-confirm`は通常の内容確認・実行承認だけを省略します。予定内容・結果の報告、Gitleaks、照合、疑義の確認、異常時の停止は省略しません。scriptに承認省略フラグを渡すものではありません。
-- pushを伴いmain／remote default上なら、新しい作業branchを1件計画して一括確認に含めます。`--no-confirm`ではその予定branchを自動作成します。不正名・衝突では停止し、既存branchへ勝手に切り替えません。main上の既存commitも同HEADから作業branchへ載せられますが、元mainを巻き戻さずローカルmainにもcommitが残ると報告します。初回main push例外はcommit-pushだけで、明示指示・リモート全体が空・送信元／宛先mainが必要で、`--no-confirm`だけでは許可しません。
-- `commit`と`commit-main`はremote準備なし、`commit-push`はPR準備なし。PRまでの指定でgh・認証・remote／base等の準備に失敗したら**新commit／push前に停止**し、無断で範囲を縮小しません。限定範囲外のStagedがあれば勝手にunstageせず停止・確認します。submodule内部の変更も親から自動commitせず停止します。
-- Python 3.14以上がPiから使える場合は同梱scriptを優先し、開始時probeで未導入・3.13以下と分かった場合だけ[Python不要の互換経路](skills/commit/references/compatibility.md)を使います。両経路の範囲・一括確認・許容遷移・停止条件は同じですが、互換経路はLLMの手順遵守に依存し、scriptと同等の機械的ガードは保証しません。特殊名等を安全に処理できなければ停止します。
-- 経路選択はGit変更前の開始時だけです。Python起動失敗・不正応答は停止し、script実行後の検査失敗・状態不一致・認証／通信エラー・timeout等から互換経路へ切り替えません。Pythonや別runtimeの自動install・PATH変更はしません。追加Python packageも不要です。
-- 4入口は[共有workflow](skills/commit/references/workflow.md)を全文読み、到達点とbranch方針を引き継ぎます。branch方針未確定なら停止し、commit到達点だけで直接commitを推測しません。scriptは入口でなく`skills/commit/`基準で、対象repositoryをcwdのまま実行します。標準経路は`git-status.py`、`staged-commit.py`、`guarded-push.py`、`github-pr.py`の全サブコマンドを、開始時に確認したPython実体と`-E -S`で起動します。隣接helperのimportを壊す`-I`／`-P`は使わず、diffのハッシュ計算専用の`-I -S -c`と区別します。Stage後にcheck、必要なpush／PR prepareをcommit前に取得し、最終確認後にcommit → PR verify → push check／push → PR check／createと照合します。既存HEADは`prepare --existing-head`→承認→予定branch作成（必要時だけ）→verify／checkへ進み、commitCheckやcommit結果と混在させません。push済みからPRだけなら通常PR checkを使います。準備JSONは実行用checkやユーザー承認ではなく、手書き更新・永続承認DBは使いません。
-- diffは概要から必要箇所へ読み、commitと予定PRで全5フィールドが一致する変更単位の理解を再利用します。完全bytesのdigestは機械的に照合し、同じ本文を再読しません。一時diffはrepository外のprivate directory（`0700`）内に`0600`で保存し、不要になったら**どの質問よりも前に**削除成功を確認します。
-- Gitleaksがあれば全Staged差分を検査し、未導入なら未検査と報告します。検査失敗やbranch／parent／tree／raw本文／indexの不一致ではpushせず停止します。秘密値・scannerの生出力は表示しません。
-- PRはブランチ全体の差分・履歴・テンプレート・確認できたissueを根拠にし、実行したテスト結果だけを記載します。認証済み`gh`が必要で、同一repository内のみ対応します。SSH host aliasはOpenSSHで解決し、fork間PR・独自SSH commandは扱いません。既存PRはOPEN/CLOSED/MERGEDとも重複作成・自動編集しません。
-- 必要objectがなければ自動fetchせず停止します。同時に他プロセスからGitを変更しないでください。照合と操作は非atomicで、hook副作用や通信断による部分成功・成否不明は残ります。失敗時は照会だけを行い、自動再試行・rollbackしません。
-- reset、amend、force push、rebase、merge、release、deploy、PR自動mergeは行いません。
+materialsで全Staged diffをGitleaks検査します。未導入だけunavailable、検出／失敗は停止。scanner／hook／子CLIの生出力・秘密値は会話へ流しません。小diffは一覧・本文・必要履歴を約32KiBの予算内で一括、大diffは未表示を明示して固定材料の必要複数範囲をまとめて読み、検査範囲を縮めません。不要diff／履歴payloadはどの質問前にも削除します。
 
-### 新commit承認後の実行集約
+完成文章は承認前にrepo外private directory0700／file0600へ排他的保持。owner／非symlink／regular file／実体／bytes digest・repo／runを照合し、修正時は旧版削除成功後だけ新参照を返します。executeは参照だけで文章／設定を再送せず、途中LLM判断／処理コード生成なし。通常hooks、raw本文（末尾LFなし入力への1 LF追加だけ許容）／全親／tree／branch ref／index／他refsを事後照合します。失敗／drift／成否不明で後続停止し、Git成功応答後の確認失敗・cleanup失敗を区別します。所有実体だけcleanupし未知sentinel／他実行は消しません。完全atomic性・任意強制中断時のcleanup／報告必達は保証しません。
 
-標準script経路で新commitがありCodemodeを使える場合は、一括承認後の操作・最終状態確認・cleanupを原則1回のCodemode内で直列awaitし、中継LLM requestを挟みません。`commit`/`commit-main`は別途ローカルdefault根拠の直前完全再照合→commit（通信なし）、`commit-push`はcommit→push check/push（PR APIなし）、`commit-pr`はcommit→PR verify→push check/push→PR check/必要createまでです。正常時のassistantは実行コード生成＋結果報告の2回。Stage・diff理解・Gitleaks・prepare・文章・一括承認と呼出し間の再利用禁止は変更しません。詳細は[共有実行集約](skills/commit/references/execution-batching.md)を参照してください。
+### 他3入口は未移行
 
-Codemodeが集約開始前から利用不可の場合だけ従来の逐次script経路を維持します。開始後の失敗からfallback/再試行/rollback/準備更新はしません。対象差分なし・既存HEAD・Python-freeは現行どおり。元JSONと返された実行用checkは完全保持し、exit 0だけでなく段階固有の型/期待値を確認します。大容量preparation/PR checkはrepo外owned private directory 0700/file 0600へ保持し、全量store/表示・切断復元はしません。既存PRのdiff:nullやcreateのexistingは正常な非重複結果です。新規文章/設定が今回確定していない場合は、既存PRが途中で消えてもcreateしません。
+commit／commit-push／commit-prは[旧共有workflow](skills/commit/references/workflow.md)・[旧互換経路](skills/commit/references/compatibility.md)を維持します。Python3.14以上の開始時確認実体と-E -Sで同梱scriptを起動し、開始時Python不足の場合だけ既存Python-free経路を使います。新TSへ旧CLI／schema互換adapterは作りません。Python製品／tests／fixture／開発設定・CIと配布物は、この3入口に必要なため今回残しています。pack全体からPythonを除外しません。
 
-成功済みcommit/pushと停止段階・部分成功/成否不明を区別して報告します。各外部コマンド60秒と外側全体deadlineは別で、一律短い全体期限は付けません。捕捉可能な失敗では記録済み所有fileだけcleanupし、未知fileは削除しません。任意の強制中断でfinally/報告/cleanupが必ず完了する保証はなく、残る出力と実状態を照合します。
-
-再実行は[検証Skill](.pi/skills/verify-project/SKILL.md)から[集約と停止・部分成功の手順](.pi/skills/verify-project/references/execution-batching.md)を選びます。fresh Piの通常承認PR正常、commit後verify/push後PR check停止、ローカル2入口の直前照合（少なくとも一方no-confirm）、大容量/不正応答/中断代表を実状態と照合します。既存PR/existing競合・文章未確定create禁止・push終点PR APIなし・開始前Codemode不在fallbackは文書/限定例/既存回帰とし、全入口full pipelineや実GitHubを保証しません。TDDは採用せず、baselineと関係回帰・実操作で確認します。性能は同条件fresh contextで前後各3run、承認回答受領〜最終報告の全assistant（tool-only含む）回数/duration合計・外側tool時間・wall時間の全値/中央値を分けます。Codemode内部bashを二重加算せず、構造達成と時間効果/ばらつき/未実証を別に報告し、固定秒数閾値は設けません。Worker選定実行後、Rootが更新手順だけから別fresh正常/commit後停止/local直前照合を独立再実行します。
+旧経路の新commit承認後Codemode集約は[旧実行集約](skills/commit/references/execution-batching.md)。commitはdefaultから作業branch、pushはPR準備なし、PRはcommit前に必要準備を完了してからcommit→verify→push→PRへ進みます。既存HEAD／PR-only、既存PR非重複／非編集、通常main/default直接push禁止と明示初回main例外は変更しません。開始後fallback／retry／rollbackなし。旧性能3run条件を今回commit-mainへ流用しません。
 
 ### ローカルdefaultとbranch方針
 
-`/skill:commit`はdefault相当上なら、Stage後のdiffの主目的から未存在の作業branchを1件計画し、通常の一括承認後のcommit時だけ作成します。作業branch上では現在branchを使い、明示新branch指定は維持します。不正名・衝突は停止し、既存branchへの自動切替・上書きはしません。対象diffなしではbranch・commitとも作らず終了し、初回commit前にも同じ方針を適用します。defaultへの直接commit指示ではGit変更前に停止し、branch作成を迂回しません。直接ローカルcommitには`/skill:commit-main`を案内します。
+利用者方針は両ローカル入口で同じですが、commit-mainは新CLIの機械的照合、commitは[旧共有手順](skills/commit/references/workflow.md#ローカルdefault判定)でのAgent判断です。一意なdevelopならmainは作業branchであり、mainという名前だけで直接commitしません。defaultへ自動切替せず未commit変更を持ち運びません。
 
-`/skill:commit-main`は同じ判定でdefault相当と確認できた現在branchへの直接ローカルcommitに固定します。mainという固定名ではなく、判別済みdefaultがmaster／developならそのbranchで許可します。作業branch上、または新branch作成・別branchへの切替・push／PRなど矛盾する明示指示では、Stageを含むGit変更前に停止して4入口の対応Skillを案内します。defaultへ自動切替せず、未commit変更を持ち運びません。`--no-confirm`でもbranch条件・検査・停止は省略しません。対象diffなしでは実行可能なbranchならbranch・commitなしで終了します。入口は4つ、配布Skillは8つです。
+直接確認は[検証Skill](.pi/skills/verify-project/SKILL.md)から[commit-main Bun手順](.pi/skills/verify-project/references/commit-main-bun.md)を選びます。fresh Piの通常承認／cancel／no-confirm／default実質問・未回答Stage0／Bunなしlocal互換と実Gitを照合します。他3入口は[旧集約手順](.pi/skills/verify-project/references/execution-batching.md)／[公開Python接続](.pi/skills/verify-project/references/staged-push-pr.md)を使います。共有RPC／metric helperはNode24で、legacy Codemodeだけ明示optionを付けます。model/thinkingは通常解決を記録し比較条件と照合、認証の独自read/copy/logは禁止。RPC通常テキスト承認はask_user_questionのTUI実証でありません。
 
-判定の詳細は[共有手順のローカルdefault判定](skills/commit/references/workflow.md#ローカルdefault判定)に一箇所で定義し、Python不要の互換経路も参照します。
-
-- local remote HEADのsymbolic refと対応するremote／fetch設定から、宛先tracking refをremote側のbranchへ逆解決します。複数remoteが同じbranch名へ解決できれば利用できます。一意に判別できたdefaultを優先し、例えばdevelopならmainという別branchは作業branchです。
-- remote HEAD情報が存在しない場合だけmain／masterをdefault相当とするfallbackを使います。remote未設定・unbornにも適用します。upstream、存在branch、`init.defaultBranch`、古い会話は根拠にしません。
-- 候補の競合、壊れたref、対応不明・安全に解釈できないmappingは情報なしと混同せず、理由を示して確認し、未解決ならStageを含むGit変更前に停止します。origin名だけで選ばず、`--no-confirm`も疑義解消を省略しません。
-- 判定の通信・設定補修はしません。今回の根拠を保持しStage前と操作直前に再取得・照合して、変化なら停止します。判定根拠とローカル情報の古さを予定内容に示します。remoteの最新defaultは保証しません。これはAgentの手順であり、新しいscriptガードではありません。永続stateは作りません。
-
-標準経路で新branchを作るcommitは既存の`staged-commit.py check --branch NEW`とcommit APIを使います。commit-mainと新branch不要のcommitは`staged-commit.py check`（`--branch`なし）と同じcommit APIを使い、新policy引数は追加しません。新branchを計画した場合はcheckではbranchを作らず、承認後のcommit時だけ`--no-track`で作成し、元defaultの既存refを進めず、upstreamも暗黙継承しません。commit-mainでは現在defaultのrefだけを進めます。既存Stage・ignore・対象・Gitleaks・diff・状態照合・detached／競合／submodule停止、失敗後の経路切替・自動再試行・rollback禁止は両経路で維持します。Stageはキャンセル時にも残り得ます。branch作成とcommitは非atomicで、失敗時にbranchだけ残る場合もあります。push／PRのremote default確認・直接push禁止・初回main push例外・既存HEAD処理は変更しません。
-
-#### branch判断の直接確認
-
-[プロジェクト検証Skill](.pi/skills/verify-project/SKILL.md)と[Feature Map](.pi/skills/verify-project/references/feature-map.md)に今回のbranch判断だけの再実行手順を置きます。Piの新セッションまたは`/reload`とproject trustを確認し、`/skill:verify-project commitとcommit-mainのbranch判断`、または実ファイルの明示読み込みで使います。隔離repository／HOME／Git設定と架空identityを使い、変更後の実Skill入口から実行します。文言assertやscript単体実行をAgent判断の実証にしません。標準経路のmain／master fallback、local remote HEAD master／develop、作業branch、判別済みdefault優先、候補競合・壊れた情報、commit-mainの作業branch／矛盾指示でのStage前停止、空diff、初回commit、限定対象・既存Staged、一括承認／cancel／no-confirmと、開始時Python不足での互換経路master fallbackを代表確認します。before／afterのbranch・HEAD・refs・index・親・treeと最小tool操作記録を照合し、remote通信追加なしを確認します。
-
-証拠とrun記録は既存ignore対象の`docs/verification/<issue-number>/`（今回は`29/`）等へ保存し、Mapの手順と分けます。秘密情報・不要なraw logは保存せず、認証は正常なPiの方法だけを使います。利用者設定は変更せず、作成した一時環境だけcleanupし、その後も証拠参照を確認します。既存script統合テストと正式チェック、Rootの独立再実行・受入判断を代替しません。
+単発の旧commit baselineと新commit-mainはbranch操作等の条件が違います。承認前／後／全体時間、利用者待機、全assistant request、生成codeと固定呼出し／payload、取得可能usage・失敗・unknownを分け、nested toolを二重加算しません。構造改善と時間効果を分け、同条件高速化や全4入口完成と呼びません。
 
 #### 状態一覧の色付き表示
 
@@ -103,7 +69,7 @@ ln -s "$PWD/extensions/commit-status.js" ~/.pi/agent/extensions/commit-status.js
 
 ## 開発時の検証
 
-開発にはmiseとGitを使います。Python 3.14系・uv・Node.js・pnpm・Ruff・tyのバージョンは`mise.toml`で固定します。pytest 9系は開発用依存として`pyproject.toml`と`uv.lock`で管理し、uvが`.venv`に導入します。miseを有効化したshellで次を実行してください。
+開発にはmiseとGitを使います。Node24・Bun1.3.0・pnpm、および未移行3入口に必要なPython3.14系・uv・Ruff・tyを`mise.toml`で固定します。pytest 9系は開発用依存として`pyproject.toml`と`uv.lock`で管理し、uvが`.venv`に導入します。miseを有効化したshellで次を実行してください。
 
 ```bash
 mise install
@@ -115,7 +81,7 @@ pnpm format:check
 pnpm test
 ```
 
-`pnpm lint`はPythonにRuff、表示extensionとNode.jsテストにBiomeを使います。`pnpm typecheck`はPythonをtyで検査し、`pnpm format:check`はBiomeとRuff、`pnpm test`はNode.js標準のtest runnerとpytestを実行します。`pnpm lint:fix`でRuffの自動修正、`pnpm format`で整形を適用します。BiomeはJSON・JavaScript等のformatに使います。Ruffの`target-version`とtyの`python-version`も3.14に合わせています。型検査はscript・テスト・fixtureを含み、診断の一括無効化やテスト除外はしません。これらは開発用です。同梱scriptはPython標準ライブラリだけを使い、互換経路はPythonを必要としません。
+`pnpm lint`はoxlint + oxlint-tsgolintのtype-aware lint（--type-aware --deny-warnings）と既存PythonのRuff。`pnpm typecheck`はtsc --noEmitとty、formatはBiome専用（linter/assist無効）とPythonのRuff、testはNode24標準node:test／node:assertのTS直接実行・既存JS tests・pytestです。製品TS・tests・fixture・隠し`.pi/skills/verify-project/scripts` helperを収集し、最寄りtsconfigを整合します。warningはsource修正で0にし、quiet／一括disable／除外で隠しません。devDependenciesとlockはexact version固定、追加製品npm依存はありません。Node/Bun用build成果物は作りません。Python設定／uv.lockの撤去は残3入口の移行後です。
 
 pytestでは`tmp_path`・共通fixture・`parametrize`・`monkeypatch`を使い、一時Gitリポジトリとbare remoteでstatus解析、部分Stage、Gitleaks検査、状態変化時のcommit/push拒否、main保護と初回登録の例外、PRの本文・Draft・重複防止、認証・通信エラーとtimeout時の再試行禁止などを検証します。Gitleaks・gh・SSHはテスト用の実行ファイルで再現するため、実行時には不要です。実remoteやGitHubには接続しません。回帰テストはGitとPOSIX環境を対象とします。表示extensionのNode.jsテストはPi提供moduleの境界だけをstubにし、色の割当て、部分Stage・rename・競合、制御文字のescape、不正JSONの拒否、TUI以外の表示を確認します。Pi本体の追加installや外部接続は不要です。Pi提供moduleはoptionalなpeer dependencyとして宣言し、`pnpm-workspace.yaml`でpeerの自動installを無効化して、開発時にもSDKを二重導入しません。
 
@@ -151,7 +117,7 @@ source再変更後は該当検証と最終チェックを更新し、以前の�
 
 ```bash
 node --test tests/verification-skills.test.js
-pnpm exec biome lint tests/verification-skills.test.js
+pnpm exec oxlint --type-aware --deny-warnings tests/verification-skills.test.js
 pnpm exec biome format tests/verification-skills.test.js
 ```
 
@@ -178,6 +144,6 @@ pnpm exec biome format tests/verification-skills.test.js
 
 ## CI
 
-`.github/workflows/ci.yml`で、PRの作成・更新とmainへのpush時にUbuntu上で同じlint・型検査・format確認・pytestを実行します。依存は`pnpm install --frozen-lockfile`と`uv sync --locked`で固定し、Pythonはmiseで選ばれた実行ファイルを使います。Actionはcommit SHA、mise本体もバージョンを固定しています。
+`.github/workflows/ci.yml`で、PRの作成・更新とmainへのpush時にUbuntu上で同じlint・型検査・format確認・Node TS/JS testsとpytestを実行します。依存は`pnpm install --frozen-lockfile`と`uv sync --locked`で固定し、Pythonはmiseで選ばれた実行ファイルを使います。Actionはcommit SHA、mise本体もバージョンを固定しています。
 
 権限は`contents: read`のみで、checkoutの認証情報は永続化しません。実GitHubへのpush・PR作成や個人の認証情報は不要です。CI成功をmerge条件にする場合は、workflowとは別にGitHubのRuleset等で必須チェックを設定してください。
