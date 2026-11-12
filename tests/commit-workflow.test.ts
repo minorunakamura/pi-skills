@@ -547,6 +547,84 @@ await test("large materials disclose omission and allow several fixed ranges in 
   assert.equal(existsSync(join(ref.directory, "diff.bin")), false);
 });
 
+for (const mode of ["commit", "commit-main"] as const) {
+  await test(`${mode} preserves materials on display overflow and allows smaller reads before commit`, (t) => {
+    const f = fixture(t);
+    writeFileSync(join(f.repo, "example.txt"), '"\\\n'.repeat(20000));
+    const materials = prepare(f, { mode });
+    assert.equal(materials.value.displayed, false);
+    const ref = materials.value.reference as {
+      directory: string;
+      files: Record<string, unknown>;
+    };
+    const files = Object.fromEntries(
+      Object.keys(ref.files).map((name) => [
+        name,
+        readFileSync(join(ref.directory, name)),
+      ]),
+    );
+    const head = f.git("rev-parse", "HEAD");
+    const refs = f.git("show-ref");
+    const index = readFileSync(join(f.repo, ".git/index"));
+    for (const length of [24000, 33000]) {
+      const stopped = f.cli("read", {
+        reference: ref,
+        parts: [{ name: "diff", offset: 0, length }],
+      });
+      assert.equal(stopped.exit, 1);
+      assert.equal(stopped.value.error, "material_display_budget_exceeded");
+      assert.equal(stopped.value.materialsPreserved, true);
+      assert.deepEqual(stopped.value.reference, ref);
+      assert.equal(stopped.value.cleanup, undefined);
+      assert.equal(stopped.value.parts, undefined);
+      assert.equal(stopped.value.commitSucceeded, false);
+      assert.equal(stopped.value.branchCreated, false);
+      for (const [name, bytes] of Object.entries(files))
+        assert.deepEqual(readFileSync(join(ref.directory, name)), bytes);
+      const read = f.cli("read", {
+        reference: stopped.value.reference,
+        parts: [{ name: "diff", offset: 0, length: 1000 }],
+      });
+      assert.equal(read.exit, 0);
+      assert.equal(read.value.fixed, true);
+      assert.ok(Buffer.byteLength(JSON.stringify(read.value)) <= 32 * 1024);
+      assert.equal(f.git("rev-parse", "HEAD"), head);
+      assert.equal(f.git("show-ref"), refs);
+      assert.deepEqual(readFileSync(join(f.repo, ".git/index")), index);
+    }
+    const planned = f.cli("plan", {
+      reference: ref,
+      message: "test: retain materials after oversized read\n",
+      ...(mode === "commit" ? { newBranch: "test/material-read" } : {}),
+    });
+    assert.equal(planned.exit, 0, JSON.stringify(planned.value));
+    const executed = f.cli("execute", { reference: planned.value.reference });
+    assert.equal(executed.exit, 0, JSON.stringify(executed.value));
+    assert.equal(executed.value.phase, "committed");
+    assert.equal(f.git("rev-list", "--count", "HEAD"), "2");
+    assert.equal(existsSync(ref.directory), false);
+  });
+}
+
+await test("invalid material ranges still clean up preparations without committing", (t) => {
+  const f = fixture(t);
+  writeFileSync(join(f.repo, "example.txt"), "pending\n");
+  const materials = prepare(f);
+  const ref = materials.value.reference as { directory: string };
+  const stopped = f.cli("read", {
+    reference: ref,
+    parts: [{ name: "diff", offset: 0, length: 100000 }],
+  });
+  assert.equal(stopped.exit, 1);
+  assert.equal(stopped.value.error, "invalid_material_request");
+  assert.equal(stopped.value.materialsPreserved, undefined);
+  assert.equal(stopped.value.reference, undefined);
+  assert.deepEqual(stopped.value.cleanup, { complete: true, remaining: [] });
+  assert.equal(existsSync(ref.directory), false);
+  assert.equal(f.git("rev-list", "--count", "HEAD"), "1");
+  assert.equal(f.git("show", ":example.txt"), "pending");
+});
+
 await test("trusted Bun launch and probe ignore repository, home and environment startup payloads", (t) => {
   const f = fixture(t);
   const marker = join(f.owned, "startup-marker");
@@ -2315,8 +2393,17 @@ await test("PR large fixed materials support batched reads and never reuse same 
       .reusableStagedPathBytes,
     [],
   );
-  const read = f.cli("read", {
+  const stopped = f.cli("read", {
     reference: materials.value.reference,
+    parts: [{ name: "pr-diff", offset: 0, length: 33000 }],
+  });
+  assert.equal(stopped.exit, 1);
+  assert.equal(stopped.value.error, "material_display_budget_exceeded");
+  assert.equal(stopped.value.materialsPreserved, true);
+  assert.deepEqual(stopped.value.reference, materials.value.reference);
+  assert.equal(stopped.value.cleanup, undefined);
+  const read = f.cli("read", {
+    reference: stopped.value.reference,
     parts: [
       { name: "pr-diff", offset: 0, length: 1500 },
       {
@@ -2329,6 +2416,9 @@ await test("PR large fixed materials support batched reads and never reuse same 
   assert.equal(read.exit, 0, JSON.stringify(read.value));
   assert.equal(read.value.fixed, true);
   assert.equal((read.value.parts as unknown[]).length, 2);
+  const cleaned = f.cli("cleanup", { reference: stopped.value.reference });
+  assert.equal(cleaned.exit, 0);
+  assert.deepEqual(cleaned.value.cleanup, { complete: true, remaining: [] });
 });
 for (const response of ["missing", "empty", "null"] as const) {
   await test(`PR template field ${response} response ${response === "missing" ? "stops" : "allows"} public materials with Stage retained and no commit/push/PR`, (t) => {
