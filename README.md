@@ -36,7 +36,7 @@ git clone https://github.com/minorunakamura/pi-skills.git
 pi install ./pi-skills
 ```
 
-全8 Skill と表示 extension がまとめてインストールされます。導入後は Pi を起動し直すか、起動中のセッションで `/reload` を実行してください。
+全8 Skill と Bun確認・Git inspect／状態表示の extension（`commit_inspect`、既存 `commit_status_display`）がまとめてインストールされます。導入後は Pi を起動し直すか、起動中のセッションで `/reload` を実行してください。
 
 ## 使い方
 

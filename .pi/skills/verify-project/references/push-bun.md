@@ -1,5 +1,7 @@
 # commit-push: Bun公開CLI／fresh Pi／Bun必須停止
 
+専用toolの明示extension／allowlist、実TUI即時表示・nonTUI・cancel／reloadは[commit_inspect手順](commit-inspect.md)を選ぶ。下の無extension経路は従来CLI／tool未導入対照として維持し、専用toolの実証には使わない。
+
 対象はpushだけ。PR準備／APIは0。製品の[push手順](../../../../skills/commit/references/push-bun.md)を使う。local2入口の無通信／default質問をpushへ転用しない。正式checks／独立Review／受入はRoot担当、全Map／Maintainは不要。
 
 ## fresh setupと固定

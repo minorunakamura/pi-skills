@@ -2,6 +2,12 @@
 
 今回の変更に関係する入口だけを選ぶ。Mapは再利用する手順と期待であり、run結果／一時pathを混ぜない。観測は`docs/verification/<issue-number>/<一意run>/`へ分離する。全OS／全refspec／LLM判断精度全般／実GitHub／任意中断保証は対象外。[分離・証拠・cleanup](../SKILL.md)と各専用手順を使い、全Map／Maintainは要求しない。
 
+## 専用toolの取得・表示
+
+[commit_inspect手順](commit-inspect.md)でfresh setupからmodel-only toolをmodelに直接呼ばせる。部分Stage／renameを実Gitと照合し、content末尾JSONとdetailsの完全一致・同じBun/referenceの後続cleanup・Git不変を確認する。実TUIは次assistant本文より前の一覧snapshot・重複なし・dotのみ色、reload後の過去details描画と新callだけの再inspectを観測する。RPCとprint／JSONは色なし一覧と完全判断材料、通常cancelは参照前後をmarker／公開updateで区別しcleanup報告と実状態、Bun不足はGit変更前停止・fallback0を確認する。色失敗／不正応答は限定testで分離する。
+
+証拠は時刻付き実PTYセルsnapshot（物理screenshotでない）・必要tool結果・版／dirty／digest／exit／unknown／metricと所有PID wait／group・server不存在／owned cleanup／全参照readback。専用tool単独成功で4入口の接続・release・同ターンreadやW2前後比較を保証しない。
+
 ## commit / commit-main Bun標準入口（現行）
 
 [共有local手順](local-bun.md)から必要な公開CLI／fresh Pi代表を選ぶ。Git／Node24／Bun1.3.0+／Piの既存実体、正常認証、macOS sandbox、専用HOME/PATH/TMPDIR/Git設定と架空identityでfresh setupする。source書込拒否／owned書込成功と起動前manifest固定、同じ親shellのPID記録／waitを行う。

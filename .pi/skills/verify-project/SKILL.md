@@ -1,11 +1,11 @@
 ---
 name: verify-project
-description: Verify pi-skills local commit Bun branch planning, approval, default ambiguity and required-Bun stops through fresh Pi, push via Bun and local bare, or PR via Bun with same-repository fixtures in disposable environments.
+description: Verify pi-skills commit_inspect acquisition, real TUI/nonTUI display, cancellation and reload, or local commit Bun branch planning, approval, default ambiguity and required-Bun stops through fresh Pi, push via Bun and local bare, or PR via Bun with same-repository fixtures in disposable environments.
 ---
 
 # pi-skills の対象機能を直接確認する
 
-今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。**commit／commit-mainの現行Bun入口・branch方針・通常承認／cancel／no-confirm・default実質問の未回答Stage0・Bun不足のGit変更前停止は[共有local手順](references/local-bun.md)**を使う。起動前に関連source／手順／helperと使捨てdriverのdigestを固定し、run中は編集しない。観測者のPIDを同じ親shellで記録しwaitする。実Gitの元ref／予定branch／親／tree／raw本文／index／upstream、全tool操作・Git子processの通信0、小diff一括、質問前の不要payload削除を照合する。script単体・文言assert・Pi起動成功だけでAgent判断を保証しない。RPCの通常テキスト承認はTUI実証でない。
+今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。**専用toolの取得／即時表示／nonTUI／cancel／reloadは[commit_inspect手順](references/commit-inspect.md)**を使う。既存RPCは明示extensionとplain tool allowlistを選択追加でき、無extension経路は維持する。実TUIは導入Pi 1.4.0とowned tmuxで別に観測し、RPCをTUI実証と呼ばない。**commit／commit-mainの現行Bun入口・branch方針・通常承認／cancel／no-confirm・default実質問の未回答Stage0・Bun不足のGit変更前停止は[共有local手順](references/local-bun.md)**を使う。起動前に関連source／手順／helperと使捨てdriverのdigestを固定し、run中は編集しない。観測者のPIDを同じ親shellで記録しwaitする。実Gitの元ref／予定branch／親／tree／raw本文／index／upstream、全tool操作・Git子processの通信0、小diff一括、質問前の不要payload削除を照合する。script単体・文言assert・Pi起動成功だけでAgent判断を保証しない。RPCの通常テキスト承認はTUI実証でない。
 
 **commit-pushは[push専用Bun／runtime停止手順](references/push-bun.md)**を使う。新commit／既存HEAD、remote／実URL／target／予定upstreamの一括確認、固定SHA送信・PR API0、先行成功と後続停止を実Gitで照合する。
 

@@ -116,7 +116,7 @@ await test("verification skills Markdown relative references resolve", async () 
       "diff-review",
     ].map((name) => `skills/commit/references/${name}.md`),
     ".pi/skills/verify-project/SKILL.md",
-    ...["feature-map", "local-bun", "push-bun", "pr-bun"].map(
+    ...["feature-map", "local-bun", "push-bun", "pr-bun", "commit-inspect"].map(
       (name) => `.pi/skills/verify-project/references/${name}.md`,
     ),
   ]) {

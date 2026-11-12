@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { abortRequested, assistantRecord, stopGroup } from "./commit-rpc.ts";
+import { observeCommit } from "./commit-observer.js";
 
 await test("commit-rpc records tool-only timing without thinking or signatures", () => {
   const record = assistantRecord({
@@ -70,7 +71,7 @@ import { appendFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 const spawn = childProcess.spawn;
 childProcess.spawn = (exe, args, options) => {
-  appendFileSync(${JSON.stringify(marker)}, JSON.stringify({ exe }) + "\\n");
+  appendFileSync(${JSON.stringify(marker)}, JSON.stringify({ exe, args }) + "\\n");
   if (!process.env.RPC_FIXTURE_CHILD) throw new Error("Unexpected child launch");
   return spawn(process.execPath, [${JSON.stringify(rpcChild)}], options);
 };
@@ -140,6 +141,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   const result = run(
     "valid",
     [
+      "--extension",
+      skill,
+      "--tools",
+      "read,bash,commit_inspect",
       "--answer-file",
       answer,
       ...followUps.flatMap((path) => ["--follow-up-file", path]),
@@ -154,6 +159,24 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, "");
   assert.equal(readFileSync(marker, "utf8").trim().split("\n").length, 1);
+  const launch = JSON.parse(readFileSync(marker, "utf8")) as { args: string[] };
+  assert(launch.args.includes("--no-extensions"));
+  assert.equal(
+    readFileSync(
+      launch.args[launch.args.indexOf("--system-prompt") + 1],
+      "utf8",
+    ),
+    "",
+  );
+  assert(launch.args.includes("--append-system-prompt"));
+  assert.equal(
+    launch.args[launch.args.indexOf("--extension") + 1],
+    realpathSync(skill),
+  );
+  assert.equal(
+    launch.args[launch.args.indexOf("--tools") + 1],
+    "read,bash,commit_inspect",
+  );
   const operations = readFileSync(join(owned, "valid/operations.jsonl"), "utf8")
     .trim()
     .split("\n")
@@ -163,6 +186,16 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       .filter((record) => record.type === "input")
       .map((record) => record.text),
     ["initial request", "reply0\n", "reply1\n", "reply2\n"],
+  );
+  const defaultRun = run("default", ["--timeout", "3"], true);
+  assert.equal(defaultRun.status, 0, defaultRun.stderr);
+  const defaultLaunch = JSON.parse(
+    readFileSync(marker, "utf8").trim().split("\n")[1],
+  ) as { args: string[] };
+  assert.equal(defaultLaunch.args.includes("--extension"), false);
+  assert.equal(
+    defaultLaunch.args[defaultLaunch.args.indexOf("--tools") + 1],
+    "read,bash",
   );
   const cleanup = JSON.parse(
     readFileSync(join(owned, "valid/cleanup.json"), "utf8"),
@@ -217,4 +250,86 @@ await test("commit-rpc metrics keep approval boundaries and do not double count 
   assert.equal(result.wallSeconds, 3);
   assert.equal(result.codemodeCalls, 1);
   assert.equal(result.intermediateAssistantRequests, 0);
+  assert.deepEqual(result.turns[0].tools, [
+    {
+      id: "outer",
+      name: "codemode",
+      argumentsBytes: "unknown",
+      resultBytes: "unknown",
+      read: null,
+    },
+  ]);
+  assert.equal(result.transcribedPayloadBytes, "unknown");
+  assert.equal(result.tuiRenderedAt, "unknown");
+  const readBatch = summarize([
+    { type: "user_received", receivedMonotonic: 1 },
+    {
+      type: "assistant",
+      durationMs: 1,
+      receivedMonotonic: 2,
+      toolCalls: [
+        { id: "read1", name: "read" },
+        { id: "read2", name: "read" },
+      ],
+    },
+    {
+      type: "tool_execution_start",
+      toolCallId: "read1",
+      args: { path: "local-bun.md" },
+    },
+    {
+      type: "tool_execution_start",
+      toolCallId: "read2",
+      args: { path: "push-bun.md", offset: 10 },
+    },
+    {
+      type: "tool_execution_end",
+      toolCallId: "read1",
+      durationMs: 1,
+      resultBytes: 123,
+    },
+    {
+      type: "tool_execution_end",
+      toolCallId: "read2",
+      durationMs: 2,
+      resultBytes: 456,
+    },
+  ]);
+  assert.equal(readBatch.turns.length, 1);
+  assert.deepEqual(
+    readBatch.turns[0].tools.map((tool) => tool.read),
+    [{ path: "local-bun.md" }, { path: "push-bun.md", offset: 10 }],
+  );
+  assert.equal(readBatch.turns[0].tools[0].argumentsBytes, 23);
+  assert.equal(readBatch.turns[0].tools[1].resultBytes, 456);
+});
+
+await test("commit-observer records the public reference update before ordinary abort without replacing results", () => {
+  type Handler = (event: Record<string, unknown>, ctx?: unknown) => unknown;
+  const handlers = new Map<string, Handler>();
+  const records: Record<string, unknown>[] = [];
+  observeCommit(
+    { on: (name: string, handler: Handler) => handlers.set(name, handler) },
+    (event: Record<string, unknown>) => records.push(event),
+    true,
+  );
+  const update = {
+    toolName: "commit_inspect",
+    partialResult: { details: { result: { reference: { run: "fixture" } } } },
+  };
+  const original = JSON.stringify(update);
+  let aborts = 0;
+  const ctx = {
+    abort: () => {
+      assert.equal(records.at(-1)?.type, "abort_after_reference");
+      aborts++;
+    },
+  };
+  handlers.get("tool_execution_update")?.({ toolName: "read" }, ctx);
+  handlers.get("tool_execution_update")?.({ toolName: "commit_inspect" }, ctx);
+  assert.equal(aborts, 0);
+  handlers.get("tool_execution_update")?.(update, ctx);
+  handlers.get("tool_execution_update")?.(update, ctx);
+  assert.equal(aborts, 1);
+  assert.equal(JSON.stringify(update), original);
 });
