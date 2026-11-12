@@ -42,6 +42,7 @@ local／PR各1組の同条件baseline/finalを同じ固定helperで比較する�
 | --- | --- | --- |
 | 新commit・通常一括承認 | fresh main／bare main／README pending／outside untracked。Pi commit-push、完成表示後に同session回答 | 承認前Stageとpush準備だけ、payload削除。承認後参照だけexecuteで必要新branch／commit／固定SHA push／readback／予定upstream／cleanup。元ref・scope外保持、通常hooks、bareの余分refsなし、PR API0 |
 | 既存HEAD・同SHA省略 | 公開Bun CLI、またはfresh existing fixtureのPi | message／commit不要、既存履歴を今回scanner済みと呼ばない。必要branchだけ承認後作成、HEAD／commit数不変、同SHA再push・残操作なしの通常承認なし。HEADも対象diffもなければ通信なし |
+| upstream自動設定・既存保持 | 公開CLIの`push upstream`／`missing upstream`／`explicit upstream` tests。setUpstream省略／false／true、未設定／同じ／別宛先／片側／空値／値なし設定、送信済みHEAD | 省略時はremote／merge両方未設定だけ自動設定、設定済みは保持。falseは未設定維持、trueの既存衝突はcommit前拒否。元branchのupstream非継承・保持、送信済みなら再pushなしで設定。予定設定は最終一括確認に含める |
 | main／default保護・初回例外 | 公開CLI normal main/default拒否、明示initialMain | 全remote空（tag等もなし）かつ送信元／予定／宛先mainだけ許可。no-confirmで推定せず、失敗からcommitのみへ縮小しない |
 | 固定宛先・失敗後停止 | 公開CLIのURL／remote drift、commit後URL変更、pre-push非0／HEAD変更、送信後local drift／upstream失敗 | 先行branch／commit／push成功・成否不明・送信readback・upstream／cleanup失敗を区別し後続mutation0。通常hookを有効に固定SHA送信、extra tags／refs／submodule送信なし、必要object不足は非fetch |
 | Bun不足停止 | fresh Pi commit-push、開始前からBunなしPATH、絶対Node観測者。no-confirmでも同じ | 必要条件案内でGit変更前停止。read-only snapshotでindex bytes／HEAD／全refs／branch／upstream／worktree／bare refs不変。送信／PR0、代替Python／手書きmutation／install未試行 |
@@ -55,6 +56,7 @@ local／PR各1組の同条件baseline/finalを同じ固定helperで比較する�
 | 機能と入口 | 前提・実操作 | 期待・観測 |
 | --- | --- | --- |
 | 新commit・通常PR／Draft | 既存branch履歴＋今回README diff、fresh Pi commit-pr、固定特殊文字文章、通常一括承認 | base全体固定diff/history/templateとremote／PR準備を新commit前に完了。branch名との循環なし。元ref／scope外保持・必要commit/push/PRだけ、全文bytes・Draft/head/base/SHA readback、承認後参照だけexecute |
+| Issue Close／参照とupstream | 新commit／既存HEAD／PR-onlyの公開CLI testsでCloses／Refsを含む本文。fresh Piの意味判断を選ぶ場合はユーザー指定Issueのread-only照会と最終表示を観測 | 本文bytesを固定・作成後readback、未設定upstream自動設定・同SHA再pushなし。Issue内容／完了条件を確認し解決ならCloses、関連／一部はRefs、番号創作・直接close・既存PR編集なし。default以外のbaseではmerge時自動Closeされない旨を説明。fixtureの本文検証をGitHub上の実自動CloseやAgent判断の実証にしない |
 | 片側修正／設定再準備 | 同sessionへcommitのみ修正→Draft／base設定修正→最終一式承認の実follow-up | 他方bytes保持、旧参照失効。未確定materialsはexecute不可。設定はcleanup→影響準備再取得→再提示・再確認、driftは吸収しない |
 | 既存HEAD／PR-only | 公開CLI existing head／push済み、fresh Pi runtime停止は別fresh | commitなし、同SHA再pushなし、存在しない文章／修正選択肢なし。既存履歴を今回scanner済みと呼ばない |
 | 既存PR／競合 | 公開CLI OPEN/CLOSED/MERGED、準備後消失／create前競合 | 非重複・非編集。既存PR消失なら追加文章生成せず停止。残操作なしなら不要承認なし |

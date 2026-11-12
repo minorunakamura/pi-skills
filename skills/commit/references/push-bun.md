@@ -12,10 +12,10 @@
 
 ```bash
 cd "$SCRIPTS" || exit 1
-printf '%s\n' '{"mode":"push","push":{"remote":"origin","setUpstream":true}}' | env -u BUN_OPTIONS -u NODE_OPTIONS "$BUN" --config="$SCRIPTS/bunfig.toml" --env-file=/dev/null --no-install "$SCRIPTS/commit-workflow.ts" inspect --repository "$REPOSITORY"
+printf '%s\n' '{"mode":"push","push":{"remote":"origin"}}' | env -u BUN_OPTIONS -u NODE_OPTIONS "$BUN" --config="$SCRIPTS/bunfig.toml" --env-file=/dev/null --no-install "$SCRIPTS/commit-workflow.ts" inspect --repository "$REPOSITORY"
 ```
 
-以下も同じ起動形でoperationだけ置換しstdin JSONを渡す。remote名は実際に`git remote`で確認し、明示先を優先、曖昧ならStage前に実質問する。例のoriginを推測採用しない。push設定は`remote`必須、`target`省略時は予定branch名、`setUpstream:true`は利用者と確定した場合だけ。省略／falseは既存設定を保持。新branchはinspectの`newBranch`で明示でき、未指定名は材料の意味から後で決める。資格情報入りURLや複数push URLを拒否し、生設定／秘密値を表示しない。
+以下も同じ起動形でoperationだけ置換しstdin JSONを渡す。remote名は実際に`git remote`で確認し、明示先を優先、曖昧ならStage前に実質問する。例のoriginを推測採用しない。push設定は`remote`必須、`target`省略時は予定branch名。`setUpstream`省略時は、予定branchのremote／merge設定が両方未設定ならpush先をupstreamに自動設定し、設定済み（片側だけ／空値／値なしも含む）なら既存設定を保持する。自動設定だけのための追加質問はせず、設定先を最終一括確認に含める。利用者が設定不要と明示した場合は`setUpstream:false`で未設定を維持する。`true`の明示指定は未設定または同じ指定先だけを許し、異なる既存設定は上書きせず停止する。新branchはinspectの`newBranch`で明示でき、未指定名は材料の意味から後で決める。資格情報入りURLや複数push URLを拒否し、生設定／秘密値を表示しない。
 
 inspectは通信せずlocal push URL（pushInsteadOf等のrewrite後）／順序付きfetch設定／SSH解決を保持する。SSHではssh -Gのalias解決を照合し、core.sshCommand／GIT_SSH_COMMAND／GIT_SSHは拒否する。local bare／file URLも対応。HEADも選択した変更もなければremote設定不要。
 
@@ -57,7 +57,7 @@ stdinは`{"reference":REFERENCE}`に、commitNeeded=trueなら`message:"完成�
 
 承認後は`{"reference":REFERENCE}`**だけ**でexecuteを呼ぶ。文章／設定再送・途中LLM判断・コード／文章再生成なし。直前照合→必要branchだけ作成（通常post-checkout有効）→必要commitだけ作成（通常hooks）→raw本文／親／tree／index／ref検証→remote再照合→**固定SHA:refs/heads/target**の明示refspecでpush→送信SHA readback→許可したtracking refだけ照合→予定upstreamだけ設定／照合→cleanupを行う。
 
-force／mirror／暗黙tags／submodule送信はしない。最初のpositive fetch mapping先のtracking refだけ、元値のままか予定SHAへの更新を許す。negative等のrefspecにより実Gitが更新しない場合もあり、未更新を送信SHAに読み替えない。そのmapping先がlocal branch／tagまたはsymbolic ref（未解決も含む）ならplanで拒否し、実行時もbranch／commit／push前に再確認する。local default逆mappingとは別の意味。upstreamは未設定または同じ予定先だけ受け付け、送信確認後だけ更新する。元ref／他refs／対象外worktree／無関係なupstreamを保持する。
+force／mirror／暗黙tags／submodule送信はしない。最初のpositive fetch mapping先のtracking refだけ、元値のままか予定SHAへの更新を許す。negative等のrefspecにより実Gitが更新しない場合もあり、未更新を送信SHAに読み替えない。そのmapping先がlocal branch／tagまたはsymbolic ref（未解決も含む）ならplanで拒否し、実行時もbranch／commit／push前に再確認する。local default逆mappingとは別の意味。upstreamの設定が予定されている場合は未設定または同じ予定先だけ受け付け、送信確認後だけ更新する。同SHAが送信済みでも未設定upstreamの自動設定は行い、再pushしない。元ref／他refs／対象外worktree／無関係なupstreamを保持する。
 
 phase=pushed／already_pushedの実SHA・branch・commitCreated／pushSent／pushVerified／upstreamConfigured／cleanupを通常assistantで報告する。非0／不正応答／drift／成否不明は後続mutation停止。branchCreated／branchMayHaveChanged、commitSucceeded（成功応答）／commitVerified、pushAttempted／pushSucceeded（成功応答）／pushVerified（readback）、remoteObservedを区別する。push失敗をcommit失敗と言い換えず、先行成功を保持する。timeout等は送信済みの可能性がある。upstream更新／事後照合／cleanup失敗は送信成功と別に報告し、自動retry／rollback／resume／別経路なし。
 

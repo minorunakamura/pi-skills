@@ -145,7 +145,8 @@ function inspectResult(json, repository, mode) {
         typeof policy.push.remote !== "string" ||
         !nullableString(policy.push.target) ||
         typeof policy.push.initialMain !== "boolean" ||
-        typeof policy.push.setUpstream !== "boolean")) ||
+        (policy.push.setUpstream !== null &&
+          typeof policy.push.setUpstream !== "boolean"))) ||
     (policy.pr !== null &&
       (!object(policy.pr) ||
         typeof policy.pr.repository !== "string" ||

@@ -1458,7 +1458,7 @@ function pushPlan(
 ) {
   const materials = prepare(f, {
     mode: "push",
-    push: { remote: "origin", setUpstream: true, ...options },
+    push: { remote: "origin", ...options },
     ...extra,
   });
   const planned = f.cli("plan", {
@@ -1495,6 +1495,8 @@ for (const existing of [false, true]) {
     f.git("config", "remote.origin.mirror", "true");
     f.git("config", "push.recurseSubmodules", "on-demand");
     f.git("config", "push.autoSetupRemote", "true");
+    f.git("config", "branch.main.remote", "origin");
+    f.git("config", "branch.main.merge", "refs/heads/main");
     f.git("tag", "-a", "unsent", "-m", "do not send");
     const planned = pushPlan(
       f,
@@ -1522,6 +1524,7 @@ for (const existing of [false, true]) {
     assert.equal(result.value.phase, "pushed");
     assert.equal(result.value.commitCreated, !existing);
     assert.equal(f.git("rev-parse", "main"), parent);
+    assert.equal(f.git("config", "branch.main.merge"), "refs/heads/main");
     assert.equal(f.bareGit("rev-parse", "main"), main);
     assert.equal(f.bareGit("rev-parse", "docs/pushed"), sha);
     assert.equal(
@@ -1557,6 +1560,127 @@ for (const existing of [false, true]) {
     assert.equal(f.git("rev-parse", "HEAD"), sha);
   });
 }
+for (const [settings, options, configure] of [
+  ["unset", {}, true],
+  ["same", {}, false],
+  ["other", {}, false],
+  ["remote-only", {}, false],
+  ["merge-only", {}, false],
+  ["empty-remote", {}, false],
+  ["empty-merge", {}, false],
+  ["valueless-remote", {}, false],
+  ["valueless-merge", {}, false],
+  ["unset", { setUpstream: false }, false],
+  ["unset", { setUpstream: true }, true],
+] as const) {
+  await test(`push upstream ${settings} with ${JSON.stringify(options)} ${configure ? "is configured" : "is preserved"}`, (t) => {
+    const f = pushFixture(t);
+    f.git("switch", "-c", "feature");
+    if (["same", "other", "remote-only"].includes(settings))
+      f.git("config", "branch.feature.remote", "origin");
+    if (["same", "other", "merge-only"].includes(settings))
+      f.git(
+        "config",
+        "branch.feature.merge",
+        settings === "same" ? "refs/heads/feature" : "refs/heads/main",
+      );
+    if (settings.startsWith("empty-") || settings.startsWith("valueless-"))
+      writeFileSync(
+        join(f.repo, ".git/config"),
+        `\n[branch "feature"]\n\t${settings.endsWith("remote") ? "remote" : "merge"}${settings.startsWith("empty-") ? " =" : ""}\n`,
+        { flag: "a" },
+      );
+    if (settings.startsWith("valueless-")) {
+      const config = readFileSync(join(f.repo, ".git/config"));
+      const stopped = f.cli("inspect", {
+        mode: "push",
+        push: { remote: "origin" },
+      });
+      assert.equal(stopped.exit, 1);
+      assert.equal(stopped.value.error, "git_observation_failed");
+      assert.deepEqual(readFileSync(join(f.repo, ".git/config")), config);
+      assert.equal(
+        f.bareGit("for-each-ref", "--format=%(refname)"),
+        "refs/heads/main",
+      );
+      return;
+    }
+    const config = f.git("config", "--get-regexp", "^remote\\.");
+    const before = f.git(
+      "for-each-ref",
+      "--format=%(upstream)",
+      "refs/heads/feature",
+    );
+    const branchConfig = spawnSync(
+      "git",
+      ["config", "--get-regexp", "^branch\\."],
+      { cwd: f.repo, env: f.env },
+    ).stdout;
+    const planned = pushPlan(f, options);
+    assert.equal(
+      (planned.value.push as { setUpstream: boolean }).setUpstream,
+      configure,
+    );
+    const result = f.cli("execute", { reference: planned.value.reference });
+    assert.equal(result.exit, 0, JSON.stringify(result.value));
+    assert.equal(result.value.upstreamConfigured, configure);
+    assert.equal(f.bareGit("rev-parse", "feature"), f.git("rev-parse", "HEAD"));
+    assert.equal(f.git("config", "--get-regexp", "^remote\\."), config);
+    if (configure)
+      assert.equal(
+        f.git("rev-parse", "--abbrev-ref", "@{upstream}"),
+        "origin/feature",
+      );
+    else {
+      assert.equal(
+        f.git("for-each-ref", "--format=%(upstream)", "refs/heads/feature"),
+        before,
+      );
+      assert.deepEqual(
+        spawnSync("git", ["config", "--get-regexp", "^branch\\."], {
+          cwd: f.repo,
+          env: f.env,
+        }).stdout,
+        branchConfig,
+      );
+    }
+  });
+}
+await test("push configures missing upstream without resending an already pushed HEAD", (t) => {
+  const f = pushFixture(t);
+  f.git("switch", "-c", "feature");
+  f.git("push", "origin", "feature");
+  const planned = pushPlan(f);
+  assert.equal(planned.value.phase, "plan");
+  const result = f.cli("execute", { reference: planned.value.reference });
+  assert.equal(result.exit, 0, JSON.stringify(result.value));
+  assert.equal(result.value.pushSent, false);
+  assert.equal(result.value.upstreamConfigured, true);
+  assert.equal(
+    f.git("rev-parse", "--abbrev-ref", "@{upstream}"),
+    "origin/feature",
+  );
+});
+await test("explicit upstream request still rejects a conflicting existing upstream before commit", (t) => {
+  const f = pushFixture(t);
+  f.git("switch", "-c", "feature");
+  f.git("config", "branch.feature.remote", "origin");
+  f.git("config", "branch.feature.merge", "refs/heads/main");
+  writeFileSync(join(f.repo, "example.txt"), "pending\n");
+  const config = readFileSync(join(f.repo, ".git/config"));
+  const materials = prepare(f, {
+    mode: "push",
+    push: { remote: "origin", setUpstream: true },
+  });
+  const planned = f.cli("plan", {
+    reference: materials.value.reference,
+    message: "docs: pending\n",
+  });
+  assert.equal(planned.exit, 1);
+  assert.equal(planned.value.error, "conflicting_upstream");
+  assert.equal(f.git("rev-list", "--count", "HEAD"), "1");
+  assert.deepEqual(readFileSync(join(f.repo, ".git/config")), config);
+});
 for (const initial of [
   "new",
   "existing",
@@ -2215,7 +2339,7 @@ function preparePrPlan(
   const materials = prepare(f, {
     mode: "pr",
     scope: { kind: "paths", paths: ["example.txt"] },
-    push: { remote: "origin", setUpstream: true },
+    push: { remote: "origin" },
     pr: { repository: fixtureRepository, ...pr },
   });
   const pending = f.cli("plan", {
@@ -2311,9 +2435,10 @@ for (const kind of ["new", "existing-head", "pr-only"] as const) {
       Object.keys(pendingRef.files).some((name) => name.endsWith(".bin")),
       false,
     );
+    const body = "$HOME `code` 日本語\n\nCloses #123\nRefs #456\n\n";
     const planned = f.cli("plan", {
       reference: pendingRef,
-      pr: { title: "docs: fixed 'title'", body: "$HOME `code` 日本語\n\n" },
+      pr: { title: "docs: fixed 'title'", body },
     });
     assert.equal(planned.exit, 0, JSON.stringify(planned.value));
     assert.equal(f.git("rev-parse", "HEAD"), before);
@@ -2323,6 +2448,11 @@ for (const kind of ["new", "existing-head", "pr-only"] as const) {
     assert.equal(executed.value.commitCreated, kind === "new");
     assert.equal(executed.value.pushSent, kind !== "pr-only");
     assert.equal(executed.value.prVerified, true);
+    assert.equal(executed.value.upstreamConfigured, true);
+    assert.equal(
+      f.git("rev-parse", "--abbrev-ref", "@{upstream}"),
+      "origin/docs/pr",
+    );
     assert.equal(f.git("rev-parse", "main"), main);
     assert.equal(f.bareGit("rev-parse", "docs/pr"), f.git("rev-parse", "HEAD"));
     assert.equal(
@@ -2335,7 +2465,7 @@ for (const kind of ["new", "existing-head", "pr-only"] as const) {
     assert.equal(state.prs.length, 1);
     assert.deepEqual(
       [state.prs[0].title, state.prs[0].body, state.prs[0].isDraft],
-      ["docs: fixed 'title'", "$HOME `code` 日本語\n\n", true],
+      ["docs: fixed 'title'", body, true],
     );
   });
 }

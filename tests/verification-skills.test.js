@@ -143,9 +143,37 @@ await test("PR reference retains preparation, fixed text, approval and readback 
     "PR-only",
     "参照だけ",
     "キャンセル",
+    "gh issue view",
+    "Closes #123",
+    "Refs #123",
+    "owner/repo#123",
+    "完了条件",
+    "default branchへのmerge時",
+    "別base",
+    "直接closeしない",
+    "無断で書き換えず",
   ])
     assert.ok(source.includes(contract), contract);
   assert.doesNotMatch(source, /compatibility\.md/);
+});
+
+await test("push reference defaults to missing-upstream setup and preserves existing settings", async () => {
+  const source = await readFile(
+    new URL("../skills/commit/references/push-bun.md", import.meta.url),
+    "utf8",
+  );
+  for (const contract of [
+    "`setUpstream`省略時",
+    "両方未設定",
+    "自動設定",
+    "片側だけ／空値／値なしも含む",
+    "既存設定を保持",
+    "setUpstream:false",
+    "最終一括確認",
+    "再pushしない",
+  ])
+    assert.ok(source.includes(contract), contract);
+  assert.doesNotMatch(source, /setUpstream:true.*利用者と確定した場合だけ/);
 });
 
 const repository = new URL("../", import.meta.url);

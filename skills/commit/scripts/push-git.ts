@@ -6,7 +6,7 @@ export type PushOptions = {
   remote: string;
   target: string | null;
   initialMain: boolean;
-  setUpstream: boolean;
+  setUpstream: boolean | null;
 };
 export type PushContext = ReturnType<typeof pushContext>;
 export type RemoteState = ReturnType<typeof remoteState>;
@@ -16,6 +16,7 @@ export type Destination = PushContext &
     branch: string;
     observed: RemoteState;
     tracking: string | null;
+    setUpstream: boolean;
   };
 function text(value: unknown): asserts value is string {
   requireThat(
@@ -48,7 +49,7 @@ export function pushOptions(value: unknown): PushOptions {
     remote: input.remote,
     target: (input.target as string | undefined) ?? null,
     initialMain: input.initialMain === true,
-    setUpstream: input.setUpstream === true,
+    setUpstream: (input.setUpstream as boolean | undefined) ?? null,
   };
 }
 function config(repo: string, pattern: string): Buffer {
@@ -360,16 +361,18 @@ export function destination(
       "protected_push_target",
     );
   outgoingBase(repo, state, observed, target);
-  if (options.setUpstream) {
-    const entries = Buffer.from(state.branchConfig, "base64")
-      .toString()
-      .split("\0");
-    const values = (key: string) =>
-      entries
-        .filter((row) => row.startsWith(`${key}\n`))
-        .map((row) => row.slice(key.length + 1));
-    const remote = values(`branch.${branch}.remote`);
-    const merge = values(`branch.${branch}.merge`);
+  const entries = Buffer.from(state.branchConfig, "base64")
+    .toString()
+    .split("\0");
+  const values = (key: string) =>
+    entries
+      .filter((row) => row === key || row.startsWith(`${key}\n`))
+      .map((row) => row.slice(key.length + 1));
+  const remote = values(`branch.${branch}.remote`);
+  const merge = values(`branch.${branch}.merge`);
+  const setUpstream =
+    options.setUpstream ?? (remote.length === 0 && merge.length === 0);
+  if (setUpstream) {
     requireThat(
       (remote.length === 0 && merge.length === 0) ||
         (remote.length === 1 &&
@@ -384,6 +387,7 @@ export function destination(
   return {
     ...context,
     ...options,
+    setUpstream,
     target,
     branch,
     observed,
