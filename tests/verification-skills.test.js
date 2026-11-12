@@ -52,6 +52,76 @@ await test("migrated commit entries require Bun and remove only their dedicated 
   );
 });
 
+await test("commit entries declare the same-turn full read set and rule precedence", async () => {
+  for (const [name, references] of Object.entries({
+    commit: ["local-bun"],
+    "commit-main": ["local-bun"],
+    "commit-push": ["local-bun", "push-bun"],
+    "commit-pr": ["local-bun", "push-bun", "pr-bun", "diff-review"],
+  })) {
+    const source = await readFile(
+      new URL(`../skills/${name}/SKILL.md`, import.meta.url),
+      "utf8",
+    );
+    const readSet = source
+      .split("## 開始時の全文read一式")[1]
+      .split("到達点は")[0];
+    assert.match(readSet, /同じassistant turn/);
+    assert.match(readSet, /tail/);
+    assert.match(readSet, /未読.*操作・停止判断しない/);
+    assert.match(readSet, /PR > push > local/);
+    assert.deepEqual(
+      [...readSet.matchAll(/\[([^\]]+)\.md\]/g)].map((match) => match[1]),
+      references,
+    );
+  }
+});
+
+await test("shared startup and release contracts distinguish direct plan, questions and terminal cleanup", async () => {
+  const local = await readFile(
+    new URL("../skills/commit/references/local-bun.md", import.meta.url),
+    "utf8",
+  );
+  for (const contract of [
+    "commit_inspect",
+    "直接1回",
+    "{bun,result}",
+    "無改変",
+    "開始時からtool未導入",
+    "旧表示toolは使わない",
+    "独立releaseを省く",
+    "payloadRemoved=true",
+    "返された新reference",
+    "cleanup.complete",
+    "所有検証不能",
+    "Stageをreset／unstageしない",
+  ])
+    assert.ok(local.includes(contract), contract);
+  assert.doesNotMatch(local, /commit_status_display.*直接.*呼ぶ/);
+  for (const name of [
+    "push-bun",
+    "pr-bun",
+    "diff-review",
+    "execution-batching",
+  ]) {
+    const source = await readFile(
+      new URL(`../skills/commit/references/${name}.md`, import.meta.url),
+      "utf8",
+    );
+    assert.match(source, /独立releaseを省[くき]/, name);
+    assert.ok(source.includes("payloadRemoved=true"), name);
+    assert.match(source, /release成功/);
+    assert.match(source, /停止/);
+  }
+  const pr = await readFile(
+    new URL("../skills/commit/references/pr-bun.md", import.meta.url),
+    "utf8",
+  );
+  assert.match(pr, /phase=materials, executable=false/);
+  assert.match(pr, /承認提示用の完成planではなくexecute不可/);
+  assert.match(pr, /次のplanへ現参照と不足する/);
+});
+
 await test("PR reference retains preparation, fixed text, approval and readback contracts", async () => {
   const source = await readFile(
     new URL("../skills/commit/references/pr-bun.md", import.meta.url),

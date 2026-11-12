@@ -2,13 +2,13 @@
 
 到達点はpushのみ。PR準備・gh・PR APIは0。新commit／既存HEADとも、必要準備→完成文章／操作のprivate保持→通常assistant一括確認→参照だけexecute→固定SHA push／readback／予定upstream／cleanupを行う。準備失敗からcommitだけへ縮小しない。旧Python／Codemodeは呼ばない。
 
-最初に[共有local手順](local-bun.md)を全文読み、**起動・scope／疑わしい対象・Stage／全Staged検査・固定材料読取・private参照／release／cleanup・文章／一括承認・失敗停止**を共通利用する。ただしlocal2入口のdefault判定・default質問・空diff即終了・mode／branch方針・通信禁止はこの入口には適用しない。以下がpush用の差分であり、省略しない。
+入口で[共有local手順](local-bun.md)と本手順を同じassistant turnに全文readし、切断時はtailを取得する。PR > push > localの優先順位で、**起動・scope／疑わしい対象・Stage／全Staged検査・固定材料読取・private参照／release／cleanup・文章／一括承認・失敗停止**を共通利用する。ただしlocal2入口のdefault判定・default質問・空diff即終了・mode／branch方針・通信禁止はこの入口には適用しない。以下がpush用の差分であり、省略しない。
 
 ## 0. 起動とStage前
 
-開始時だけBun存在を確認する。**Bun 1.3.0以上は必須**。不在／非対応version／probe異常／確認不能なら必要条件「確認可能なBun 1.3.0以上」を案内し、Stageを含むGit変更前に停止する。`--no-confirm`でも省略しない。手書きBash／旧Python／互換へのfallback・自動install／PATH変更はなく、開始後失敗からも経路変更しない。
+共有local手順のtool選択を使う。利用可能な`commit_inspect`を実repositoryと明示`mode:"push"`で直接1回呼び、完全結果／referenceと返されたBun絶対実体を後続の全保護CLI呼出しへ引き継ぐ。手動probe・inspect・JSON転記・重複一覧は不要。開始時からtool利用不能の場合だけ既存Bun確認＋CLI inspect＋通常テキスト表示。Bun 1.3.0以上の確認不能／開始後の失敗はStageを含むGit変更前に停止し、fallback／installしない。
 
-Bun1.3.0以上の確認済み絶対実体を最後まで使う。probe含めtrusted配布元scripts cwd、BUN_OPTIONS／NODE_OPTIONS除去、同梱空TOML／env-file=/dev/null／no-install、絶対entrypoint／明示repositoryを使う。対象欠落fallback／tsconfig-overrideなし。通常Git設定・hooks有効。全Git子processはGIT_NO_LAZY_FETCH=1で必要object欠落時はfetchせず停止する。
+以下はtoolなしの場合のinspect入力例。保護probeと全起動条件（trusted cwd・環境除去・同梱config・env-file・no-install）は共有local手順どおり。
 
 ```bash
 cd "$SCRIPTS" || exit 1
@@ -19,7 +19,7 @@ printf '%s\n' '{"mode":"push","push":{"remote":"origin","setUpstream":true}}' | 
 
 inspectは通信せずlocal push URL（pushInsteadOf等のrewrite後）／順序付きfetch設定／SSH解決を保持する。SSHではssh -Gのalias解決を照合し、core.sshCommand／GIT_SSH_COMMAND／GIT_SSHは拒否する。local bare／file URLも対応。HEADも選択した変更もなければremote設定不要。
 
-branch／changesは通常表示し、commit_status_displayがあれば取得JSONを直接渡す。scopeはall／paths／staged（無指定は全変更、Untracked／部分Stage残り含む）。outsideStaged／suspiciousは共有手順どおり実質問し、実回答だけmaterialsへ。detached／競合／MERGE_HEAD／dirty nested submodule／終点矛盾はStage前停止。pushは**通信したremote defaultとmain**でbranch方針を決める。local default疑義を理由に余分なdefault質問をしない。
+一覧は共有のtool表示（開始時からtoolなしの場合だけ通常テキスト）とし、重複表示しない。scopeはall／paths／staged（無指定は全変更、Untracked／部分Stage残り含む）。outsideStaged／suspiciousは共有手順どおり実質問し、実回答だけmaterialsへ。detached／競合／MERGE_HEAD／dirty nested submodule／終点矛盾はStage前停止。pushは**通信したremote defaultとmain**でbranch方針を決める。local default疑義を理由に余分なdefault質問をしない。
 
 ## 1. materials: 新commit要否とpush材料
 
@@ -39,9 +39,11 @@ branch／changesは通常表示し、commit_status_displayがあれば取得JSON
 
 stdinは`{"reference":REFERENCE}`に、commitNeeded=trueなら`message:"完成文章\n"`、新branchが必要なら`newBranch:"docs/example"`を追加する。既存HEADではmessageを渡さない（拒否される）。target省略ならこの具体名で宛先を確定する。branch／宛先／URL／upstreamとremote target/default SHAの準備は**新commit前にすべて完了**し、状態driftを新値で吸収しない。
 
-`phase=already_pushed`なら同SHA再push・commit・通常承認なしでcleanup結果を報告する。残るbranch／upstream操作があればplanになる。
+追加質問なしなら材料から直接planへ進み、独立releaseを省く。先に質問が必要ならrelease成功・返却reference採用後だけ質問する。失敗／削除拒否は共有local手順どおり停止・cleanup／残存を報告する。
 
-`phase=plan`は確定文章／操作がimmutable private保持され、不要payload削除済み。返されたreferenceだけを採用する。通常assistantで次をまとめて表示する。
+`phase=already_pushed`なら同SHA再push・commit・通常承認なしで`cleanup.complete`と残存を確認・報告する。残るbranch／upstream操作があればplanになる。
+
+`phase=plan`は確定文章／操作がimmutable private保持され、`payloadRemoved=true`を確認してから提示する。返された新referenceだけを採用する。通常assistantで次をまとめて表示する。
 
 - 新commitがある場合だけ返された完成messageを1 code block。固定bytes／言語／形式を維持し、WHY／Issue／未実施テスト成功を創作しない。
 - scope／Stage／scanner、元branchと予定branch（必要時だけ新規、元ref保持）、親／tree。既存HEADの場合は送信対象が既存履歴で新commitなしと明示。

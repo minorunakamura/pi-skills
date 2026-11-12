@@ -17,21 +17,23 @@
 
 完成文章と操作一式を通常assistantで表示し、一括承認／修正／cancelを扱います。作らない文章や操作の選択肢は出しません。明示no-confirmは通常承認だけ省略し、予定表示・検査・疑義の実質問・異常停止は維持します。ask_user_questionがなければ同じ選択肢を通常テキストで示し回答を待ちます。script成功や参照の存在は承認でありません。
 
+各入口の必要文書は開始時に**同じassistant turn**で全文readし、切断時はtailを取得します。commit／commit-mainはlocal、pushはlocal＋push、PRはlocal＋push＋PR＋diff-reviewです。読取順と規則の優先順位は別で、PR > push > local。local専用の無通信・default質問・空diff即終了をpush／PRへ転用しません。
+
 ### ローカル2入口のBun標準経路
 
 [commit](skills/commit/SKILL.md)／[commit-main](skills/commit-main/SKILL.md)から[同梱Bun手順](skills/commit/references/local-bun.md)を全文読みます。Bun1.3.0以上の確認済み絶対実体で同梱TSを直接実行し、製品npm依存・build・Codemode・Pythonは不要です。probeもtrusted scripts cwd、空の同梱TOML／env-file=/dev/null／no-install、BUN_OPTIONS／NODE_OPTIONS除去、絶対entrypoint／対象repositoryを使います。tsconfig-overrideなし、対象欠落fallbackなし。通常Git設定・hooksは維持します。
 
 Bun 1.3.0以上は必須です。不在／非対応version／起動異常／不正probe／確認不能では必要条件を案内し、Stageを含むGit変更前に停止します。no-confirmでも省略しません。開始前後を問わず手書きBash／旧Python／互換へのfallback・自動install・PATH／利用者設定変更で迂回しません。新launcherやruntime管理は追加しません。
 
-公開CLIはinspect→materials→plan→execute。必要な固定材料まとめ読取／release／cleanupだけを補います。defaultは全local remote HEADのsymbolic target／解決OIDと対応remote／順序付きfetch設定から**宛先→送信元**へ逆mappingします。一意default優先、真に情報なしの場合だけmain／master fallback。競合・broken・orphan・non-symbolic・不明mapping・観測不能を情報なしにせず、候補／理由を表示して実質問し、未回答はStage0。commit-mainは回答後も作業branchなら拒否、commitは回答に応じて作業branchを計画します。通信・自動補修なし、Stage前／操作直前の根拠driftを拒否します。ローカル情報は古い可能性があり最新defaultを保証しません。
+利用可能な`commit_inspect`を実repositoryと明示modeで直接1回呼び、手動probe／inspect／JSON転記／重複一覧を省きます。完全結果と返された絶対Bun・完全referenceを以後の保護CLIへ引き継ぎ、materials→plan→executeへ進みます。開始時からtool利用不能の場合だけ既存Bun確認＋CLI inspect＋通常テキスト表示を使い、旧表示toolは呼びません。必要な固定材料まとめ読取／release／cleanupだけを補います。defaultは全local remote HEADのsymbolic target／解決OIDと対応remote／順序付きfetch設定から**宛先→送信元**へ逆mappingします。一意default優先、真に情報なしの場合だけmain／master fallback。競合・broken・orphan・non-symbolic・不明mapping・観測不能を情報なしにせず、候補／理由を表示して実質問し、未回答はStage0。commit-mainは回答後も作業branchなら拒否、commitは回答に応じて作業branchを計画します。通信・自動補修なし、Stage前／操作直前の根拠driftを拒否します。ローカル情報は古い可能性があり最新defaultを保証しません。
 
-materialsで全Staged diffをGitleaks検査します。未導入だけunavailable、検出／失敗は停止。scanner／hook／子CLIの生出力・秘密値は会話へ流しません。小diffは一覧・本文・必要履歴を約32KiBの予算内で一括、大diffは未表示を明示して固定材料の必要複数範囲をまとめて読み、検査範囲を縮めません。不要diff／履歴payloadはどの質問前にも削除します。readの表示予算はJSON全体で1回あたり32KiB（累計ではない）。`material_display_budget_exceeded`かつ`materialsPreserved=true`だけは準備を削除せず、応答の同じreferenceで要求量を減らして読み直せます。Skill全体の再実行は不要です。続行しない場合はcleanupし、他の失敗時の停止／cleanupは維持します。
+materialsで全Staged diffをGitleaks検査します。未導入だけunavailable、検出／失敗は停止。scanner／hook／子CLIの生出力・秘密値は会話へ流しません。小diffは一覧・本文・必要履歴を約32KiBの予算内で一括、大diffは未表示を明示して固定材料の必要複数範囲をまとめて読み、検査範囲を縮めません。不要diff／履歴payloadはどの質問前にも削除します。追加質問なくplanへ進める場合は独立releaseを省き、完成planまたはPR中間結果の`payloadRemoved=true`を確認してから提示・質問します。先に疑義質問が必要ならrelease成功と返された新referenceを確認・採用してから質問します。PRの`phase=materials, executable=false`は承認・execute不可で、新referenceで不足文章を補います。`already_pushed`／`existing_pr`等の終了結果はcleanup成否・残存を確認し、残操作なしなら不要承認をしません。plan失敗／削除拒否／cleanup失敗は停止して残存を報告し、所有検証不能時にcleanup成功を推定したり承認で迂回したりしません。readの表示予算はJSON全体で1回あたり32KiB（累計ではない）。`material_display_budget_exceeded`かつ`materialsPreserved=true`だけは準備を削除せず、応答の同じreferenceで要求量を減らして読み直せます。Skill全体の再実行は不要です。続行しない場合はcleanupし、他の失敗時の停止／cleanupは維持します。
 
 完成文章は承認前にrepo外private directory0700／file0600へ排他的保持。owner／非symlink／regular file／実体／bytes digest・repo／runを照合し、修正時は旧版削除成功後だけ新参照を返します。executeは参照だけで文章／設定を再送せず、途中LLM判断／処理コード生成なし。通常hooks、raw本文（末尾LFなし入力への1 LF追加だけ許容）／全親／tree／branch ref／index／他refsを事後照合します。失敗／drift／成否不明で後続停止し、Git成功応答後の確認失敗・cleanup失敗を区別します。所有実体だけcleanupし未知sentinel／他実行は消しません。完全atomic性・任意強制中断時のcleanup／報告必達は保証しません。
 
 ### push入口のBun標準経路
 
-[commit-push](skills/commit-push/SKILL.md)から[push用Bun手順](skills/commit/references/push-bun.md)を全文読みます。起動はローカル入口と同じ保護形。新commit／既存HEADを区別し、事前push準備・確定文章／操作のprivate保持・通常assistant一括確認後、参照だけexecuteで必要branch／commit／固定SHA push／送信readback／予定upstream／cleanupまで進みます。既存HEADはmessage／commit不要、同SHA再pushなし、HEADも対象diffもなければ通信なし。PR準備／gh APIは0です。
+[commit-push](skills/commit-push/SKILL.md)から[push用Bun手順](skills/commit/references/push-bun.md)を全文読みます。local＋pushを同ターンで読み、起動のtool選択と保護形は共有local手順を使います。新commit／既存HEADを区別し、事前push準備・確定文章／操作のprivate保持・通常assistant一括確認後、参照だけexecuteで必要branch／commit／固定SHA push／送信readback／予定upstream／cleanupまで進みます。既存HEADはmessage／commit不要、同SHA再pushなし、HEADも対象diffもなければ通信なし。PR準備／gh APIは0です。
 
 remote／実push URL／target／upstreamを確定表示します。branchは通信したremote defaultとmainで判断し、local2入口のdefault質問は転用しません。通常main／remote default宛てを拒否し、明示初回mainだけ全remote空（tag等もなし）かつ送信元／予定／宛先mainで許可。通常hooks有効、余分refs／tag／submodule非送信、必要object不足は非fetch。drift／異常／成否不明は後続停止し、先行branch／commit／push成功、事後照合／upstream／cleanup失敗を区別します。Bun必須条件とGit変更前停止はローカル2入口と共通であり、開始後の失敗でも別経路へ切り替えません。
 
@@ -41,9 +43,9 @@ remote／実push URL／target／upstreamを確定表示します。branchは通�
 
 commit-prは[PR用Bun手順](skills/commit/references/pr-bun.md)でbranch全体の固定diff／履歴／templateと同repo／認証／権限／base／既存PRを新commit前に準備します。通常PR既定、明示Draft優先、既存PRは全state非編集／非重複。具体branchを準備するplanが文章未確定なら非実行可能materials参照を返し、必要文章を補って完成planを通常承認します。片側文章だけの修正は他方bytesを保持し旧参照失効、設定修正はcleanupから影響準備をやり直します。承認後executeは参照だけ、固定SHA送信とPR全文／head／base／SHA readback、drift／異常応答後停止・先行成功保持を行います。汎用engineや旧CLI／schema互換adapterはありません。
 
-直接確認は[検証Skill](.pi/skills/verify-project/SKILL.md)から[ローカルBun手順](.pi/skills/verify-project/references/local-bun.md)を選びます。fresh Piの通常承認／cancel／no-confirm／default実質問・未回答Stage0／Bun不足／非対応／確認不能のGit変更前停止と実Gitを照合します。pushは[専用Bun検証手順](.pi/skills/verify-project/references/push-bun.md)、PR入口は[PR用Bun検証手順](.pi/skills/verify-project/references/pr-bun.md)を使います。共有RPC／metric／fixture helperはNode24で実行し、既定はread,bashだけのfresh Piです。専用toolの直接確認は[commit_inspect検証手順](.pi/skills/verify-project/references/commit-inspect.md)で明示extensionとplain allowlistを選択し、実TUI／nonTUI／cancel／reloadを区別して確認します。model/thinkingは通常解決を記録し比較条件と照合、認証の独自read/copy/logは禁止。RPC通常テキスト承認はask_user_questionのTUI実証でありません。
+直接確認は[検証Skill](.pi/skills/verify-project/SKILL.md)から[ローカルBun手順](.pi/skills/verify-project/references/local-bun.md)を選びます。fresh Piの通常承認／cancel／no-confirm／default実質問・未回答Stage0／Bun不足／非対応／確認不能のGit変更前停止と実Gitを照合します。pushは[専用Bun検証手順](.pi/skills/verify-project/references/push-bun.md)、PR入口は[PR用Bun検証手順](.pi/skills/verify-project/references/pr-bun.md)を使います。共有RPC／metric／fixture helperはNode24で実行し、helperの既定read,bashだけはtool未導入対照として保持し、通常Skill検証では明示extensionとread,bash,commit_inspectを使います。専用toolの直接確認は[commit_inspect検証手順](.pi/skills/verify-project/references/commit-inspect.md)で明示extensionとplain allowlistを選択し、実TUI／nonTUI／cancel／reloadを区別して確認します。model/thinkingは通常解決を記録し比較条件と照合、認証の独自read/copy/logは禁止。RPC通常テキスト承認はask_user_questionのTUI実証でありません。
 
-production変更前のread-only archiveで旧commitと新commitを同じ小diff／history／明示文章／通常承認で1組比較します。provider／model／thinkingは通常解決を照合し、無断変更しません。承認前／後／全体時間、利用者待機、全assistant request、生成codeと固定呼出し／payload、取得可能usage・失敗・unknownを分け、nested toolを二重加算しません。構造改善と時間効果を分け、単発観測を安定した高速化の証明と呼びません。変更前baselineがすでにBun版ならPython→Bunの速度効果とは呼ばず、条件差・比較不能・未実証を明記します。
+production変更前のread-only archiveでlocal commitとcommit-prを各1組、同じ小diff／history／明示文章／通常承認で比較します。新旧とも同じ観測helperを固定し、baselineは当時の表示extensionを使います。inspect取得→一覧までのLLM介在、probe／転記／release／全文readの同ターン性も操作記録から分類します。provider／model／thinkingは通常解決を照合し、無断変更しません。承認前／後／全体時間、利用者待機、全assistant request、生成codeと固定呼出し／payload、取得可能usage・失敗・unknownを分け、nested toolを二重加算しません。構造改善と時間効果を分け、単発観測を安定した高速化の証明と呼びません。変更前baselineがすでにBun版ならPython→Bunの速度効果とは呼ばず、条件差・比較不能・未実証を明記します。
 
 #### 状態一覧の色付き表示
 
@@ -55,7 +57,7 @@ production変更前のread-only archiveで旧commitと新commitを同じ小diff�
 
 通常cancelで完全な信頼できるreference取得済みなら、同じBunと所有検証CLIでcleanupし、abort済みsignalを引き継がず上限と終了確認を持たせます。取得前・切断JSON等は成功／cleanup済みとせず残存可能性を明示し、未知directoryを探索削除しません。最終isErrorとcleanup成否・child終了確認を区別し、任意強制中断での返却必達や永続registry／reloadをまたぐ自動復旧は保証しません。
 
-既存`commit_status_display`は取得済みJSON表示だけ・Git操作なしの互換toolとして維持し、入力とannotationsは変更しません。Pi packageのmanifestで読み込まれ、追加・更新後に新sessionまたは`/reload`で使えます。今回の実TUI直接確認はPi 1.4.0が対象です。4 Skill入口の新tool利用・release分岐・一括readと速度比較は別の接続作業であり、tool単独の確認から完了を推定しません。
+既存`commit_status_display`は取得済みJSON表示だけ・Git操作なしの互換toolとして維持し、入力とannotationsは変更しません。Pi packageのmanifestで読み込まれ、追加・更新後に新sessionまたは`/reload`で使えます。今回の実TUI直接確認はPi 1.4.0が対象です。4 Skill入口もこのtool選択・Bun引継ぎ・同ターンread・release分岐を使います。接続と前後比較はfresh Skillで別途確認し、tool単独の確認から完了を推定しません。
 
 絵文字ではないテキストの`●`だけを色付けし、状態名・ファイル名は通常色で表示します。このtoolは標準の色付き背景枠を使わず、通常背景に一覧を表示します。theme設定や他のtoolの表示は変更しません。
 

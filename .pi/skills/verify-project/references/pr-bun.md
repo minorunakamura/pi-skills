@@ -1,6 +1,6 @@
 # commit-pr: Bun公開CLI／fresh Pi／Bun必須停止
 
-専用toolの明示extension／allowlist、実TUI即時表示・nonTUI・cancel／reloadは[commit_inspect手順](commit-inspect.md)を選ぶ。下の無extension経路は従来CLI／tool未導入対照として維持し、専用toolの実証には使わない。
+専用toolの明示extension／allowlist、実TUI即時表示・nonTUI・cancel／reloadは[commit_inspect手順](commit-inspect.md)を選ぶ。通常Skill操作は以下の明示extension／allowlistで行い、tool未導入対照だけ両optionを外してread,bashの既定を使う。開始後失敗を対照へ切り替えない。
 
 初期対象は新commit／既存HEAD／PR-only／既存PR、固定文章と片側修正、設定再準備、commit後／送信後部分成功、runtime停止。製品の[PR手順](../../../../skills/commit/references/pr-bun.md)を使う。実GitHub／fork／TUI／全OS／任意中断必達は対象外。正式checks・独立Review・受入はRoot担当。
 
@@ -29,12 +29,15 @@ source版／dirty・関連SHA256 manifestをdocs/verification/<issue-number>/<�
 
 新commit／既存HEAD／PR-only、base全体固定材料と一致単位、固定特殊文字／片側修正と旧参照拒否、未確定materials参照execute拒否、OPEN/CLOSED/MERGED非編集／非重複、準備PR消失／作成前競合、base/Draft再準備、commit後URL drift／送信後local ref drift、create異常応答／readback異常を選ぶ。scope外bytes保持、通常hooks、秘密非出力・未知file保持は共有Bun suiteのscanner／hook／private代表と対応する。内部handler成功mockで代用しない。
 
+[共有W2接続・read／release照合](local-bun.md#w2-通常skill接続readrelease分岐の照合)も適用する。
+
 ## fresh Pi: 通常承認と本当のfollow-up
 
-既存RPC helperをread,bashだけで起動する。使捨てdriverを完成・digest固定してから起動し、親PID／DRIVER_PIDを直後に記録、同じ親shellでwait／exit保存する。以下は片側修正→設定再準備→通常承認を同一sessionで観測する例。
+既存RPC helperを明示製品extensionとread,bash,commit_inspectで起動する。使捨てdriverを完成・digest固定してから起動し、親PID／DRIVER_PIDを直後に記録、同じ親shellでwait／exit保存する。以下は片側修正→設定再準備→通常承認を同一sessionで観測する例。
 
 ```bash
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.ts" \
+  --extension "$SOURCE/extensions/commit-status.js" --tools read,bash,commit_inspect \
  "$OWNED/repo" "$SOURCE/skills/commit-pr/SKILL.md" "$OWNED/evidence" \
  --fixture-remote --answer-file "$OWNED/answer1" \
  --follow-up-file "$OWNED/answer2" --follow-up-file "$OWNED/answer3" \
@@ -54,6 +57,10 @@ printf '%s\n' "$?" > "$OWNED/driver-exit"
 
 終了後push-fixture observeとpr-state.json／git.jsonl／gh.jsonlで実commit親／tree／raw本文、元ref／scope外保持、必要push1（PR-onlyは0）、bare SHA=HEAD、固定PR title/body bytes／通常またはDraft／head/base名と両SHAを照合する。PR-onlyは新commit／message修正選択肢なし。既存PRは全state報告だけ、残操作なしなら不要承認なし。
 
+### PR中間planの最小代表
+
+修正／設定再準備の全follow-upを要しない場合は、別freshな既存履歴＋今回diffで最初のplanをcommit messageのみ（既存PR確認後、新PR文章を補完）とするrequestを使う。answer-fileは1つだけにする。`phase=materials, executable=false, payloadRemoved=true`・5 bin不在・新referenceを確認し、その参照でtitle/bodyを補って完成planへ進む。中間結果を通常承認／executeに使わず、完成後にだけ通常assistant全文提示→実回答→参照だけexecuteを観測する。
+
 ## commit後／送信後driftと開始後fallbackなし
 
 別fresh fixtureで通常承認前にhookを設置し、hookもmanifest固定する。post-commitで`git remote set-url origin https://other.example.invalid/wrong/repo.git`ならcommitVerified=true・pushAttempted=false・PR create0を期待。pre-pushで`git update-ref refs/heads/unplanned HEAD`なら固定SHA送信成功を保持し、post_push_local_verification_failed・PR create0。正常hooksは無効化しない。ghのcreate-response/readback fault代表はpr-state.jsonのfaultを設定し、前者は作成済み可能性、後者はPR全文検証失敗を観測する。
@@ -67,6 +74,7 @@ printf '%s\n' "$?" > "$OWNED/driver-exit"
 ```bash
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/push-fixture.ts" snapshot "$OWNED" "$GIT" > "$OWNED/before-stop.json"
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.ts" \
+  --extension "$SOURCE/extensions/commit-status.js" --tools read,bash,commit_inspect \
  "$OWNED/repo" "$SOURCE/skills/commit-pr/SKILL.md" "$OWNED/evidence" --fixture-remote \
  --request '/skill:commit-pr --no-confirm README.mdだけ。remote origin、repository github.example.invalid/example/project。'
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/push-fixture.ts" snapshot "$OWNED" "$GIT" > "$OWNED/after-stop.json"

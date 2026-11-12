@@ -2,13 +2,13 @@
 
 到達点はPR。同一repository内のみ、通常PR既定・明示Draft優先。新commit／既存HEAD／push済みPR-onlyを同じ公開CLIで扱う。既存PRはOPEN/CLOSED/MERGEDとも報告だけで、重複作成・編集しない。
 
-最初に[共有local手順](local-bun.md)と[push手順](push-bun.md)を全文読む。起動・scope・疑わしい対象の実質問・Stage・全Staged検査・固定材料・private参照・表示／承認・cleanup・失敗停止は共通。local2入口のdefault質問／無通信／空diff即終了、pushの初回main例外／PR API0はこの入口に適用しない。以下を優先する。機械処理を毎回生成せず、旧Python／手書き互換を使わない。
+入口で[共有local手順](local-bun.md)・[push手順](push-bun.md)・本手順・[差分確認](diff-review.md)を同じassistant turnに全文readし、切断時はtailを取得する。読取順とは別にPR > push > localを優先する。起動・scope・疑わしい対象の実質問・Stage・全Staged検査・固定材料・private参照・表示／承認・cleanup・失敗停止は共通。local2入口のdefault質問／無通信／空diff即終了、pushの初回main例外／PR API0はこの入口に適用しない。以下を優先する。機械処理を毎回生成せず、旧Python／手書き互換を使わない。
 
 ## 0. 起動とinspect
 
-**Bun 1.3.0以上は必須**。PR-onlyも同じ。不在／非対応version／起動異常／不正probe／確認不能は必要条件を案内し、Stageを含むGit変更前に停止する。no-confirmでも省略しない。自動install／PATH変更／旧Python／手書きfallbackなし。開始後失敗からも別経路へ切り替えない。
+共有local手順のtool選択を使う。利用可能な`commit_inspect`を実repositoryと明示`mode:"pr"`で直接1回呼び、完全結果／referenceと返されたBun絶対実体を後続の全保護CLI呼出しへ引き継ぐ。PR-onlyも同じ。手動probe・inspect・JSON転記・重複一覧は不要。開始時からtool利用不能の場合だけ既存Bun確認＋CLI inspect＋通常テキスト表示。Bun 1.3.0以上の確認不能／開始後の失敗はStageを含むGit変更前に停止し、fallback／installしない。
 
-共有local手順の保護probeで確認したBun絶対実体を最後まで使う。probe含めtrusted配布元scripts cwd、BUN_OPTIONS／NODE_OPTIONS除去、同梱空TOML・env-file=/dev/null・no-install、絶対entrypoint／明示repository。同梱tsconfigを使いtsconfig-overrideなし。通常Git設定・hooks有効、必要object欠落時fetchなし。
+以下はtoolなしの場合のinspect入力例。保護probeと全起動条件は共有local手順どおり。
 
 ```bash
 cd "$SCRIPTS" || exit 1
@@ -17,7 +17,7 @@ printf '%s\n' '{"mode":"pr","push":{"remote":"origin","setUpstream":true},"pr":{
 
 例のremote／repositoryを推測採用しない。実際の明示先とlocal設定から選び、曖昧ならStage前に実質問する。`pr.repository`は`[HOST/]OWNER/REPO`、`base`省略はremote／GitHubの一致したdefault、`draft`省略はfalse。`push.target`省略は予定branch名、同一repositoryの**予定branch＝push target＝PR head**を要する。fork／別target／初回main例外は扱わない。HTTPS／通常SSHとssh -G解決aliasを使える。資格情報URL・custom SSH・rewrite後の別repo／file URLは拒否する。
 
-scopeはall／限定literal paths／staged-only。Untracked・部分Stageの残りを含む既定、対象外既存Stageの確認・対象外保持、dirty submodule／detached／競合／merge／矛盾のStage前停止は共有どおり。branch／changesはcommit_status_displayがあれば取得JSONで直接表示し、通常assistant文章・承認に転用しない。
+scopeはall／限定literal paths／staged-only。Untracked・部分Stageの残りを含む既定、対象外既存Stageの確認・対象外保持、dirty submodule／detached／競合／merge／矛盾のStage前停止は共有どおり。一覧は共有のtool表示（開始時からtoolなしの場合だけ通常テキスト）とし、重複表示や通常assistant文章・承認への転用をしない。
 
 ## 1. materials: branch名に依存しない全体材料
 
@@ -26,12 +26,12 @@ stdinは`{"reference":REFERENCE}`と必要な実回答だけ。状態照合→�
 - `commitNeeded=true`: commit文章は固定Stagedだけに基づく。scanner=unavailableは新commit未検査と明示。
 - `commitNeeded=false`: message／空commit／amendなし。既存HEADのbranch全体を扱い、既存履歴を今回Gitleaks検査済みと呼ばない。必要pushだけ、同SHA再pushなし。
 - gh認証account／WRITE以上の権限／同repo／default／base SHA／templateを取得。唯一のmerge-base(base, 親HEAD)→予定index treeの**branch全体diff**とbaseにない既存履歴を固定する。送信履歴`history`はPR全体の代用でない。必要object欠落／準備失敗は新commit前に停止し、勝手にpushだけへ縮小しない。
-- 小材料は一覧／Staged diff／送信履歴／`prDiff`／`prHistory`／`prTemplates`を一括。合計約32KiBを超えたら未表示を明示。`read`のpartsに`diff`／`history`／`pr-diff`／`pr-history`／`pr-templates`の複数bytes範囲をまとめる。totalBytesを守り、固定材料を最新Git diffで置換しない。[差分確認](diff-review.md)も読む。readの`material_display_budget_exceeded`かつ`materialsPreserved=true`だけは準備を保持するため、応答のreferenceで要求量を減らして読み直す。Skill全体の再実行は不要。
+- 小材料は一覧／Staged diff／送信履歴／`prDiff`／`prHistory`／`prTemplates`を一括。合計約32KiBを超えたら未表示を明示。`read`のpartsに`diff`／`history`／`pr-diff`／`pr-history`／`pr-templates`の複数bytes範囲をまとめる。totalBytesを守り、固定材料を最新Git diffで置換しない。入口で読んだ差分確認の規則を使う。readの`material_display_budget_exceeded`かつ`materialsPreserved=true`だけは準備を保持するため、応答のreferenceで要求量を減らして読み直す。Skill全体の再実行は不要。
 - `pr.stagedDiffIdentical`は完全diffの一致、`pr.reusableStagedPathBytes`はpath bytes（base64）とold/new mode／OIDの一致した変更単位。同じpath／新blobだけでは再利用しない。一致した部分の今回の意味理解だけ再利用し、異なる部分・未読履歴・templateを確認する。一致は理解の認定でない。表示量で全Staged検査を縮めない。
 
 ここまででbranch名を決める意味材料が揃う。createBranch=trueならmain／通信defaultから、または明示新branchから未存在名1件を計画。falseなら現在作業branch維持。具体名を材料取得の前提にせず循環させない。
 
-どの質問よりも前に`release`で不要payloadを削除する。planもdiff／history／PR材料payloadを削除し、必要な操作根拠・digest・文章だけ保持する。未知fileや他実行は消さない。
+追加質問なしなら材料から直接planへ進み、独立releaseを省く。先に疑義質問が必要な場合だけrelease成功・返却reference採用後に質問する。planの完成／中間結果は`payloadRemoved=true`を確認してから提示・質問する。失敗／削除拒否は停止してcleanup成否・残存を報告し、承認で迂回しない。未知file・差替え・他実行を削除せず、Stageをreset／unstageしない。
 
 ## 2. plan: 固定文章・具体headの照会・全準備完了
 
@@ -45,9 +45,9 @@ messageはcommitNeeded=trueだけ。newBranchは必要なときだけ。PR title
 
 具体headに対する全state既存PR照会はplanで完了する。既存PRなら新規PR文章は不要（渡すと拒否）。存在しない文章を作らないため、まず必要branchと既知のcommit messageだけでplanを呼べる。
 
-新規PRで文章未確定なら`phase=materials, executable=false, requiredInputs`と新参照を返す。branch／宛先／既存PR結果／既に与えたmessageを保持し、旧参照失効、payload削除済み。これは承認提示用の完成planではなくexecute不可。次のplanへ現参照と不足するtitle/body（またはmessage）だけ渡す。中間準備からも既存PR消失／driftを拒否する。必要文章が最初から揃う既知のケースは初回planだけで完成でき、不要な往復を強制しない。
+新規PRで文章未確定なら`phase=materials, executable=false, requiredInputs`と新参照を返す。branch／宛先／既存PR結果／既に与えたmessageを保持し、旧参照失効。`payloadRemoved=true`を確認する。これは承認提示用の完成planではなくexecute不可。次のplanへ現参照と不足するtitle/body（またはmessage）だけ渡す。中間準備からも既存PR消失／driftを拒否する。必要文章が最初から揃う既知のケースは初回planだけで完成でき、不要な往復を強制しない。
 
-`phase=plan`はimmutable private保持済み。通常assistantメッセージ／Markdownで完成message（ある場合）と完成title/body（新PRだけ）を別code blockに表示する。緑色の成功枠を含むtool結果には表示しない。bash等のstdout／status toolを文章表示に使わない。scope／Stage／scanner、元branch保持と予定branch、remote／実URL／target／upstream、PR repo／head／base／base SHA／通常かDraft、既存PR URL・状態、操作一式もまとめる。
+`phase=plan`はimmutable private保持済み。`payloadRemoved=true`を確認し、返された新referenceだけを採用する。通常assistantメッセージ／Markdownで完成message（ある場合）と完成title/body（新PRだけ）を別code blockに表示する。緑色の成功枠を含むtool結果には表示しない。bash等のstdout／status toolを文章表示に使わない。scope／Stage／scanner、元branch保持と予定branch、remote／実URL／target／upstream、PR repo／head／base／base SHA／通常かDraft、既存PR URL・状態、操作一式もまとめる。
 
 表示後に一回の`ask_user_question`で`提示内容で実行`／`commit文章を修正`（新commitだけ）／`PR文章を修正`（新PRだけ）／`実行設定を修正`／`キャンセル`＋Other自由回答を求める。question／label／description／previewには全文を入れず、表示済み内容を参照する短い質問・操作名・説明だけ。toolがなければ通常テキストで同じ選択肢と回答待ち。script成功／参照存在は承認でない。no-confirmは通常承認だけ省略し同じ最終一式を表示する。
 
@@ -57,7 +57,7 @@ messageはcommitNeeded=trueだけ。newBranchは必要なときだけ。PR title
 - PRのみ修正: 現referenceと`pr:{title:...}`または`pr:{body:...}`または両方だけ。messageと未指定PR側bytesを保持する。
 - 旧参照は失効。毎回同じ表示規則で質問前に最終一式を再提示・再承認する。
 - branch／scope／remote／base／Draft等の設定変更はcleanup→新inspectから影響準備を取り直す。Stage残存を説明し、固定文章は保持しつつ影響材料を読み直し再確認する。driftを新値への自動再準備で吸収しない。
-- cancelはcleanup、Stage保持。残操作のない既存PRは`phase=existing_pr`でURL・状態だけ報告し不要な通常承認なし。
+- cancelはcleanup、Stage保持。残操作のない既存PRは`phase=existing_pr`で`cleanup.complete`と残存を確認してURL・状態を報告し不要な通常承認なし。
 
 ## 3. execute: 承認後は参照だけ
 

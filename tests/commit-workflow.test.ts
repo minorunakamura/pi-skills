@@ -83,6 +83,24 @@ function fixture(t: { after: (fn: () => void) => void }, unborn = false) {
   return { owned, repo, git, cli, env };
 }
 
+function assertPayloadRemoved(value: Record<string, unknown>) {
+  assert.equal(value.payloadRemoved, true);
+  const ref = value.reference as {
+    directory: string;
+    files: Record<string, unknown>;
+  };
+  for (const name of [
+    "diff.bin",
+    "history.bin",
+    "pr-diff.bin",
+    "pr-history.bin",
+    "pr-templates.bin",
+  ]) {
+    assert.equal(name in ref.files, false, name);
+    assert.equal(existsSync(join(ref.directory, name)), false, name);
+  }
+}
+
 for (const [kind, payload] of [
   ["invalid UTF-8", Buffer.from('{"message":"SECRET_INPUT\xff"}', "binary")],
   ["invalid JSON", Buffer.from('{"SECRET_INPUT":')],
@@ -168,6 +186,8 @@ await test("plan retains the fixed message bytes before approval", (t) => {
   });
   assert.equal(planned.exit, 0);
   assert.equal(planned.value.message, message);
+  assert.equal(planned.value.phase, "plan");
+  assertPayloadRemoved(planned.value);
   const ref = planned.value.reference as {
     directory: string;
     files: Record<string, unknown>;
@@ -448,6 +468,57 @@ await test("private bytes or symlink substitution is rejected without deleting t
   assert.equal(readFileSync(sentinel, "utf8"), "keep\n");
 });
 
+for (const replacement of [false, true]) {
+  await test(`plan failure ${replacement ? "rejects payload replacement" : "cleans owned payload"} and preserves unknown sentinel`, (t) => {
+    const f = fixture(t);
+    writeFileSync(join(f.repo, "example.txt"), "pending\n");
+    f.git("branch", "existing");
+    const materials = prepare(f, { mode: "commit" });
+    const ref = materials.value.reference as {
+      directory: string;
+      files: Record<string, unknown>;
+    };
+    const sentinel = join(ref.directory, "unknown");
+    writeFileSync(sentinel, "keep\n");
+    const diff = join(ref.directory, "diff.bin");
+    assert.equal(existsSync(diff), true);
+    if (replacement) writeFileSync(diff, "replacement\n");
+    const head = f.git("rev-parse", "HEAD");
+    const refs = f.git("show-ref");
+    const index = readFileSync(join(f.repo, ".git/index"));
+    const stopped = f.cli("plan", {
+      reference: ref,
+      newBranch: "existing",
+      message: "docs: pending\n",
+    });
+    assert.equal(stopped.exit, 1);
+    assert.equal(
+      stopped.value.error,
+      replacement ? "private_file_changed" : "branch_exists",
+    );
+    assert.equal(stopped.value.commitSucceeded, false);
+    assert.equal(stopped.value.stagedChangesPreserved, true);
+    if (replacement) {
+      // Validation fails before ownership is established; no cleanup can be claimed.
+      assert.equal(stopped.value.cleanup, undefined);
+      assert.equal(readFileSync(diff, "utf8"), "replacement\n");
+      for (const name of Object.keys(ref.files))
+        assert.equal(existsSync(join(ref.directory, name)), true);
+    } else {
+      assert.deepEqual(stopped.value.cleanup, {
+        complete: false,
+        remaining: [ref.directory],
+      });
+      for (const name of Object.keys(ref.files))
+        assert.equal(existsSync(join(ref.directory, name)), false);
+    }
+    assert.equal(readFileSync(sentinel, "utf8"), "keep\n");
+    assert.equal(f.git("rev-parse", "HEAD"), head);
+    assert.equal(f.git("show-ref"), refs);
+    assert.deepEqual(readFileSync(join(f.repo, ".git/index")), index);
+  });
+}
+
 for (const mode of ["pass", "detect", "failure"] as const) {
   await test(`whole Staged scanner ${mode} never exposes child output`, (t) => {
     const f = fixture(t);
@@ -537,7 +608,7 @@ await test("large materials disclose omission and allow several fixed ranges in 
   assert.equal(read.exit, 0);
   assert.equal((read.value.parts as unknown[]).length, 2);
   const released = f.cli("release", { reference: materials.value.reference });
-  assert.equal(released.value.payloadRemoved, true);
+  assertPayloadRemoved(released.value);
   const planned = f.cli("plan", {
     reference: released.value.reference,
     message: "docs: large example\n",
@@ -1400,6 +1471,13 @@ function pushPlan(
       : {}),
   });
   assert.equal(planned.exit, 0, JSON.stringify(planned.value));
+  if (planned.value.phase === "already_pushed")
+    assert.equal(
+      existsSync(
+        (materials.value.reference as { directory: string }).directory,
+      ),
+      false,
+    );
   return planned;
 }
 for (const existing of [false, true]) {
@@ -1474,6 +1552,7 @@ for (const existing of [false, true]) {
     );
     assert.equal(again.value.phase, "already_pushed");
     assert.equal(again.value.pushSent, false);
+    assert.deepEqual(again.value.cleanup, { complete: true, remaining: [] });
     assert.equal(existsSync(join(f.owned, "push-hook")), false);
     assert.equal(f.git("rev-parse", "HEAD"), sha);
   });
@@ -2147,7 +2226,16 @@ function preparePrPlan(
       : {}),
   });
   assert.equal(pending.exit, 0, JSON.stringify(pending.value));
-  if (pending.value.phase !== "materials") return pending;
+  if (pending.value.phase !== "materials") {
+    if (pending.value.phase === "existing_pr")
+      assert.equal(
+        existsSync(
+          (materials.value.reference as { directory: string }).directory,
+        ),
+        false,
+      );
+    return pending;
+  }
   return f.cli("plan", {
     reference: pending.value.reference,
     pr: {
@@ -2265,6 +2353,10 @@ await test("PR pending plan cannot execute, retains branch/message without resen
     message: "docs: retain\n",
   });
   assert.equal(pending.exit, 0, JSON.stringify(pending.value));
+  assert.equal(pending.value.phase, "materials");
+  assert.equal(pending.value.executable, false);
+  assertPayloadRemoved(pending.value);
+  assert.notDeepEqual(pending.value.reference, materials.value.reference);
   assert.equal(
     f.cli("execute", { reference: materials.value.reference }).exit,
     1,
@@ -2288,6 +2380,7 @@ for (const state of ["OPEN", "CLOSED", "MERGED"]) {
     const planned = preparePrPlan(f);
     assert.equal(planned.exit, 0, JSON.stringify(planned.value));
     assert.equal(planned.value.phase, "existing_pr");
+    assert.deepEqual(planned.value.cleanup, { complete: true, remaining: [] });
     assert.equal(planned.value.commitCreated, false);
     assert.equal(planned.value.pushSent, false);
     assert.deepEqual(readFileSync(join(f.owned, "pr-state.json")), before);
