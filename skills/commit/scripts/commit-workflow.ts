@@ -1401,7 +1401,11 @@ try {
     branchCreated,
     ...(observed ? { observed } : {}),
     stagedChangesPreserved: true,
-    ...(owned ? { cleanup: cleanup(owned) } : {}),
+    ...(owned
+      ? code === "material_display_budget_exceeded"
+        ? { materialsPreserved: true, reference: owned }
+        : { cleanup: cleanup(owned) }
+      : {}),
   };
   console.log(JSON.stringify(result));
   process.exitCode = 1;

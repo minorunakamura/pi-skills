@@ -48,7 +48,8 @@ Stageは通常承認より先。キャンセル・失敗でもStageが残り得�
 
 - `phase=empty`はcommitなし・通常承認なしで結果だけ報告する。
 - `phase=materials`は返された新しいreferenceだけを使う。小diffなら一覧／本文／必要な直近履歴を一括で返す（JSON表示予算約32KiB）。履歴は明示形式・言語を補うために使い、WHY・Issue番号・未実施テスト成功を創作しない。
-- `displayed=false`なら未表示を明示する。全体一覧と量を把握し、必要な複数箇所を固定材料から一括読取する。`read`へ`{"reference":REFERENCE,"parts":[{"name":"diff","offset":0,"length":4000},{"name":"diff","offset":12000,"length":3000},{"name":"history","offset":0,"length":300}]}`のようにbytes範囲をまとめる。実際のtotalBytesを超えない。合計表示予算を超えると拒否する。追加一覧は`fileOffset`／`fileCount`、partsは空配列でもよい。`encoding=base64`はbytesを失わず解釈し、binary／不明変更の意味は推測しない。
+- `displayed=false`なら未表示を明示する。全体一覧と量を把握し、必要な複数箇所を固定材料から一括読取する。`read`へ`{"reference":REFERENCE,"parts":[{"name":"diff","offset":0,"length":4000},{"name":"diff","offset":12000,"length":3000},{"name":"history","offset":0,"length":300}]}`のようにbytes範囲をまとめる。実際のtotalBytesを超えない。表示予算はread応答JSON全体で1回あたり32KiB（累計ではない）。本文のescape／base64化とメタデータも含むため余裕を取る。追加一覧は`fileOffset`／`fileCount`、partsは空配列でもよい。`encoding=base64`はbytesを失わず解釈し、binary／不明変更の意味は推測しない。
+- `read`のexit1／`error=material_display_budget_exceeded`かつ`materialsPreserved=true`は例外的に回復可能。応答の`reference`は同じ固定材料を保持する。cleanup／inspect／materialsや利用者へのSkill再実行依頼は行わず、`parts`の範囲・数や`fileCount`を減らして同じreadを再要求する。commit／push／PRの実行を許可する応答ではない。続行しないならcleanupし、質問前のrelease規則も維持する。他の失敗は従来どおり停止する。
 - `filesOmitted>0`／各totalBytesから未表示部分を説明する。file名・stat・lockfile／生成物という理由だけで理解済みにしない。機械的検査範囲は表示量で縮めない。固定材料を最新Git diffで置換しない。
 
 質問・通常承認の前に`release`（stdin `{"reference":REFERENCE}`）で不要diff／historyを削除し、返されたreferenceへ置換する。`plan`も自動でpayloadを削除する。保持するのは必要根拠／digest／確定文章だけ。
@@ -76,6 +77,6 @@ commit文章は今回のStaged材料から作る。タイトルはWHAT、本文�
 
 `phase=committed`のcommit SHA／branch／tree／全parents／raw本文digest／scanner／cleanupを通常assistantで報告する。raw本文は完全bytes一致、末尾LFなしの入力だけ1 LF追加を許す。branch ref／全親／tree／index／他refs／default根拠を照合する。empty commit／amendはしない。
 
-非0／不正応答／drift／失敗／成否不明なら後続mutationを停止する。`operationMayHaveSucceeded`は未実行と断定できない印、`branchMayHaveChanged`はbranch操作済みの可能性、`branchCreated`はbranch作成コマンド成功、`commitSucceeded`はcommit成功応答を区別する。post-checkout hookの失敗やbranch／index／他ref変更でもcommitへ続けない。branch作成だけ先行成功している場合も保持しrollbackしない。観測できたSHA／停止点／Stage残存を報告し、成功済みcommitをrollback／再commitしない。cleanupのcomplete=falseはGit成否とは別に残存を報告する。未知sentinel／差替え／他実行は削除しない。
+上記readの表示予算超過だけを除き、非0／不正応答／drift／失敗／成否不明なら後続mutationを停止する。`operationMayHaveSucceeded`は未実行と断定できない印、`branchMayHaveChanged`はbranch操作済みの可能性、`branchCreated`はbranch作成コマンド成功、`commitSucceeded`はcommit成功応答を区別する。post-checkout hookの失敗やbranch／index／他ref変更でもcommitへ続けない。branch作成だけ先行成功している場合も保持しrollbackしない。観測できたSHA／停止点／Stage残存を報告し、成功済みcommitをrollback／再commitしない。cleanupのcomplete=falseはGit成否とは別に残存を報告する。未知sentinel／差替え／他実行は削除しない。
 
-捕捉可能な失敗でも所有物だけcleanupする。参照検証不能なら所有と断定して削除しない。照合と操作は完全atomicではなく、任意の強制中断でcleanup／報告が必達とは保証しない。同時に他processからGit状態を変更しない。
+回復可能なread表示予算超過では準備を保持し、それ以外の捕捉可能な失敗では所有物だけcleanupする。参照検証不能なら所有と断定して削除しない。照合と操作は完全atomicではなく、任意の強制中断でcleanup／報告が必達とは保証しない。同時に他processからGit状態を変更しない。
