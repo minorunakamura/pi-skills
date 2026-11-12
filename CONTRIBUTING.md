@@ -41,13 +41,21 @@ remote／実push URL／target／upstreamを確定表示します。branchは通�
 
 commit-prは[PR用Bun手順](skills/commit/references/pr-bun.md)でbranch全体の固定diff／履歴／templateと同repo／認証／権限／base／既存PRを新commit前に準備します。通常PR既定、明示Draft優先、既存PRは全state非編集／非重複。具体branchを準備するplanが文章未確定なら非実行可能materials参照を返し、必要文章を補って完成planを通常承認します。片側文章だけの修正は他方bytesを保持し旧参照失効、設定修正はcleanupから影響準備をやり直します。承認後executeは参照だけ、固定SHA送信とPR全文／head／base／SHA readback、drift／異常応答後停止・先行成功保持を行います。汎用engineや旧CLI／schema互換adapterはありません。
 
-直接確認は[検証Skill](.pi/skills/verify-project/SKILL.md)から[ローカルBun手順](.pi/skills/verify-project/references/local-bun.md)を選びます。fresh Piの通常承認／cancel／no-confirm／default実質問・未回答Stage0／Bun不足／非対応／確認不能のGit変更前停止と実Gitを照合します。pushは[専用Bun検証手順](.pi/skills/verify-project/references/push-bun.md)、PR入口は[PR用Bun検証手順](.pi/skills/verify-project/references/pr-bun.md)を使います。共有RPC／metric／fixture helperはNode24で実行し、read,bashだけのfresh Piを使います。model/thinkingは通常解決を記録し比較条件と照合、認証の独自read/copy/logは禁止。RPC通常テキスト承認はask_user_questionのTUI実証でありません。
+直接確認は[検証Skill](.pi/skills/verify-project/SKILL.md)から[ローカルBun手順](.pi/skills/verify-project/references/local-bun.md)を選びます。fresh Piの通常承認／cancel／no-confirm／default実質問・未回答Stage0／Bun不足／非対応／確認不能のGit変更前停止と実Gitを照合します。pushは[専用Bun検証手順](.pi/skills/verify-project/references/push-bun.md)、PR入口は[PR用Bun検証手順](.pi/skills/verify-project/references/pr-bun.md)を使います。共有RPC／metric／fixture helperはNode24で実行し、既定はread,bashだけのfresh Piです。専用toolの直接確認は[commit_inspect検証手順](.pi/skills/verify-project/references/commit-inspect.md)で明示extensionとplain allowlistを選択し、実TUI／nonTUI／cancel／reloadを区別して確認します。model/thinkingは通常解決を記録し比較条件と照合、認証の独自read/copy/logは禁止。RPC通常テキスト承認はask_user_questionのTUI実証でありません。
 
 production変更前のread-only archiveで旧commitと新commitを同じ小diff／history／明示文章／通常承認で1組比較します。provider／model／thinkingは通常解決を照合し、無断変更しません。承認前／後／全体時間、利用者待機、全assistant request、生成codeと固定呼出し／payload、取得可能usage・失敗・unknownを分け、nested toolを二重加算しません。構造改善と時間効果を分け、単発観測を安定した高速化の証明と呼びません。変更前baselineがすでにBun版ならPython→Bunの速度効果とは呼ばず、条件差・比較不能・未実証を明記します。
 
 #### 状態一覧の色付き表示
 
-同梱の`extensions/commit-status.js`は、取得済みの状態JSONを表示するだけの`commit_status_display` toolを追加します。Git操作はせず、公開CLI `inspect`の`branch/changes[].path/index/worktree/originalPath?`を含むJSON表示入力は変更しません。Pi packageとして導入した場合はmanifestの指定に従って読み込まれ、`/reload`後に使えます。Pi 1.3.0を対象としています。
+同梱の`extensions/commit-status.js`はmodel-onlyの`commit_inspect`でBun確認→保護起動inspect→状態表示を1回に連結します。入力はrepository実ルート絶対pathと、明示mode（commit／commit-main／push／pr）を含む既存inspectのJSON文字列です。任意command／runtime／scripts指定は受け付けず、symlink導入でも配布元実体のCLIを使います。Bun 1.3.0以上の実行可能な絶対実体を確認し、trusted scripts cwd・空の同梱TOML・env-file=/dev/null・no-install・BUN_OPTIONS／NODE_OPTIONS除去をprobeとinspectの両方に適用します。開始後の失敗からfallback／installはしません。
+
+成功にはexit0・完全JSON・inspect固有のreference／branchPolicy／default／evidence／questions／pathBytes等の構造検証が必要です（正常inspectにphaseなし）。content末尾JSONとdetailsは同じ`{bun,result}`で完全材料を保持し、後続CLIは同じBun絶対実体と完全referenceを無改変で使います。CLIの所有・digest・repository検証は維持し、Stage以降を自動連結しません。inspectはGit mutationなしでもprivate準備を作るため、readOnlyHint／idempotentHintはfalseです。
+
+実行と描画を分離し、TUIはdetailsからrenderResultで次LLM応答を待たず表示、通常assistantに同じ一覧を繰り返しません。RPC／JSON／printには色なし一覧と完全材料をcontentに残します。print stdoutは最終assistantだけなので標準sessionのtoolResultも観測します。rendererの色生成失敗だけ同じデータで色なしへ代替し、再inspectしません。不正応答・取得失敗は代替対象でありません。PiのrenderResult第一引数はcontent/details、失敗判定は第四引数context.isErrorです。取得後cancelのdetails.resultを成功一覧として描きません。
+
+通常cancelで完全な信頼できるreference取得済みなら、同じBunと所有検証CLIでcleanupし、abort済みsignalを引き継がず上限と終了確認を持たせます。取得前・切断JSON等は成功／cleanup済みとせず残存可能性を明示し、未知directoryを探索削除しません。最終isErrorとcleanup成否・child終了確認を区別し、任意強制中断での返却必達や永続registry／reloadをまたぐ自動復旧は保証しません。
+
+既存`commit_status_display`は取得済みJSON表示だけ・Git操作なしの互換toolとして維持し、入力とannotationsは変更しません。Pi packageのmanifestで読み込まれ、追加・更新後に新sessionまたは`/reload`で使えます。今回の実TUI直接確認はPi 1.4.0が対象です。4 Skill入口の新tool利用・release分岐・一括readと速度比較は別の接続作業であり、tool単独の確認から完了を推定しません。
 
 絵文字ではないテキストの`●`だけを色付けし、状態名・ファイル名は通常色で表示します。このtoolは標準の色付き背景枠を使わず、通常背景に一覧を表示します。theme設定や他のtoolの表示は変更しません。
 
@@ -58,7 +66,7 @@ production変更前のread-only archiveで旧commitと新commitを同じ小diff�
 | Added | `success` | 緑色 |
 | Deleted | `error` | 赤色 |
 
-部分StageはStaged/Unstagedを分け、rename/copyは元パスも表示します。色は有効なthemeに従います。toolがない環境やTUI以外では通常のテキスト表示を使います。承認・検査の手順は変わりません。
+部分StageはStaged/Unstagedを分け、rename/copyは元パスも表示します。色は有効なthemeに従います。toolが開始時から未導入／非公開なら既存Bun確認＋CLI inspect＋通常textを使います（開始後失敗のfallbackとは区別）。TUI以外ではtool contentの通常textを使います。完成commit／PR文章・操作一式と明示承認は通常assistantで別途表示し、tool contentを承認表示に流用しません。承認・検査の手順は変わりません。
 
 スキルだけをsymlinkで導入している場合は、cloneしたリポジトリのルートから表示extensionもリンクできます。既存ファイルは上書きしません。
 

@@ -55,6 +55,32 @@ export function summarize(records: Observation[]) {
     requestStopReasons: requests.map((record) => record.stopReason),
     outerToolDurationsMs: tools.map((record) => record.durationMs),
     wholeAssistantRequests: allRequests.length,
+    turns: allRequests.map((record, turn) => ({
+      turn: turn + 1,
+      tools: (record.toolCalls as Observation[]).map((call) => {
+        const start = records.find(
+          (item) =>
+            item.type === "tool_execution_start" && item.toolCallId === call.id,
+        );
+        const end = records.find(
+          (item) =>
+            item.type === "tool_execution_end" && item.toolCallId === call.id,
+        );
+        return {
+          id: call.id,
+          name: call.name,
+          argumentsBytes: start?.args
+            ? Buffer.byteLength(JSON.stringify(start.args))
+            : "unknown",
+          resultBytes: end?.resultBytes ?? "unknown",
+          read: call.name === "read" ? (start?.args ?? "unknown") : null,
+        };
+      }),
+    })),
+    semanticRoundtrips: "unknown",
+    transcribedPayloadBytes: "unknown",
+    inspectInternalSeconds: "unknown",
+    tuiRenderedAt: "unknown",
     preApprovalSeconds: waiting
       ? Number(waiting.receivedMonotonic) - Number(first.receivedMonotonic)
       : null,

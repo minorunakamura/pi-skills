@@ -1,10 +1,12 @@
 # commit / commit-main: Bun公開CLIとfresh Pi入口
 
+専用toolの明示extension／allowlist、実TUI即時表示・nonTUI・cancel／reloadは[commit_inspect手順](commit-inspect.md)を選ぶ。下の無extension経路は従来CLI／tool未導入対照として維持し、専用toolの実証には使わない。
+
 対象は両ローカル入口。製品手順は[同梱Bun手順](../../../../skills/commit/references/local-bun.md)。pushは[専用Bun手順](push-bun.md)、PRは[専用Bun手順](pr-bun.md)を使う。旧3run／Codemode回数／性能閾値を今回へ流用しない。以下だけでfresh setupから再実行する。正式checks・独立Review・受入はRootの担当。
 
 ## 前提・fresh setup
 
-macOS sandbox-exec、導入済みGit／Node24／Bun1.3.0+／Pi、正常なPi認証が必要。runtimeをinstallせず、shimでなく確認済み絶対実体を指定する。Bunなしcaseでも観測者は絶対Node実体で起動する。Piの導入版`docs/{rpc.md,rpc-commands.md,json.md,message-types.md,cli.md}`を読む。auth独自read／copy／log禁止。ambient Extensions／MCP／contextを読み込ませず、model／thinkingは通常解決に任せ、diagnosticや意図しないfallbackを成功扱いしない。
+macOS sandbox-exec、導入済みGit／Node24／Bun1.3.0+／Pi、正常なPi認証が必要。runtimeをinstallせず、shimでなく確認済み絶対実体を指定する。Bunなしcaseでも観測者は絶対Node実体で起動する。Piの導入版`docs/{rpc.md,rpc-commands.md,json.md,message-types.md,cli.md}`を読む。auth独自read／copy／log禁止。ambient Extensions／MCP／contextを読み込ませず（`--no-context-files`だけではglobal SYSTEM／APPEND_SYSTEMを防がないため、既存RPCはowned空regular fileの`--system-prompt`と固定isolation文の`--append-system-prompt`を明示）、model／thinkingは通常解決に任せ、diagnosticや意図しないfallbackを成功扱いしない。
 
 Bashでrepository rootから実行する。`SOURCE`は製品source、検証mutationは新しい`OWNED/repo`だけ。以下の絶対実体はその環境で確認して代入し、利用者設定を変更しない。
 

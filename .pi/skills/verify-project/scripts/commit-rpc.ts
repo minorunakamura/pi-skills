@@ -121,6 +121,8 @@ async function main() {
     allowPositionals: true,
     options: {
       request: { type: "string", default: "/skill:commit-main" },
+      extension: { type: "string", multiple: true },
+      tools: { type: "string", default: "read,bash" },
       answer: { type: "string" },
       "answer-file": { type: "string" },
       "follow-up-file": { type: "string", multiple: true },
@@ -153,6 +155,11 @@ async function main() {
   );
   const [repo, skill, evidence] = positionals.map((path) => resolve(path));
   const selectedSkill = realpathSync(skill);
+  const extensions = (values.extension ?? []).map((path) => realpathSync(path));
+  assert(
+    /^[a-z_]+(?:,[a-z_]+)*$/.test(values.tools),
+    "Plain tool allowlist required",
+  );
   const owned = realpathSync(dirname(evidence));
   process.umask(0o077);
   mkdirSync(evidence, { mode: 0o700 });
@@ -171,6 +178,8 @@ async function main() {
   const remotePolicy = values["fixture-remote"]
     ? "Only the owned local bare Git remote and gh/ssh fixtures in PATH are allowed. Never contact external GitHub or any real Git remote. "
     : "Do not perform remote Git/network operations. ";
+  const systemPrompt = resolve(evidence, "empty-system.md");
+  writeFileSync(systemPrompt, "", { flag: "wx", mode: 0o600 });
   const child = spawn(
     "/usr/bin/sandbox-exec",
     [
@@ -181,6 +190,7 @@ async function main() {
       "rpc",
       "--no-session",
       "--no-extensions",
+      ...extensions.flatMap((path) => ["--extension", path]),
       "--no-mcp",
       "--no-skills",
       "--skill",
@@ -191,7 +201,9 @@ async function main() {
       "--offline",
       "--no-approve",
       "--tools",
-      "read,bash",
+      values.tools,
+      "--system-prompt",
+      systemPrompt,
       "--append-system-prompt",
       "This is a disposable commit verification. Operate only in the target cwd repository and owned HOME/TMPDIR. Read the supplied Skill and its references/scripts, but do not modify them. Do not access credentials, user files, or settings through tools. Do not install anything. " +
         remotePolicy +
@@ -321,8 +333,14 @@ async function main() {
               }
             } else if (
               type === "tool_execution_start" ||
-              type === "tool_execution_end"
+              type === "tool_execution_end" ||
+              (type === "tool_execution_update" &&
+                event.toolName === "commit_inspect")
             ) {
+              if (event.result)
+                event.resultBytes = Buffer.byteLength(
+                  JSON.stringify(event.result),
+                );
               if (event.toolName === "read") delete event.result;
               record(event);
             } else if (type === "message_end") {

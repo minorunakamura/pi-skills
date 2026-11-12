@@ -1,5 +1,21 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  chmodSync,
+  writeFileSync,
+} from "node:fs";
 import { registerHooks } from "node:module";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 // Pi supplies these modules; only the host boundary is stubbed in Node tests.
@@ -21,12 +37,14 @@ registerHooks({
   },
 });
 const { default: register } = await import("../extensions/commit-status.js");
-let tool;
+const tools = new Map();
 register({
   registerTool(value) {
-    tool = value;
+    tools.set(value.name, value);
   },
 });
+const tool = tools.get("commit_status_display");
+const inspectTool = tools.get("commit_inspect");
 
 function state(changes = []) {
   return { repository: "/repo", branch: "feature", changes };
@@ -176,4 +194,454 @@ await test("rejects malformed metadata without echoing invalid JSON", async () =
     tool.execute("display", { status: "SECRET_INVALID_JSON" }, null, null, {}),
     { message: "Invalid Git status metadata" },
   );
+});
+
+const scripts = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../skills/commit/scripts",
+);
+const bun = realpathSync(
+  spawnSync("which", ["bun"], { encoding: "utf8" }).stdout.trim(),
+);
+
+function inspectFixture(t) {
+  const owned = realpathSync(
+    mkdtempSync(join(tmpdir(), "commit-inspect-test-")),
+  );
+  const repo = join(owned, "repo");
+  const bin = join(owned, "bin");
+  mkdirSync(repo);
+  mkdirSync(bin);
+  symlinkSync(bun, join(bin, "bun"));
+  symlinkSync("/usr/bin/git", join(bin, "git"));
+  const previous = { ...process.env };
+  Object.assign(process.env, {
+    HOME: owned,
+    TMPDIR: owned,
+    PATH: bin,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+  });
+  t.after(() => {
+    for (const key of Object.keys(process.env)) {
+      if (!(key in previous)) delete process.env[key];
+    }
+    Object.assign(process.env, previous);
+    rmSync(owned, { recursive: true, force: true });
+  });
+  const git = (...args) => {
+    const result = spawnSync("/usr/bin/git", args, { cwd: repo });
+    assert.equal(result.status, 0);
+    return result.stdout;
+  };
+  git("init", "-b", "main");
+  writeFileSync(join(repo, "partial.txt"), "staged\n");
+  git("add", "partial.txt");
+  writeFileSync(join(repo, "partial.txt"), "unstaged\n");
+  writeFileSync(join(repo, "new.txt"), "new\n");
+  const cli = (operation, reference) => {
+    const env = { ...process.env };
+    delete env.BUN_OPTIONS;
+    delete env.NODE_OPTIONS;
+    const result = spawnSync(
+      bun,
+      [
+        `--config=${join(scripts, "bunfig.toml")}`,
+        "--env-file=/dev/null",
+        "--no-install",
+        join(scripts, "commit-workflow.ts"),
+        operation,
+        "--repository",
+        repo,
+      ],
+      { cwd: scripts, env, input: JSON.stringify({ reference }) },
+    );
+    assert.equal(result.status, 0);
+    return JSON.parse(result.stdout.toString());
+  };
+  return { owned, repo, bin, git, cli };
+}
+
+await test("commit_inspect preserves complete real inspect data and uses protected Bun", async (t) => {
+  const f = inspectFixture(t);
+  // Repository startup files and ambient runtime options must never run.
+  writeFileSync(join(f.repo, "bunfig.toml"), 'preload = ["./hostile.ts"]\n');
+  writeFileSync(
+    join(f.repo, "hostile.ts"),
+    'throw new Error("SECRET_STARTUP");',
+  );
+  process.env.BUN_OPTIONS = "--preload=SECRET_STARTUP";
+  process.env.NODE_OPTIONS = "--require=SECRET_STARTUP";
+  const index = readFileSync(join(f.repo, ".git/index"));
+  assert.equal(inspectTool.exposure, "model-only");
+  assert.notEqual(inspectTool.annotations.readOnlyHint, true);
+  assert.notEqual(inspectTool.annotations.idempotentHint, true);
+  for (const mode of ["tui", "rpc", "json", "print"]) {
+    const result = await inspectTool.execute(
+      "inspect",
+      {
+        repository: f.repo,
+        input: '{"mode":"commit","scope":{"kind":"staged"}}',
+      },
+      undefined,
+      undefined,
+      { mode },
+    );
+    assert.notEqual(result.isError, true, JSON.stringify(result));
+    const retained = JSON.parse(result.content.at(-1).text);
+    assert.deepEqual(retained, result.details);
+    assert.equal(retained.bun, bun);
+    const data = retained.result;
+    assert.equal(data.branch, "main");
+    assert.equal(data.head, null);
+    assert.equal(data.branchPolicy.mode, "commit");
+    assert.equal(data.default.kind, "absent");
+    assert.deepEqual(data.evidence, {
+      remotes: [],
+      heads: [],
+      observationFailed: false,
+    });
+    assert.deepEqual(data.questions, {
+      default: false,
+      outsideStaged: [],
+      suspicious: [],
+    });
+    assert.equal(data.localInformationMayBeStale, true);
+    assert.equal(data.reference.repository, f.repo);
+    assert.match(data.reference.run, /^[\da-f-]{36}$/);
+    const identities = Object.values(data.reference.files);
+    assert.equal(identities.length, 1);
+    assert.match(identities[0].digest, /^[\da-f]{64}$/);
+    assert.ok(identities[0].bytes > 0);
+    assert.deepEqual(
+      data.changes.find((change) => change.path === "partial.txt"),
+      {
+        path: "partial.txt",
+        pathBytes: "cGFydGlhbC50eHQ=",
+        index: "A",
+        worktree: "M",
+      },
+    );
+    assert.deepEqual(readFileSync(join(f.repo, ".git/index")), index);
+    const text = result.content[0].text;
+    if (mode === "tui") {
+      assert.doesNotMatch(text, /●|Branch:/);
+      assert.match(text, /重複/);
+    } else {
+      assert.match(text, /Branch: "main"/);
+      assert.match(
+        text,
+        /Added \[Staged\].*Modified \[Unstaged\].*"partial.txt"/,
+      );
+      assert.equal(text.includes("\u001b"), false);
+    }
+    const rendered = inspectTool.renderResult(
+      result,
+      {},
+      { fg: (_color, text) => text },
+      { outputPad: 2 },
+    );
+    assert.match(rendered.text, /Untracked.*"new.txt"/);
+    assert.equal(rendered.paddingX, 2);
+    assert.equal(f.cli("cleanup", data.reference).cleanup.complete, true);
+    assert.equal(existsSync(data.reference.directory), false);
+  }
+});
+
+await test("commit_inspect falls back only from renderer color failure using retained data", async (t) => {
+  const f = inspectFixture(t);
+  const result = await inspectTool.execute(
+    "inspect",
+    { repository: f.repo, input: '{"mode":"commit"}' },
+    undefined,
+    undefined,
+    { mode: "tui" },
+  );
+  assert.notEqual(result.isError, true);
+  try {
+    const before = JSON.stringify(result);
+    const rendered = inspectTool.renderResult(
+      result,
+      {},
+      {
+        fg() {
+          throw new Error("SECRET_THEME");
+        },
+      },
+      { outputPad: 1 },
+    );
+    assert.match(rendered.text, /Branch: "main"/);
+    assert.match(rendered.text, /Untracked.*"new.txt"/);
+    assert.doesNotMatch(rendered.text, /SECRET_THEME/);
+    assert.equal(rendered.text.includes("\u001b"), false);
+    assert.equal(JSON.stringify(result), before);
+    // Rendering remains possible with no runtime available; it must not re-inspect.
+    process.env.PATH = "";
+    assert.equal(
+      inspectTool.renderResult(
+        result,
+        {},
+        {
+          fg() {
+            throw new Error();
+          },
+        },
+        { outputPad: 1 },
+      ).text,
+      rendered.text,
+    );
+  } finally {
+    assert.equal(
+      f.cli("cleanup", result.details.result.reference).cleanup.complete,
+      true,
+    );
+  }
+});
+
+await test("commit_inspect stops at its fixed input and protected runtime boundaries", async (t) => {
+  const f = inspectFixture(t);
+  const before = {
+    index: readFileSync(join(f.repo, ".git/index")),
+    refs: f.git("for-each-ref"),
+    branch: f.git("symbolic-ref", "HEAD"),
+    worktree: readFileSync(join(f.repo, "partial.txt")),
+  };
+  const params = { repository: f.repo, input: '{"mode":"commit"}' };
+  const rejected = await inspectTool.execute(
+    "inspect",
+    { ...params, command: "SECRET_COMMAND" },
+    undefined,
+    undefined,
+    { mode: "rpc" },
+  );
+  try {
+    assert.equal(rejected.isError, true);
+  } finally {
+    if (rejected.details.result)
+      f.cli("cleanup", rejected.details.result.reference);
+  }
+  const missingMode = await inspectTool.execute(
+    "inspect",
+    { ...params, input: "{}" },
+    undefined,
+    undefined,
+    { mode: "rpc" },
+  );
+  assert.equal(missingMode.details.error, "invalid_input");
+  for (const boundary of [
+    "missing",
+    "script shim",
+    "invalid native probe",
+    "oversized native probe",
+  ]) {
+    unlinkSync(join(f.bin, "bun"));
+    if (boundary === "script shim") {
+      writeFileSync(
+        join(f.bin, "bun"),
+        '#!/bin/sh\n/bin/echo SECRET_SHIM\n: > "$HOME/SHIM_RAN"\n',
+      );
+      chmodSync(join(f.bin, "bun"), 0o700);
+    } else if (boundary === "invalid native probe") {
+      symlinkSync("/usr/bin/true", join(f.bin, "bun"));
+    } else if (boundary === "oversized native probe") {
+      symlinkSync("/usr/bin/yes", join(f.bin, "bun"));
+    }
+    const result = await inspectTool.execute(
+      "inspect",
+      params,
+      undefined,
+      undefined,
+      { mode: "rpc" },
+    );
+    assert.equal(result.isError, true, boundary);
+    assert.match(result.details.error, /Bun 1\.3\.0\+/);
+    assert.equal(result.details.processExitConfirmed, true);
+    if (boundary === "oversized native probe")
+      assert.equal(result.details.probeFailure, "output_limit");
+    assert.equal(result.details.result, undefined);
+    assert.doesNotMatch(JSON.stringify(result), /SECRET_SHIM|SECRET_COMMAND/);
+    assert.equal(existsSync(join(f.owned, "SHIM_RAN")), false);
+    if (boundary === "missing") symlinkSync(bun, join(f.bin, "bun"));
+  }
+  assert.deepEqual(readFileSync(join(f.repo, ".git/index")), before.index);
+  assert.deepEqual(f.git("for-each-ref"), before.refs);
+  assert.deepEqual(f.git("symbolic-ref", "HEAD"), before.branch);
+  assert.deepEqual(readFileSync(join(f.repo, "partial.txt")), before.worktree);
+});
+
+await test("commit_inspect cancels a running child before reference without claiming cleanup", async (t) => {
+  const f = inspectFixture(t);
+  unlinkSync(join(f.bin, "git"));
+  writeFileSync(
+    join(f.bin, "git"),
+    '#!/bin/sh\nif [ "$1" = status ]; then\n  /bin/echo "$$" > "$HOME/paused-git"\n  exec /bin/sleep 30\nfi\nexec /usr/bin/git "$@"\n',
+  );
+  chmodSync(join(f.bin, "git"), 0o700);
+  const controller = new AbortController();
+  let updates = 0;
+  const pending = inspectTool.execute(
+    "inspect",
+    { repository: f.repo, input: '{"mode":"commit"}' },
+    controller.signal,
+    () => {
+      updates++;
+    },
+    { mode: "tui" },
+  );
+  const until = Date.now() + 5000;
+  try {
+    while (!existsSync(join(f.owned, "paused-git")) && Date.now() < until)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(
+      existsSync(join(f.owned, "paused-git")),
+      true,
+      "real inspect reached Git observation",
+    );
+  } finally {
+    controller.abort();
+  }
+  const result = await pending;
+  assert.equal(result.isError, true);
+  assert.equal(result.details.error, "cancelled");
+  assert.equal(result.details.processExitConfirmed, true);
+  assert.equal(result.details.result, undefined);
+  assert.equal(result.details.cleanup, undefined);
+  assert.match(result.details.privatePreparation, /Unconfirmed.*may remain/);
+  assert.equal(updates, 0);
+  const pid = Number(readFileSync(join(f.owned, "paused-git"), "utf8").trim());
+  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+});
+
+await test("commit_inspect returns final cancellation and owned cleanup after a retained reference update", async (t) => {
+  const f = inspectFixture(t);
+  const index = readFileSync(join(f.repo, ".git/index"));
+  const controller = new AbortController();
+  let update;
+  const result = await inspectTool.execute(
+    "inspect",
+    { repository: f.repo, input: '{"mode":"commit"}' },
+    controller.signal,
+    (value) => {
+      update = value;
+      controller.abort();
+    },
+    { mode: "tui" },
+  );
+  assert.ok(update.details.result.reference);
+  assert.equal(result.isError, true);
+  assert.equal(result.details.error, "cancelled");
+  assert.deepEqual(result.details.result, update.details.result);
+  assert.equal(result.details.bun, bun);
+  assert.equal(result.details.cleanup.confirmed, true);
+  assert.equal(result.details.cleanup.processExitConfirmed, true);
+  assert.equal(result.details.cleanup.result.cleanup.complete, true);
+  assert.equal(existsSync(result.details.result.reference.directory), false);
+  assert.deepEqual(readFileSync(join(f.repo, ".git/index")), index);
+  assert.deepEqual(JSON.parse(result.content[0].text), result.details);
+  assert.doesNotMatch(
+    inspectTool.renderResult(
+      { content: result.content, details: result.details },
+      {},
+      {},
+      { outputPad: 1, isError: result.isError },
+    ).text,
+    /Branch:/,
+  );
+  const failedUpdate = await inspectTool.execute(
+    "inspect",
+    { repository: f.repo, input: '{"mode":"commit"}' },
+    undefined,
+    () => {
+      throw new Error("SECRET_CALLBACK");
+    },
+    { mode: "tui" },
+  );
+  assert.equal(failedUpdate.isError, true);
+  assert.equal(failedUpdate.details.error, "result_update_failed");
+  assert.equal(failedUpdate.details.cleanup.result.cleanup.complete, true);
+  assert.doesNotMatch(JSON.stringify(failedUpdate), /SECRET_CALLBACK/);
+});
+
+await test("commit_inspect rejects corrupt subprocess output rather than trusting display metadata", async (t) => {
+  const f = inspectFixture(t);
+  const normal = await inspectTool.execute(
+    "inspect",
+    { repository: f.repo, input: '{"mode":"commit"}' },
+    undefined,
+    undefined,
+    { mode: "rpc" },
+  );
+  assert.notEqual(normal.isError, true);
+  const distribution = join(f.owned, "distribution");
+  const extension = join(distribution, "extensions/commit-status.js");
+  const fixedScripts = join(distribution, "skills/commit/scripts");
+  mkdirSync(dirname(extension), { recursive: true });
+  mkdirSync(fixedScripts, { recursive: true });
+  writeFileSync(
+    extension,
+    readFileSync(new URL("../extensions/commit-status.js", import.meta.url)),
+  );
+  writeFileSync(
+    join(fixedScripts, "bunfig.toml"),
+    readFileSync(join(scripts, "bunfig.toml")),
+  );
+  const { default: registerFaultDistribution } = await import(extension);
+  let faultTool;
+  registerFaultDistribution({
+    registerTool(value) {
+      if (value.name === "commit_inspect") faultTool = value;
+    },
+  });
+  const missing = structuredClone(normal.details.result);
+  delete missing.changes[0].pathBytes;
+  const invalidPolicy = structuredClone(normal.details.result);
+  invalidPolicy.branchPolicy.push = {};
+  const invalidDigest = structuredClone(normal.details.result);
+  Object.values(invalidDigest.reference.files)[0].digest = ["a".repeat(64)];
+  const validBytes = Buffer.from(JSON.stringify(normal.details.result));
+  const corrupt = Buffer.concat([
+    Buffer.from('{"branch":"SECRET_INVALID'),
+    Buffer.from([0xff]),
+    Buffer.from('",'),
+    validBytes.subarray(1),
+  ]);
+  // Actual Bun and protected arguments, but deliberately faulty subprocess responses.
+  try {
+    for (const bytes of [
+      Buffer.from('SECRET_FRAGMENT {"branch":'),
+      Buffer.from(JSON.stringify(missing)),
+      Buffer.from(JSON.stringify(invalidPolicy)),
+      Buffer.from(JSON.stringify(invalidDigest)),
+      corrupt,
+    ]) {
+      writeFileSync(
+        join(fixedScripts, "commit-workflow.ts"),
+        `process.stdout.write(Buffer.from(${JSON.stringify(bytes.toString("base64"))}, "base64"));`,
+      );
+      const result = await faultTool.execute(
+        "inspect",
+        { repository: f.repo, input: '{"mode":"commit"}' },
+        undefined,
+        undefined,
+        { mode: "rpc" },
+      );
+      assert.equal(result.isError, true);
+      assert.equal(result.details.result, undefined);
+      assert.match(result.details.error, /invalid_inspect_result/);
+      assert.match(result.details.privatePreparation, /Unconfirmed/);
+      assert.doesNotMatch(
+        JSON.stringify(result),
+        /SECRET_FRAGMENT|SECRET_INVALID/,
+      );
+      assert.doesNotMatch(
+        faultTool.renderResult(result, {}, {}, { outputPad: 1 }).text,
+        /Branch:/,
+      );
+    }
+  } finally {
+    assert.equal(
+      f.cli("cleanup", normal.details.result.reference).cleanup.complete,
+      true,
+    );
+  }
 });
