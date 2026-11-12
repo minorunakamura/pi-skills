@@ -35,13 +35,15 @@ materialsで全Staged diffをGitleaks検査します。未導入だけunavailabl
 
 [commit-push](skills/commit-push/SKILL.md)から[push用Bun手順](skills/commit/references/push-bun.md)を全文読みます。local＋pushを同ターンで読み、起動のtool選択と保護形は共有local手順を使います。新commit／既存HEADを区別し、事前push準備・確定文章／操作のprivate保持・通常assistant一括確認後、参照だけexecuteで必要branch／commit／固定SHA push／送信readback／予定upstream／cleanupまで進みます。既存HEADはmessage／commit不要、同SHA再pushなし、HEADも対象diffもなければ通信なし。PR準備／gh APIは0です。
 
-remote／実push URL／target／upstreamを確定表示します。branchは通信したremote defaultとmainで判断し、local2入口のdefault質問は転用しません。通常main／remote default宛てを拒否し、明示初回mainだけ全remote空（tag等もなし）かつ送信元／予定／宛先mainで許可。通常hooks有効、余分refs／tag／submodule非送信、必要object不足は非fetch。drift／異常／成否不明は後続停止し、先行branch／commit／push成功、事後照合／upstream／cleanup失敗を区別します。Bun必須条件とGit変更前停止はローカル2入口と共通であり、開始後の失敗でも別経路へ切り替えません。
+remote／実push URL／target／upstreamを確定表示します。push／PRでは予定branchのremote／merge設定が両方未設定なら送信確認後にpush先をupstreamに自動設定し、既存設定（片側だけ／空値／値なしも含む）は保持します。明示的な設定不要は`setUpstream:false`で保持し、明示`true`でも異なる既存設定は上書きしません。同SHA送信済みなら再pushせず未設定upstreamだけ設定します。ローカルcommit単体では設定しません。branchは通信したremote defaultとmainで判断し、local2入口のdefault質問は転用しません。通常main／remote default宛てを拒否し、明示初回mainだけ全remote空（tag等もなし）かつ送信元／予定／宛先mainで許可。通常hooks有効、余分refs／tag／submodule非送信、必要object不足は非fetch。drift／異常／成否不明は後続停止し、先行branch／commit／push成功、事後照合／upstream／cleanup失敗を区別します。Bun必須条件とGit変更前停止はローカル2入口と共通であり、開始後の失敗でも別経路へ切り替えません。
 
 ### PR入口と移行完了
 
 #47でlocal2入口／push、#48でPR本体／PR-onlyをBunへ移行し、#49で対応検証と照合して旧Python製品／tests／開発設定／CI呼出し／配布を撤去しました。4入口すべてBun必須で、開発検証もPython不要です。既存local `.venv`／cacheと過去証拠は残存artifactとして保持し、新しい開発前提にはしません。
 
 commit-prは[PR用Bun手順](skills/commit/references/pr-bun.md)でbranch全体の固定diff／履歴／templateと同repo／認証／権限／base／既存PRを新commit前に準備します。通常PR既定、明示Draft優先、既存PRは全state非編集／非重複。具体branchを準備するplanが文章未確定なら非実行可能materials参照を返し、必要文章を補って完成planを通常承認します。片側文章だけの修正は他方bytesを保持し旧参照失効、設定修正はcleanupから影響準備をやり直します。承認後executeは参照だけ、固定SHA送信とPR全文／head／base／SHA readback、drift／異常応答後停止・先行成功保持を行います。汎用engineや旧CLI／schema互換adapterはありません。
+
+関連Issueはユーザー指定・明示文脈を根拠に`gh issue view`等で内容と完了条件を確認します。PR全体で解決するなら本文に`Closes #123`、関連のみ／一部なら`Refs #123`（別repositoryは`owner/repo#123`）を記し、最終一括確認に含めます。番号を創作せず、固定本文に無断追記せず、既存PRを編集せず、Issueを直接closeしません。自動Closeはdefault branchへのmerge時で、別baseではそのmergeで自動Closeされないことを説明します。
 
 直接確認は[検証Skill](.pi/skills/verify-project/SKILL.md)から[ローカルBun手順](.pi/skills/verify-project/references/local-bun.md)を選びます。fresh Piの通常承認／cancel／no-confirm／default実質問・未回答Stage0／Bun不足／非対応／確認不能のGit変更前停止と実Gitを照合します。pushは[専用Bun検証手順](.pi/skills/verify-project/references/push-bun.md)、PR入口は[PR用Bun検証手順](.pi/skills/verify-project/references/pr-bun.md)を使います。共有RPC／metric／fixture helperはNode24で実行し、helperの既定read,bashだけはtool未導入対照として保持し、通常Skill検証では明示extensionとread,bash,commit_inspectを使います。専用toolの直接確認は[commit_inspect検証手順](.pi/skills/verify-project/references/commit-inspect.md)で明示extensionとplain allowlistを選択し、実TUI／nonTUI／cancel／reloadを区別して確認します。model/thinkingは通常解決を記録し比較条件と照合、認証の独自read/copy/logは禁止。RPC通常テキスト承認はask_user_questionのTUI実証でありません。
 

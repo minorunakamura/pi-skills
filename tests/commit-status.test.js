@@ -348,6 +348,39 @@ await test("commit_inspect preserves complete real inspect data and uses protect
   }
 });
 
+for (const mode of ["push", "pr"]) {
+  for (const setUpstream of [undefined, false, true]) {
+    await test(`commit_inspect ${mode} retains upstream ${setUpstream ?? "auto"} without schema rejection`, async (t) => {
+      const f = inspectFixture(t);
+      f.git("remote", "add", "origin", join(f.owned, "remote.git"));
+      const result = await inspectTool.execute(
+        "inspect",
+        {
+          repository: f.repo,
+          input: JSON.stringify({
+            mode,
+            push: {
+              remote: "origin",
+              ...(setUpstream === undefined ? {} : { setUpstream }),
+            },
+            ...(mode === "pr"
+              ? { pr: { repository: "github.com/example/repo" } }
+              : {}),
+          }),
+        },
+        undefined,
+        undefined,
+        { mode: "rpc" },
+      );
+      assert.notEqual(result.isError, true, JSON.stringify(result));
+      const data = result.details.result;
+      assert.equal(data.branchPolicy.push.setUpstream, setUpstream ?? null);
+      assert.deepEqual(JSON.parse(result.content.at(-1).text), result.details);
+      assert.equal(f.cli("cleanup", data.reference).cleanup.complete, true);
+    });
+  }
+}
+
 await test("commit_inspect falls back only from renderer color failure using retained data", async (t) => {
   const f = inspectFixture(t);
   const result = await inspectTool.execute(
