@@ -428,12 +428,7 @@ await test("commit_inspect stops at its fixed input and protected runtime bounda
     { mode: "rpc" },
   );
   assert.equal(missingMode.details.error, "invalid_input");
-  for (const boundary of [
-    "missing",
-    "script shim",
-    "invalid native probe",
-    "oversized native probe",
-  ]) {
+  for (const boundary of ["missing", "script shim", "invalid native probe"]) {
     unlinkSync(join(f.bin, "bun"));
     if (boundary === "script shim") {
       writeFileSync(
@@ -443,8 +438,6 @@ await test("commit_inspect stops at its fixed input and protected runtime bounda
       chmodSync(join(f.bin, "bun"), 0o700);
     } else if (boundary === "invalid native probe") {
       symlinkSync("/usr/bin/true", join(f.bin, "bun"));
-    } else if (boundary === "oversized native probe") {
-      symlinkSync("/usr/bin/yes", join(f.bin, "bun"));
     }
     const result = await inspectTool.execute(
       "inspect",
@@ -456,8 +449,6 @@ await test("commit_inspect stops at its fixed input and protected runtime bounda
     assert.equal(result.isError, true, boundary);
     assert.match(result.details.error, /Bun 1\.3\.0\+/);
     assert.equal(result.details.processExitConfirmed, true);
-    if (boundary === "oversized native probe")
-      assert.equal(result.details.probeFailure, "output_limit");
     assert.equal(result.details.result, undefined);
     assert.doesNotMatch(JSON.stringify(result), /SECRET_SHIM|SECRET_COMMAND/);
     assert.equal(existsSync(join(f.owned, "SHIM_RAN")), false);
@@ -562,7 +553,7 @@ await test("commit_inspect returns final cancellation and owned cleanup after a 
   assert.doesNotMatch(JSON.stringify(failedUpdate), /SECRET_CALLBACK/);
 });
 
-await test("commit_inspect rejects corrupt subprocess output rather than trusting display metadata", async (t) => {
+await test("commit_inspect rejects corrupt or oversized subprocess output rather than trusting display metadata", async (t) => {
   const f = inspectFixture(t);
   const normal = await inspectTool.execute(
     "inspect",
@@ -605,19 +596,26 @@ await test("commit_inspect rejects corrupt subprocess output rather than trustin
     Buffer.from('",'),
     validBytes.subarray(1),
   ]);
+  const faults = [
+    Buffer.from('SECRET_FRAGMENT {"branch":'),
+    Buffer.from(JSON.stringify(missing)),
+    Buffer.from(JSON.stringify(invalidPolicy)),
+    Buffer.from(JSON.stringify(invalidDigest)),
+    corrupt,
+  ].map((bytes) => ({
+    script: `process.stdout.write(Buffer.from(${JSON.stringify(bytes.toString("base64"))}, "base64"));`,
+    error: "invalid_inspect_result",
+  }));
+  faults.push({
+    // Stay alive until the output guard terminates Bun, not an OS-dependent yes utility.
+    script:
+      "process.stdout.write(Buffer.alloc(16 * 1024 * 1024 + 1)); setInterval(() => {}, 1000);",
+    error: "output_limit",
+  });
   // Actual Bun and protected arguments, but deliberately faulty subprocess responses.
   try {
-    for (const bytes of [
-      Buffer.from('SECRET_FRAGMENT {"branch":'),
-      Buffer.from(JSON.stringify(missing)),
-      Buffer.from(JSON.stringify(invalidPolicy)),
-      Buffer.from(JSON.stringify(invalidDigest)),
-      corrupt,
-    ]) {
-      writeFileSync(
-        join(fixedScripts, "commit-workflow.ts"),
-        `process.stdout.write(Buffer.from(${JSON.stringify(bytes.toString("base64"))}, "base64"));`,
-      );
+    for (const { script, error } of faults) {
+      writeFileSync(join(fixedScripts, "commit-workflow.ts"), script);
       const result = await faultTool.execute(
         "inspect",
         { repository: f.repo, input: '{"mode":"commit"}' },
@@ -627,7 +625,8 @@ await test("commit_inspect rejects corrupt subprocess output rather than trustin
       );
       assert.equal(result.isError, true);
       assert.equal(result.details.result, undefined);
-      assert.match(result.details.error, /invalid_inspect_result/);
+      assert.equal(result.details.error, error);
+      assert.equal(result.details.processExitConfirmed, true);
       assert.match(result.details.privatePreparation, /Unconfirmed/);
       assert.doesNotMatch(
         JSON.stringify(result),
