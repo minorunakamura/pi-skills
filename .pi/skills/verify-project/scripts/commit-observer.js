@@ -50,6 +50,8 @@ export function observeCommit(pi, record, abortAfterReference) {
   pi.on("message_end", (event) => {
     if (event.message.role === "assistant")
       record(assistantRecord(event.message));
+    else if (event.message.role === "user")
+      record({ type: "user_received", timestamp: event.message.timestamp });
   });
   for (const type of [
     "tool_execution_start",
@@ -57,9 +59,23 @@ export function observeCommit(pi, record, abortAfterReference) {
     "tool_execution_end",
   ]) {
     pi.on(type, (event, ctx) => {
-      if (event.toolName !== "commit_inspect") return;
-      record(event);
       if (
+        !["read", "bash", "commit_status_display", "commit_inspect"].includes(
+          event.toolName,
+        ) ||
+        (type === "tool_execution_update" &&
+          event.toolName !== "commit_inspect")
+      )
+        return;
+      const observation = { ...event };
+      if (event.result)
+        observation.resultBytes = Buffer.byteLength(
+          JSON.stringify(event.result),
+        );
+      if (event.toolName === "read") delete observation.result;
+      record(observation);
+      if (
+        event.toolName === "commit_inspect" &&
         type === "tool_execution_update" &&
         abortAfterReference &&
         !aborted &&

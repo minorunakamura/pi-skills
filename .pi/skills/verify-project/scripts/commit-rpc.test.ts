@@ -333,3 +333,64 @@ await test("commit-observer records the public reference update before ordinary 
   assert.equal(aborts, 1);
   assert.equal(JSON.stringify(update), original);
 });
+
+await test("commit-observer records Skill read sets and old/new outer tool payload metrics without mutating events", () => {
+  type Handler = (event: Record<string, unknown>) => unknown;
+  const handlers = new Map<string, Handler>();
+  const records: Record<string, unknown>[] = [];
+  observeCommit(
+    { on: (name: string, handler: Handler) => handlers.set(name, handler) },
+    (event: Record<string, unknown>) => records.push(event),
+    false,
+  );
+  for (const toolName of [
+    "read",
+    "bash",
+    "commit_status_display",
+    "commit_inspect",
+  ]) {
+    const args =
+      toolName === "read"
+        ? { path: "local-bun.md", offset: 1 }
+        : { fixture: true };
+    const result = {
+      content: [{ type: "text", text: "fixture result" }],
+      details: {},
+    };
+    const start = {
+      type: "tool_execution_start",
+      toolName,
+      toolCallId: toolName,
+      args,
+    };
+    const end = {
+      type: "tool_execution_end",
+      toolName,
+      toolCallId: toolName,
+      result,
+      durationMs: 1,
+    };
+    const original = JSON.stringify(end);
+    handlers.get("tool_execution_start")?.(start);
+    handlers.get("tool_execution_end")?.(end);
+    assert.deepEqual(records.at(-2), start);
+    assert.equal(
+      records.at(-1)?.resultBytes,
+      Buffer.byteLength(JSON.stringify(result)),
+    );
+    assert.deepEqual(
+      records.at(-1)?.result,
+      toolName === "read" ? undefined : result,
+    );
+    assert.equal(JSON.stringify(end), original);
+  }
+  const count = records.length;
+  handlers.get("tool_execution_update")?.({
+    toolName: "bash",
+    partialResult: { content: "omit" },
+  });
+  handlers.get("tool_execution_start")?.({ toolName: "unrelated" });
+  assert.equal(records.length, count);
+  handlers.get("message_end")?.({ message: { role: "user", timestamp: 123 } });
+  assert.deepEqual(records.at(-1), { type: "user_received", timestamp: 123 });
+});

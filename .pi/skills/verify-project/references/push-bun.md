@@ -1,6 +1,6 @@
 # commit-push: Bun公開CLI／fresh Pi／Bun必須停止
 
-専用toolの明示extension／allowlist、実TUI即時表示・nonTUI・cancel／reloadは[commit_inspect手順](commit-inspect.md)を選ぶ。下の無extension経路は従来CLI／tool未導入対照として維持し、専用toolの実証には使わない。
+専用toolの明示extension／allowlist、実TUI即時表示・nonTUI・cancel／reloadは[commit_inspect手順](commit-inspect.md)を選ぶ。通常Skill操作は以下の明示extension／allowlistで行い、tool未導入対照だけ両optionを外してread,bashの既定を使う。開始後失敗を対照へ切り替えない。
 
 対象はpushだけ。PR準備／APIは0。製品の[push手順](../../../../skills/commit/references/push-bun.md)を使う。local2入口の無通信／default質問をpushへ転用しない。正式checks／独立Review／受入はRoot担当、全Map／Maintainは不要。
 
@@ -30,12 +30,15 @@ export PATH="$OWNED/bin:$(dirname "$VERIFY_BUN"):/usr/bin:/bin"
 
 通常pre-push hookが受け取るSHA refspec／通常hook有効、followTags／mirror／submodule設定があっても余分refsなし、最初のpositive fetch mapping先だけが元値のままか予定SHAとなることを確認する。negative等のrefspecにより未更新の場合もあるので、wildcard更新／exact＋negative未更新（後続local-head mappingの有無）／予定upstreamの正常対照と、任意SHA／他ref変更の拒否を選ぶ。mapping先がlocal branch／tagまたはsymbolic ref（未解決含む）ならcommit／branch／push前に拒否し、元ref／HEAD／全refs／設定／Stageを保持する。plan後のsymbolic化も操作前拒否、正常custom mapping／mappingなしは成功する対照を選ぶ。準備後宛先／remote drift、commit後URL変更停止、hook非0、送信後local drift／upstream失敗の先行成功と後続停止を選ぶ。内部handler成功固定で実操作を消さない。local2入口の無通信等の回帰も保持する。
 
+[共有W2接続・read／release照合](local-bun.md#w2-通常skill接続readrelease分岐の照合)も適用する。
+
 ## fresh Pi通常一括承認
 
-read,bashだけの既存RPCを使い、Codemode／追加extensionなし。以下を完成・digest固定済みの使捨てdriver、または保持する同じ対話Bashで実行し、PIDと親PIDを直後に記録する。
+明示製品extensionとread,bash,commit_inspectの既存RPCを使い、Codemode／ambient extensionなし。以下を完成・digest固定済みの使捨てdriver、または保持する同じ対話Bashで実行し、PIDと親PIDを直後に記録する。
 
 ```bash
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.ts" \
+  --extension "$SOURCE/extensions/commit-status.js" --tools read,bash,commit_inspect \
   "$OWNED/repo" "$SOURCE/skills/commit-push/SKILL.md" "$OWNED/evidence" \
   --fixture-remote --answer-file "$OWNED/answer" \
   --request '/skill:commit-push README.mdだけ。remote origin。upstreamを設定。commit messageは正確に docs: explain local example と末尾LF。' \

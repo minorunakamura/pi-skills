@@ -1,6 +1,6 @@
 # commit_inspect: 取得・即時表示・nonTUI・cancel・reload
 
-初期対象は専用toolだけ。4 Skill入口の新tool選択・release分岐・一括read・前後比較は別の確認であり、この手順の成功から推定しない。実Pi 1.4.0を対象とする。色生成失敗／不正応答は`tests/commit-status.test.js`の限定testで確認し、実端末を壊さない。
+初期対象は専用toolだけ。4 Skill入口の新tool選択・release分岐・一括read・前後比較は[共有W2照合](local-bun.md#w2-通常skill接続readrelease分岐の照合)と組み合わせ、この手順のtool単独成功から推定しない。実Pi 1.4.0を対象とする。色生成失敗／不正応答は`tests/commit-status.test.js`の限定testで確認し、実端末を壊さない。
 
 ## fresh setupと公開入口
 
@@ -72,7 +72,7 @@ EOF
 
 `session_start`だけで入力可能とせず、`capture-pane -p`でeditor／footerと[Context]がowned空fileだけ、[Extensions]が明示2つだけと確認する。`pids`のparentとPi PIDを外側`ps -o pid,ppid,pgid,stat,comm -p ...`で照合し、専有PGIDを記録する（Pi PID=PGIDとは限らない）。sandbox内ps禁止を迂回しない。pane内の同じ親がwaitしてexitを保存するので、別shellから無効なwaitをしない。外側controllerをbackgroundにするならそのcontrollerも同じ親でwaitする。
 
-無秘密fixture専用の観測extension`../scripts/commit-observer.js`を明示`-e`で追加できる。`VERIFY_COMMIT_OBSERVATIONS="$OWNED/observations.jsonl"`（parent0700・file0600、symlink不可）を指定する。公開toolイベント／assistantの非thinking記録／最初の本文delta時刻／reload時の過去commit_inspect content/detailsだけを記録し、tool実行・renderer・provider応答を置換しない。run前self-checkは`node --test .pi/skills/verify-project/scripts/commit-rpc.test.ts`。logに秘密を含まないfixtureだけで使う。
+無秘密fixture専用の観測extension`../scripts/commit-observer.js`を明示`-e`で追加できる。`VERIFY_COMMIT_OBSERVATIONS="$OWNED/observations.jsonl"`（parent0700・file0600、symlink不可）を指定する。read／bash／commit_status_display／commit_inspectの公開start/end（read結果本文は除去、resultBytesとread引数は保持）、commit_inspectだけの公開update、user時刻／assistantの非thinking記録／最初の本文delta時刻／reload時の過去commit_inspect content/detailsを記録し、tool実行・renderer・provider応答を置換しない。run前self-checkは`node --test .pi/skills/verify-project/scripts/commit-rpc.test.ts`。logに秘密を含まないfixtureだけで使う。
 
 `send-keys -l`でprompt、入力反映を待って別呼出しで`send-keys Enter`（paste処理が未完了なら再度Enter）。`capture-pane -p`と`capture-pane -p -e`（属性付き）を時刻付きで取得する。`-a`はinactive alternate screenなので使わない。tool更新を検知したら繰り返しcaptureし、一覧の見えるsnapshotと次assistant本文の最初のdeltaを対応させる。**tool終了時刻を描画時刻と呼ばない**。モデルが速すぎて間のsnapshotがなければ順序は未確認。snapshotは実PTYのtmux解釈済みセルであり物理terminal screenshotではない。
 

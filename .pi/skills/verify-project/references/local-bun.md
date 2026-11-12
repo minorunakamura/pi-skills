@@ -1,6 +1,6 @@
 # commit / commit-main: Bun公開CLIとfresh Pi入口
 
-専用toolの明示extension／allowlist、実TUI即時表示・nonTUI・cancel／reloadは[commit_inspect手順](commit-inspect.md)を選ぶ。下の無extension経路は従来CLI／tool未導入対照として維持し、専用toolの実証には使わない。
+専用toolの明示extension／allowlist、実TUI即時表示・nonTUI・cancel／reloadは[commit_inspect手順](commit-inspect.md)を選ぶ。通常Skill操作は以下の明示extension／allowlistで行い、tool未導入対照だけ両optionを外してread,bashの既定を使う。開始後失敗を対照へ切り替えない。
 
 対象は両ローカル入口。製品手順は[同梱Bun手順](../../../../skills/commit/references/local-bun.md)。pushは[専用Bun手順](push-bun.md)、PRは[専用Bun手順](pr-bun.md)を使う。旧3run／Codemode回数／性能閾値を今回へ流用しない。以下だけでfresh setupから再実行する。正式checks・独立Review・受入はRootの担当。
 
@@ -70,15 +70,29 @@ commitの追加代表は、inspect(mode=commit)→materials→plan(newBranch)→
 
 手作業で公開CLIを独立確認する場合は[製品手順](../../../../skills/commit/references/local-bun.md)の起動からinspect→materials→plan→executeへ進む。本文／設定はplan前だけ渡し、executeは参照だけ。実Gitの親／tree／全refs／branch／index／raw本文と照合する。内部handlerや成功mockで代用しない。
 
+## W2: 通常Skill接続・read／release分岐の照合
+
+以下の通常例は製品extension有効、同じhelperから両optionを外したread,bashだけのfresh runは開始時toolなし対照とする。対照では保護Bun確認→CLI inspect→通常テキスト一覧、旧表示tool0を期待する。tool開始後の失敗から対照へ切り替えない。
+
+- `operations.jsonl`のassistant.toolCallsとread引数を突き合わせ、入口の全文read一式が同じassistant turnから発行されたことを確認する。commit／commit-mainはlocal、pushはlocal＋push、PRはlocal＋push＋PR＋diff-review。切断のtail取得を後続操作より前に確認する。PR > push > localで、local無通信／default質問がpush／PRへ漏れない。
+- 通常起動は実repository・明示modeの`commit_inspect`1回。手動probe／CLI inspect／status JSON転記／旧表示tool／assistantの重複一覧0。完全結果／referenceと返された絶対Bunが全後続保護CLIに引き継がれることを実引数と照合する。意味理解・完成文章／操作一式・実質問・通常承認は別の通常assistant表示。
+- 追加質問なしのmaterials→planは独立release0。完成またはPR中間planの`payloadRemoved=true`と、今回privateの5実体（diff.bin／history.bin／pr-diff.bin／pr-history.bin／pr-templates.bin）不在を提示・質問前に照合する。PR中間`phase=materials, executable=false`は承認・execute不可、返された新referenceで不足文章を補う。
+- 材料後に疑義質問が必要な代表は、固定材料取得後・plan前の質問を要するrequestを別fresh runで与え、release成功・新reference採用・5 bin不在が実質問より前であることを確認する。inspect時点の質問にはdiff payloadなし。想定外質問へ通常承認を送らない。
+- 実削除拒否はpayload差替えによる所有検証失敗と分ける。macOSの別fresh公開CLI代表でmaterials後の既知owned diff.binだけを追加sandbox規則`(deny file-write-unlink (literal "確認済みdiff.bin絶対path"))`で拒否し、通常のvalidate／readを許可したまま保護planを呼ぶ。通常対照は同条件の別freshでdenyなし。拒否時は非0・cleanup.complete=false／remainingと実payload残存・unknown sentinel保持・Stage保持、Git mutation0を確認し、自動retryしない。検証者のowned環境cleanupはprocess終了後、製品cleanupとは分けて記録する。
+- `already_pushed`／`existing_pr`はcleanup.complete／実directory不在と不要承認0。plan失敗／削除拒否は停止・返却cleanup／残存報告、所有検証不能時は未確認とし、unknown sentinel／差替え保持・reset／unstage／retry0を公開CLI代表で照合する。
+
+比較はlocalとPR各1組を同条件（小diff／固定履歴日時／scope／固定文章／通常承認／通常解決provider-model-thinking）で行う。read-only baselineを変更せず新旧で同じhelperを固定し、旧版の表示extensionは当時のまま`--tools read,bash,commit_status_display`で明示ロードする。metricのturn/read／arguments/result bytesからprobe・inspect・転記表示・release・readの往復を手分類し、観測不能はunknown。取得→実TUI一覧は別の時刻付きsnapshotで確認し、RPC終了時刻を描画時刻と呼ばない。秒数・usageと構造改善を区別し、条件差／待ち時間／nested二重計上を明示する。
+
 ## fresh Pi: commit通常承認とcancel
 
 下の標準例はdefault上のcommit。commit-main代表はSkillとrequestをcommit-mainへ置換し、新branchなし・main前進を期待する。作業branch維持no-confirmはbase commit後に`git switch -c feature/docs`してから同じ追記を行う。対象外保持を組み合わせる場合は`printf 'keep outside\n' > outside.txt`を追加し、requestを「README.mdだけを対象」とする。比較baselineも同じfixture／scopeにする。
 
-各caseで上記setupを新規に行う。標準はread,bashだけ、Codemode／追加extensionなし。共有RPC helperは接続・入力・観測だけで、Git操作や判断を代行しない。
+各caseで上記setupを新規に行う。標準は明示製品extensionとread,bash,commit_inspectだけ。Codemode／ambient extensionなし。共有RPC helperは接続・入力・観測だけで、Git操作や判断を代行しない。
 
 ```bash
 "$VERIFY_NODE" --test "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.test.ts"
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.ts" \
+  --extension "$SOURCE/extensions/commit-status.js" --tools read,bash,commit_inspect \
   "$OWNED/repo" "$SOURCE/skills/commit/SKILL.md" "$OWNED/evidence" \
   --request '/skill:commit README.mdだけを対象。commit messageは正確に docs: explain local example と末尾LF。' \
   --answer-file "$OWNED/answer" > "$OWNED/driver.out" 2> "$OWNED/driver.err" &
@@ -132,6 +146,7 @@ export PATH="$OWNED/bin"
 ! command -v bun && ! command -v python3 || exit 1
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/push-fixture.ts" snapshot "$OWNED" "$GIT" > "$OWNED/before-stop.json"
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.ts" \
+  --extension "$SOURCE/extensions/commit-status.js" --tools read,bash,commit_inspect \
   "$OWNED/repo" "$SOURCE/skills/commit/SKILL.md" "$OWNED/evidence" \
   --request '/skill:commit --no-confirm README.mdだけを対象。'
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/push-fixture.ts" snapshot "$OWNED" "$GIT" > "$OWNED/after-stop.json"
