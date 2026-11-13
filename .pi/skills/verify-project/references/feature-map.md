@@ -10,7 +10,7 @@
 
 ## 4入口のW2接続・往復削減
 
-[共有W2照合](local-bun.md#w2-通常skill接続readrelease分岐の照合)を通常extension有効のfresh Skillから行う。同ターン全文read一式／tail／PR > push > local、新tool直接1回・完全結果／同Bun引継ぎ・重複なし、独立releaseなしの直接plan・payloadRemovedと5 bin不在、疑義質問前release成功・新reference、PR中間非実行可能→新参照で文章補完、終了cleanup・不要承認なし、失敗／削除拒否の停止・残存を観測する。CLI assertionsや文言testをAgent動作実証にしない。無extension対照は別freshで維持し、開始後失敗のfallbackにしない。
+[共有W2照合](local-bun.md#w2-通常skill接続readrelease分岐の照合)を通常extension有効のfresh Skillから行う。同ターン全文read一式／tail／PR > push > local、新tool直接1回・完全結果／同Bun引継ぎ・重複なし、独立releaseなしの直接plan・payloadRemovedと6 bin不在（recent-history.binを含む）、疑義質問前release成功・新reference、PR中間非実行可能→新参照で文章補完、終了cleanup・不要承認なし、失敗／削除拒否の停止・残存を観測する。CLI assertionsや文言testをAgent動作実証にしない。無extension対照は別freshで維持し、開始後失敗のfallbackにしない。
 
 local／PR各1組の同条件baseline/finalを同じ固定helperで比較する。旧表示extensionは当時sourceを明示し、新toolへ差し替えない。全assistant request／turn read／probe／inspect転記／release／payload bytesを手分類し、LLM・tool・利用者待機／usage／unknownと実TUI描画時刻を分ける。秒数／固定短縮率を合否にしない。
 

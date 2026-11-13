@@ -59,7 +59,7 @@ printf '%s\n' "$?" > "$OWNED/driver-exit"
 
 ### PR中間planの最小代表
 
-修正／設定再準備の全follow-upを要しない場合は、別freshな既存履歴＋今回diffで最初のplanをcommit messageのみ（既存PR確認後、新PR文章を補完）とするrequestを使う。answer-fileは1つだけにする。`phase=materials, executable=false, payloadRemoved=true`・5 bin不在・新referenceを確認し、その参照でtitle/bodyを補って完成planへ進む。中間結果を通常承認／executeに使わず、完成後にだけ通常assistant全文提示→実回答→参照だけexecuteを観測する。
+修正／設定再準備の全follow-upを要しない場合は、別freshな既存履歴＋今回diffで最初のplanをcommit messageのみ（既存PR確認後、新PR文章を補完）とするrequestを使う。answer-fileは1つだけにする。`phase=materials, executable=false, payloadRemoved=true`・6 bin不在（recent-history.binを含む）・新referenceを確認し、その参照でtitle/bodyを補って完成planへ進む。中間結果を通常承認／executeに使わず、完成後にだけ通常assistant全文提示→実回答→参照だけexecuteを観測する。
 
 ## commit後／送信後driftと開始後fallbackなし
 

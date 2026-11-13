@@ -76,8 +76,8 @@ commitの追加代表は、inspect(mode=commit)→materials→plan(newBranch)→
 
 - `operations.jsonl`のassistant.toolCallsとread引数を突き合わせ、入口の全文read一式が同じassistant turnから発行されたことを確認する。commit／commit-mainはlocal、pushはlocal＋push、PRはlocal＋push＋PR＋diff-review。切断のtail取得を後続操作より前に確認する。PR > push > localで、local無通信／default質問がpush／PRへ漏れない。
 - 通常起動は実repository・明示modeの`commit_inspect`1回。手動probe／CLI inspect／status JSON転記／旧表示tool／assistantの重複一覧0。完全結果／referenceと返された絶対Bunが全後続保護CLIに引き継がれることを実引数と照合する。意味理解・完成文章／操作一式・実質問・通常承認は別の通常assistant表示。
-- 追加質問なしのmaterials→planは独立release0。完成またはPR中間planの`payloadRemoved=true`と、今回privateの5実体（diff.bin／history.bin／pr-diff.bin／pr-history.bin／pr-templates.bin）不在を提示・質問前に照合する。PR中間`phase=materials, executable=false`は承認・execute不可、返された新referenceで不足文章を補う。
-- 材料後に疑義質問が必要な代表は、固定材料取得後・plan前の質問を要するrequestを別fresh runで与え、release成功・新reference採用・5 bin不在が実質問より前であることを確認する。inspect時点の質問にはdiff payloadなし。想定外質問へ通常承認を送らない。
+- 追加質問なしのmaterials→planは独立release0。完成またはPR中間planの`payloadRemoved=true`と、今回privateの6実体（diff.bin／history.bin／recent-history.bin／pr-diff.bin／pr-history.bin／pr-templates.bin）不在を提示・質問前に照合する。PR中間`phase=materials, executable=false`は承認・execute不可、返された新referenceで不足文章を補う。
+- 材料後に疑義質問が必要な代表は、固定材料取得後・plan前の質問を要するrequestを別fresh runで与え、release成功・新reference採用・6 bin不在（recent-history.binを含む）が実質問より前であることを確認する。inspect時点の質問にはdiff payloadなし。想定外質問へ通常承認を送らない。
 - 実削除拒否はpayload差替えによる所有検証失敗と分ける。macOSの別fresh公開CLI代表でmaterials後の既知owned diff.binだけを追加sandbox規則`(deny file-write-unlink (literal "確認済みdiff.bin絶対path"))`で拒否し、通常のvalidate／readを許可したまま保護planを呼ぶ。通常対照は同条件の別freshでdenyなし。拒否時は非0・cleanup.complete=false／remainingと実payload残存・unknown sentinel保持・Stage保持、Git mutation0を確認し、自動retryしない。検証者のowned環境cleanupはprocess終了後、製品cleanupとは分けて記録する。
 - `already_pushed`／`existing_pr`はcleanup.complete／実directory不在と不要承認0。plan失敗／削除拒否は停止・返却cleanup／残存報告、所有検証不能時は未確認とし、unknown sentinel／差替え保持・reset／unstage／retry0を公開CLI代表で照合する。
 
