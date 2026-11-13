@@ -400,6 +400,42 @@ for (const mode of ["push", "pr"]) {
   }
 }
 
+await test("commit_inspect reports missing push/PR options without changing Git", async (t) => {
+  const f = inspectFixture(t);
+  const index = readFileSync(join(f.repo, ".git/index"));
+  const refs = f.git("for-each-ref");
+  const status = f.git("status", "--porcelain=v1");
+  let updates = 0;
+  for (const input of [
+    { mode: "push" },
+    { mode: "pr" },
+    { mode: "pr", push: { remote: "origin" } },
+  ]) {
+    const result = await inspectTool.execute(
+      "inspect",
+      { repository: f.repo, input: JSON.stringify(input) },
+      undefined,
+      () => updates++,
+      { mode: "rpc" },
+    );
+    assert.equal(result.isError, true);
+    assert.equal(result.details.error, "inspect_failed");
+    assert.equal(result.details.cause, "invalid_input");
+    assert.equal(result.details.processExitConfirmed, true);
+    assert.equal(result.details.result, undefined);
+    assert.match(result.details.privatePreparation, /Unconfirmed/);
+    assert.deepEqual(JSON.parse(result.content[0].text), result.details);
+    assert.match(
+      inspectTool.renderResult(result, {}, {}, { outputPad: 1 }).text,
+      /"cause":"invalid_input"/,
+    );
+  }
+  assert.equal(updates, 0);
+  assert.deepEqual(readFileSync(join(f.repo, ".git/index")), index);
+  assert.deepEqual(f.git("for-each-ref"), refs);
+  assert.deepEqual(f.git("status", "--porcelain=v1"), status);
+});
+
 await test("commit_inspect falls back only from renderer color failure using retained data", async (t) => {
   const f = inspectFixture(t);
   const result = await inspectTool.execute(
@@ -550,6 +586,7 @@ await test("commit_inspect cancels a running child before reference without clai
   assert.equal(result.details.processExitConfirmed, true);
   assert.equal(result.details.result, undefined);
   assert.equal(result.details.cleanup, undefined);
+  assert.equal(result.details.cause, undefined);
   assert.match(result.details.privatePreparation, /Unconfirmed.*may remain/);
   assert.equal(updates, 0);
   const pid = Number(readFileSync(join(f.owned, "paused-git"), "utf8").trim());
@@ -610,7 +647,7 @@ await test("commit_inspect returns final cancellation and owned cleanup after a 
   assert.doesNotMatch(JSON.stringify(failedUpdate), /SECRET_CALLBACK/);
 });
 
-await test("commit_inspect rejects corrupt or oversized subprocess output rather than trusting display metadata", async (t) => {
+await test("commit_inspect only exposes allowlisted failure codes and rejects corrupt or oversized output", async (t) => {
   const f = inspectFixture(t);
   const normal = await inspectTool.execute(
     "inspect",
@@ -663,6 +700,48 @@ await test("commit_inspect rejects corrupt or oversized subprocess output rather
     script: `process.stdout.write(Buffer.from(${JSON.stringify(bytes.toString("base64"))}, "base64"));`,
     error: "invalid_inspect_result",
   }));
+  for (const cause of [
+    "invalid_input",
+    "invalid_push_input",
+    "invalid_pr_input",
+    "invalid_pr_repository",
+    "invalid_pr_base",
+  ]) {
+    faults.push({
+      script: `console.log(JSON.stringify({error: ${JSON.stringify(cause)}, message: "SECRET_DIAGNOSTIC", cleanup: {complete: true}, reference: "SECRET_REFERENCE"})); console.error("SECRET_STDERR"); process.exitCode = 1;`,
+      error: "inspect_failed",
+      cause,
+    });
+  }
+  for (const output of [
+    '{"error":"SECRET_UNKNOWN"}',
+    '{"error":"invalid_input", "message":"SECRET_FRAGMENT',
+    "null",
+    '[{"error":"invalid_input"}]',
+    '{"error":["invalid_input"]}',
+  ]) {
+    faults.push({
+      script: `process.stdout.write(${JSON.stringify(output)}); process.exitCode = 1;`,
+      error: "inspect_failed",
+    });
+  }
+  faults.push(
+    {
+      script:
+        'console.log(\'{"error":"invalid_input"}\'); process.exitCode = 2;',
+      error: "inspect_failed",
+    },
+    {
+      script:
+        'console.log(\'{"error":"invalid_input"}\'); process.kill(process.pid, "SIGTERM");',
+      error: "inspect_failed",
+    },
+    {
+      script:
+        'process.stdout.write(Buffer.concat([Buffer.from(\'{"error":"invalid_input","message":"\'), Buffer.from([0xff]), Buffer.from(\'"}\')])); process.exitCode = 1;',
+      error: "invalid_output_encoding",
+    },
+  );
   faults.push({
     // Stay alive until the output guard terminates Bun, not an OS-dependent yes utility.
     script:
@@ -671,7 +750,7 @@ await test("commit_inspect rejects corrupt or oversized subprocess output rather
   });
   // Actual Bun and protected arguments, but deliberately faulty subprocess responses.
   try {
-    for (const { script, error } of faults) {
+    for (const { script, error, cause } of faults) {
       writeFileSync(join(fixedScripts, "commit-workflow.ts"), script);
       const result = await faultTool.execute(
         "inspect",
@@ -683,12 +762,12 @@ await test("commit_inspect rejects corrupt or oversized subprocess output rather
       assert.equal(result.isError, true);
       assert.equal(result.details.result, undefined);
       assert.equal(result.details.error, error, JSON.stringify(result.details));
+      assert.equal(result.details.cause, cause);
+      assert.equal(result.details.cleanup, undefined);
+      assert.equal(result.content[0].text, JSON.stringify(result.details));
       assert.equal(result.details.processExitConfirmed, true);
       assert.match(result.details.privatePreparation, /Unconfirmed/);
-      assert.doesNotMatch(
-        JSON.stringify(result),
-        /SECRET_FRAGMENT|SECRET_INVALID/,
-      );
+      assert.doesNotMatch(JSON.stringify(result), /SECRET_/);
       assert.doesNotMatch(
         faultTool.renderResult(result, {}, {}, { outputPad: 1 }).text,
         /Branch:/,

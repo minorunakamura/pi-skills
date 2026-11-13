@@ -234,7 +234,7 @@ function discoverBun() {
   throw new Error("Bun executable required");
 }
 
-// Fixed Bun invocations only. Never expose child output on failures.
+// Fixed Bun invocations only. Never expose raw child output on failures.
 function runBun(bun, scripts, args, input, signal, timeout, limit) {
   return new Promise((done) => {
     if (signal?.aborted) {
@@ -377,7 +377,7 @@ export default function (pi) {
     exposure: "model-only",
     renderShell: "self",
     description:
-      "Discover and verify Bun 1.3.0+, run the bundled inspect CLI and display Git status. Creates private preparation, but does not Stage or commit. Supply the real absolute repository root and existing inspect JSON with explicit mode (commit, commit-main, push, pr). Preserve the complete result/reference and Bun path for subsequent CLI calls. Do not repeat the TUI list; approval remains separate. No fallback or automatic install after failure.",
+      "Discover and verify Bun 1.3.0+, run the bundled inspect CLI and display Git status. Creates private preparation, but does not Stage or commit. Supply the real absolute repository root and existing inspect JSON with explicit mode (commit, commit-main, push, pr). With HEAD or selected changes, push/pr require push.remote and pr also requires pr.repository ([HOST/]OWNER/REPO). Resolve destinations from explicit instructions/local config before calling; ask if ambiguous. Preserve the complete result/reference and Bun path for subsequent CLI calls. Do not repeat the TUI list; approval remains separate. No fallback or automatic install after failure.",
     parameters: Type.Object(
       { repository: Type.String(), input: Type.String() },
       { additionalProperties: false },
@@ -466,11 +466,38 @@ export default function (pi) {
           stage = "invalid_inspect_result";
           result = inspectResult(inspected.stdout, repository, parsed.mode);
         }
-        if (!result)
+        if (!result) {
+          let cause;
+          if (
+            inspected.code === 1 &&
+            inspected.exited &&
+            !inspected.failure &&
+            !signal?.aborted
+          ) {
+            try {
+              const value = JSON.parse(inspected.stdout);
+              // Only fixed input error codes may cross the subprocess boundary.
+              if (
+                object(value) &&
+                [
+                  "invalid_input",
+                  "invalid_push_input",
+                  "invalid_pr_input",
+                  "invalid_pr_repository",
+                  "invalid_pr_base",
+                ].includes(value.error)
+              )
+                cause = value.error;
+            } catch {
+              /* Invalid output remains unconfirmed. */
+            }
+          }
           return inspectFailure(inspected.failure ?? stage, {
             bun,
             processExitConfirmed,
+            ...(cause ? { cause } : {}),
           });
+        }
         const success = {
           content: [
             {
