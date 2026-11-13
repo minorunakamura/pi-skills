@@ -34,7 +34,7 @@ stdinは`{"reference":REFERENCE}`と必要な実回答だけ。状態照合→�
 - `commitNeeded=true`: commit文章は固定Stagedだけに基づく。scanner=unavailableは新commit未検査と明示。
 - `commitNeeded=false`: message／空commit／amendなし。既存HEADのbranch全体を扱い、既存履歴を今回Gitleaks検査済みと呼ばない。必要pushだけ、同SHA再pushなし。
 - gh認証account／WRITE以上の権限／同repo／default／base SHA／templateを取得。唯一のmerge-base(base, 親HEAD)→予定index treeの**branch全体diff**とbaseにない既存履歴を固定する。送信履歴`history`はPR全体の代用でない。必要object欠落／準備失敗は新commit前に停止し、勝手にpushだけへ縮小しない。
-- 小材料は一覧／Staged diff／送信履歴／`prDiff`／`prHistory`／`prTemplates`を一括。合計約32KiBを超えたら未表示を明示。`read`のpartsに`diff`／`history`／`pr-diff`／`pr-history`／`pr-templates`の複数bytes範囲をまとめる。totalBytesを守り、固定材料を最新Git diffで置換しない。入口で読んだ差分確認の規則を使う。readの`material_display_budget_exceeded`かつ`materialsPreserved=true`だけは準備を保持するため、応答のreferenceで要求量を減らして読み直す。Skill全体の再実行は不要。
+- 小材料は一覧／Staged diff／送信履歴／`recentHistory`／`prDiff`／`prHistory`／`prTemplates`を一括。新commitの言語・形式は共有local手順に従いHEADから直近最大5件の`recentHistory`で判定し、送信履歴・PR全体履歴は5件に制限しない。合計約32KiBを超えたら未表示を明示。`read`のpartsに`diff`／`history`／`recent-history`／`pr-diff`／`pr-history`／`pr-templates`の複数bytes範囲をまとめる。totalBytesを守り、固定材料を最新Git diffで置換しない。入口で読んだ差分確認の規則を使う。readの`material_display_budget_exceeded`かつ`materialsPreserved=true`だけは準備を保持するため、応答のreferenceで要求量を減らして読み直す。Skill全体の再実行は不要。
 - `pr.stagedDiffIdentical`は完全diffの一致、`pr.reusableStagedPathBytes`はpath bytes（base64）とold/new mode／OIDの一致した変更単位。同じpath／新blobだけでは再利用しない。一致した部分の今回の意味理解だけ再利用し、異なる部分・未読履歴・templateを確認する。一致は理解の認定でない。表示量で全Staged検査を縮めない。
 
 ここまででbranch名を決める意味材料が揃う。createBranch=trueならmain／通信defaultから、または明示新branchから未存在名1件を計画。falseなら現在作業branch維持。具体名を材料取得の前提にせず循環させない。

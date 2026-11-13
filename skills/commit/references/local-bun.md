@@ -49,7 +49,7 @@ stdinは`{"reference":REFERENCE}`に、**実回答がある場合だけ**上記�
 Stageは通常承認より先。キャンセル・失敗でもStageが残り得ることを説明する。reset／unstage禁止。全Staged binary diffをGitleaksで検査する。`scanner=unavailable`は**未導入の場合だけ**で「このcommitはGitleaks未検査」と明示する。PATH上に実行可能なscannerが見つかった後の起動失敗（interpreter欠落等）も検査失敗として停止する。検出／検査失敗は停止し、検査済みへ言い換えない。自動install／ignore追加／除外で回避しない。検出なしでもbinary・diff外・未知patternの秘密なしは保証しない。
 
 - `phase=empty`はcommitなし・通常承認なしで結果だけ報告する。
-- `phase=materials`は返された新しいreferenceだけを使う。小diffなら一覧／本文／必要な直近履歴を一括で返す（JSON表示予算約32KiB）。履歴は明示形式・言語を補うために使い、WHY・Issue番号・未実施テスト成功を創作しない。
+- `phase=materials`は返された新しいreferenceだけを使う。小diffなら一覧／本文／HEADから直近最大5件の件名・本文（`history`）を一括で返す（JSON表示予算約32KiB）。履歴は下記の言語・形式判定に使い、WHY・Issue番号・未実施テスト成功を創作しない。
 - `displayed=false`なら未表示を明示する。全体一覧と量を把握し、必要な複数箇所を固定材料から一括読取する。`read`へ`{"reference":REFERENCE,"parts":[{"name":"diff","offset":0,"length":4000},{"name":"diff","offset":12000,"length":3000},{"name":"history","offset":0,"length":300}]}`のようにbytes範囲をまとめる。実際のtotalBytesを超えない。表示予算はread応答JSON全体で1回あたり32KiB（累計ではない）。本文のescape／base64化とメタデータも含むため余裕を取る。追加一覧は`fileOffset`／`fileCount`、partsは空配列でもよい。`encoding=base64`はbytesを失わず解釈し、binary／不明変更の意味は推測しない。
 - `read`のexit1／`error=material_display_budget_exceeded`かつ`materialsPreserved=true`は例外的に回復可能。応答の`reference`は同じ固定材料を保持する。cleanup／inspect／materialsや利用者へのSkill再実行依頼は行わず、`parts`の範囲・数や`fileCount`を減らして同じreadを再要求する。commit／push／PRの実行を許可する応答ではない。続行しないならcleanupし、質問前のrelease規則も維持する。他の失敗は従来どおり停止する。
 - `filesOmitted>0`／各totalBytesから未表示部分を説明する。file名・stat・lockfile／生成物という理由だけで理解済みにしない。機械的検査範囲は表示量で縮めない。固定材料を最新Git diffで置換しない。
@@ -65,6 +65,13 @@ Stageは通常承認より先。キャンセル・失敗でもStageが残り得�
 名前の不正／衝突（未解決symbolic branchの同名・親子namespaceも含む）／既存のremote＋merge設定によりupstreamが付く名前は、明示時inspect・生成時plan・execute直前で拒否され、既存branchへ切替・上書きせず、設定を削除もしない。停止後は別名を利用者と相談し、失敗した参照を再利用しない。
 
 commit文章は今回のStaged材料から作る。タイトルはWHAT、本文は根拠のあるWHY・制約だけ。自明な小変更はタイトルだけでよい。明示言語・形式・固定タイトル／本文を一字一句維持する。明確な指示を聞き直さず、引数全体を固定タイトルにしない。
+
+言語・形式はそれぞれ明示指定を優先し、未指定の項目は固定材料のHEADから直近最大5件をassistantが読んで決める。形式は既存のものに合わせる。commit／commit-mainは`history`、push／PRの新commitは`recentHistory`（`read`では`recent-history`）を使い、送信履歴やPR全体履歴で代用しない。未表示なら判定前に該当する固定履歴全体を必要な範囲に分けて読む。
+
+- 各commitの件名を主に、必要なら本文も参考に日本語／英語を判定する。type・scopeや識別子だけでは判定しない。
+- 判定可能なcommit単位の多数派を採用し、同数なら最も新しい判定可能なcommitに合わせる。判定不能なcommitを除いても6件目以前へ範囲を広げない。
+- 5件未満なら存在する分だけを使う。履歴なし・全件判定不能なら英語のConventional Commitを使う。
+- タイトルと本文は原則同じ言語にする。明示指定・固定文章を履歴で上書きせず、履歴で決まる言語・形式を聞き直さない。
 
 `plan`のstdinは`{"reference":REFERENCE,"message":"完成文章の正確な文字列\n"}`に、作成が必要なら`"newBranch":"docs/example"`を追加する。明示指定は変更不可、文章だけの修正では予定branchを保持する。CLIは状態／完全diff／indexを照合し、完成文章を新しいimmutable private fileへ排他的に保持する。`phase=plan`・`payloadRemoved=true`と新referenceを確認してから、返されたmessageを通常assistantの**1つのcode block**で表示する。予定branchと元branch（新branch作成の有無／元default ref保持／新branchのupstream設定なし）・対象／Stage件数・親／tree・default根拠／古さ・scanner状態・操作一式（必要なら予定branch作成→commit→事後照合→cleanup）もまとめる。script成功や参照の存在は承認ではない。
 

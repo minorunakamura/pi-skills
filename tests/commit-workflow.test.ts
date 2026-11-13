@@ -92,6 +92,7 @@ function assertPayloadRemoved(value: Record<string, unknown>) {
   for (const name of [
     "diff.bin",
     "history.bin",
+    "recent-history.bin",
     "pr-diff.bin",
     "pr-history.bin",
     "pr-templates.bin",
@@ -298,6 +299,114 @@ function prepare(f: ReturnType<typeof fixture>, input: unknown = {}) {
   assert.equal(materials.exit, 0, JSON.stringify(materials.value));
   return materials;
 }
+for (const mode of ["commit", "commit-main", "push", "pr"] as const) {
+  await test(`${mode} exposes only the latest five commits for language selection`, (t) => {
+    const f =
+      mode === "pr"
+        ? prFixture(t)
+        : mode === "push"
+          ? pushFixture(t)
+          : fixture(t);
+    const messages = Array.from({ length: 7 }, (_, i) =>
+      i < 4 ? `docs: English example ${i}` : `docs: 日本語の例 ${i}`,
+    );
+    for (const message of messages)
+      f.git("commit", "--allow-empty", "-m", message);
+    writeFileSync(join(f.repo, "example.txt"), "pending\n");
+    const remote = mode === "push" || mode === "pr";
+    const materials = prepare(f, {
+      mode,
+      ...(remote ? { push: { remote: "origin" } } : {}),
+      ...(mode === "pr" ? { pr: { repository: fixtureRepository } } : {}),
+    });
+    assert.equal(materials.value.displayed, true);
+    const expected = messages
+      .slice(-5)
+      .reverse()
+      .map((message) => `${message}\n\n---\n`)
+      .join("");
+    const history = materials.value[remote ? "recentHistory" : "history"] as {
+      text: string;
+    };
+    assert.equal(history.text, expected);
+    if (remote) {
+      const outgoing = (materials.value.history as { text: string }).text;
+      for (const message of messages) assert.ok(outgoing.includes(message));
+      assert.equal(
+        materials.value.recentHistoryBytes,
+        Buffer.byteLength(expected),
+      );
+    }
+    if (mode === "pr") {
+      const prHistory = (materials.value.prHistory as { text: string }).text;
+      for (const message of messages) assert.ok(prHistory.includes(message));
+    }
+    const read = f.cli("read", {
+      reference: materials.value.reference,
+      parts: [
+        {
+          name: remote ? "recent-history" : "history",
+          offset: 0,
+          length: Buffer.byteLength(expected),
+        },
+      ],
+    });
+    assert.equal(read.exit, 0);
+    assert.equal((read.value.parts as { text: string }[])[0].text, expected);
+    const planned = f.cli("plan", {
+      reference: materials.value.reference,
+      message: "docs: 日本語の変更\n",
+      ...(mode !== "commit-main" ? { newBranch: "docs/history" } : {}),
+    });
+    assert.equal(planned.exit, 0, JSON.stringify(planned.value));
+    assertPayloadRemoved(planned.value);
+  });
+}
+
+for (const count of [0, 3]) {
+  await test(`local language history preserves all ${count} available commits`, (t) => {
+    const f = fixture(t, true);
+    for (let i = 0; i < count; i++)
+      f.git("commit", "--allow-empty", "-m", `docs: example ${i}`);
+    const materials = prepare(f, { mode: "commit" });
+    const expected = Array.from(
+      { length: count },
+      (_, i) => `docs: example ${count - i - 1}\n\n---\n`,
+    ).join("");
+    assert.equal((materials.value.history as { text: string }).text, expected);
+    const released = f.cli("release", { reference: materials.value.reference });
+    assert.equal(released.exit, 0);
+    assertPayloadRemoved(released.value);
+  });
+}
+
+await test("push retains recent language history even when outgoing history is empty and display is omitted", (t) => {
+  const f = pushFixture(t);
+  writeFileSync(join(f.repo, "example.txt"), "x".repeat(40000));
+  const materials = prepare(f, { mode: "push", push: { remote: "origin" } });
+  assert.equal(materials.value.displayed, false);
+  assert.equal(materials.value.historyBytes, 0);
+  assert.equal(materials.value.recentHistory, undefined);
+  const read = f.cli("read", {
+    reference: materials.value.reference,
+    parts: [
+      {
+        name: "recent-history",
+        offset: 0,
+        length: materials.value.recentHistoryBytes,
+      },
+    ],
+  });
+  assert.equal(read.exit, 0);
+  assert.equal(
+    (read.value.parts as { text: string }[])[0].text,
+    "docs: add example\n\n---\n",
+  );
+  const released = f.cli("release", { reference: materials.value.reference });
+  assert.equal(released.exit, 0);
+  assertPayloadRemoved(released.value);
+});
+
 function plan(
   f: ReturnType<typeof fixture>,
   message = "docs: local example\n",

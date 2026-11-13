@@ -273,6 +273,7 @@ function release(ref: Reference) {
   for (const name of [
     "diff.bin",
     "history.bin",
+    "recent-history.bin",
     "pr-diff.bin",
     "pr-history.bin",
     "pr-templates.bin",
@@ -370,6 +371,9 @@ function materialView(ref: Reference, data: Materials) {
     diffDigest: data.diffDigest,
     diffBytes: diff.length,
     historyBytes: history.length,
+    ...(data.push
+      ? { recentHistoryBytes: readOwned(ref, "recent-history.bin").length }
+      : {}),
     ...(data.prPreparation
       ? {
           prDiffBytes: readOwned(ref, "pr-diff.bin").length,
@@ -386,6 +390,9 @@ function materialView(ref: Reference, data: Materials) {
     displayed: true,
     diff: view(diff),
     history: view(history),
+    ...(data.push
+      ? { recentHistory: view(readOwned(ref, "recent-history.bin")) }
+      : {}),
     ...(data.prPreparation
       ? {
           prDiff: view(readOwned(ref, "pr-diff.bin")),
@@ -542,9 +549,14 @@ function main() {
     const parts = input.parts.map((value: unknown) => {
       const part = object(value);
       requireThat(
-        ["diff", "history", "pr-diff", "pr-history", "pr-templates"].includes(
-          String(part.name),
-        ) &&
+        [
+          "diff",
+          "history",
+          "recent-history",
+          "pr-diff",
+          "pr-history",
+          "pr-templates",
+        ].includes(String(part.name)) &&
           Number.isSafeInteger(part.offset) &&
           Number.isSafeInteger(part.length) &&
           Number(part.offset) >= 0 &&
@@ -735,11 +747,22 @@ function main() {
         ...(after.head ? [after.head] : []),
         "--",
       ]);
+    const recentHistory = after.head
+      ? git(repo, [
+          "--no-pager",
+          "log",
+          "-5",
+          "--no-show-signature",
+          "--no-notes",
+          "--format=%s%n%b%n---",
+          after.head,
+          "--",
+        ])
+      : Buffer.alloc(0);
     const history = pushRemote
       ? pushHistory(repo, after, pushRemote, preliminaryTarget)
-      : after.head
-        ? git(repo, ["--no-pager", "log", "-20", "--format=%s%n%b%n---"])
-        : Buffer.alloc(0);
+      : recentHistory;
+    if (pushRemote) save(ref, "recent-history.bin", recentHistory);
     const prPreparation =
       data.pr && data.context && pushRemote
         ? preparePr(repo, data.context, pushRemote, data.pr)
