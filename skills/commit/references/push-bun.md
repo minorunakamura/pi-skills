@@ -6,20 +6,28 @@
 
 ## 0. 起動とStage前
 
-共有local手順のtool選択を使う。利用可能な`commit_inspect`を実repositoryと明示`mode:"push"`で直接1回呼び、完全結果／referenceと返されたBun絶対実体を後続の全保護CLI呼出しへ引き継ぐ。手動probe・inspect・JSON転記・重複一覧は不要。開始時からtool利用不能の場合だけ既存Bun確認＋CLI inspect＋通常テキスト表示。Bun 1.3.0以上の確認不能／開始後の失敗はStageを含むGit変更前に停止し、fallback／installしない。
+共有local手順のtool選択を使う。利用可能な`commit_inspect`を実repositoryと以下の完全なinspect入力で直接1回呼び、完全結果／referenceと返されたBun絶対実体を後続の全保護CLI呼出しへ引き継ぐ。手動probe・inspect・JSON転記・重複一覧は不要。開始時から`commit_inspect`が利用不能な場合だけ既存Bun確認＋CLI inspect＋通常テキスト表示。Bun 1.3.0以上の確認不能／開始後の失敗はStageを含むGit変更前に停止し、fallback／installしない。
 
-以下はtoolなしの場合のinspect入力例。保護probeと全起動条件（trusted cwd・環境除去・同梱config・env-file・no-install）は共有local手順どおり。
+**`commit_inspect`でもCLIでも、既存HEADまたは対象変更がある場合は`mode:"push"`に加え、`push.remote`が必須。modeだけでは呼ばない。** inspect前に`git remote`とlocal設定で宛先を確認し、ユーザーの明示先を優先、曖昧なら実質問する。例のoriginを推測採用しない。HEADも対象変更もない場合だけ宛先設定を省略できる。
+
+`commit_inspect`呼び出し例：
+
+```json
+{"repository":"/absolute/path/to/repo","input":"{\"mode\":\"push\",\"push\":{\"remote\":\"origin\"}}"}
+```
+
+以下は**`commit_inspect`が開始時から利用不能な場合だけ**使う同じ入力のCLI実行例。保護probeと全起動条件（trusted cwd・環境除去・同梱config・env-file・no-install）は共有local手順どおり。
 
 ```bash
 cd "$SCRIPTS" || exit 1
 printf '%s\n' '{"mode":"push","push":{"remote":"origin"}}' | env -u BUN_OPTIONS -u NODE_OPTIONS "$BUN" --config="$SCRIPTS/bunfig.toml" --env-file=/dev/null --no-install "$SCRIPTS/commit-workflow.ts" inspect --repository "$REPOSITORY"
 ```
 
-以下も同じ起動形でoperationだけ置換しstdin JSONを渡す。remote名は実際に`git remote`で確認し、明示先を優先、曖昧ならStage前に実質問する。例のoriginを推測採用しない。push設定は`remote`必須、`target`省略時は予定branch名。`setUpstream`省略時は、予定branchのremote／merge設定が両方未設定ならpush先をupstreamに自動設定し、設定済み（片側だけ／空値／値なしも含む）なら既存設定を保持する。自動設定だけのための追加質問はせず、設定先を最終一括確認に含める。利用者が設定不要と明示した場合は`setUpstream:false`で未設定を維持する。`true`の明示指定は未設定または同じ指定先だけを許し、異なる既存設定は上書きせず停止する。新branchはinspectの`newBranch`で明示でき、未指定名は材料の意味から後で決める。資格情報入りURLや複数push URLを拒否し、生設定／秘密値を表示しない。
+以下も同じ起動形でoperationだけ置換しstdin JSONを渡す。push設定は`remote`必須、`target`省略時は予定branch名。`setUpstream`省略時は、予定branchのremote／merge設定が両方未設定ならpush先をupstreamに自動設定し、設定済み（片側だけ／空値／値なしも含む）なら既存設定を保持する。自動設定だけのための追加質問はせず、設定先を最終一括確認に含める。利用者が設定不要と明示した場合は`setUpstream:false`で未設定を維持する。`true`の明示指定は未設定または同じ指定先だけを許し、異なる既存設定は上書きせず停止する。新branchはinspectの`newBranch`で明示でき、未指定名は材料の意味から後で決める。資格情報入りURLや複数push URLを拒否し、生設定／秘密値を表示しない。
 
 inspectは通信せずlocal push URL（pushInsteadOf等のrewrite後）／順序付きfetch設定／SSH解決を保持する。SSHではssh -Gのalias解決を照合し、core.sshCommand／GIT_SSH_COMMAND／GIT_SSHは拒否する。local bare／file URLも対応。HEADも選択した変更もなければremote設定不要。
 
-一覧は共有のtool表示（開始時からtoolなしの場合だけ通常テキスト）とし、重複表示しない。scopeはall／paths／staged（無指定は全変更、Untracked／部分Stage残り含む）。outsideStaged／suspiciousは共有手順どおり実質問し、実回答だけmaterialsへ。detached／競合／MERGE_HEAD／dirty nested submodule／終点矛盾はStage前停止。pushは**通信したremote defaultとmain**でbranch方針を決める。local default疑義を理由に余分なdefault質問をしない。
+一覧は共有のtool表示（開始時から`commit_inspect`が利用不能な場合だけ通常テキスト）とし、重複表示しない。scopeはall／paths／staged（無指定は全変更、Untracked／部分Stage残り含む）。outsideStaged／suspiciousは共有手順どおり実質問し、実回答だけmaterialsへ。detached／競合／MERGE_HEAD／dirty nested submodule／終点矛盾はStage前停止。pushは**通信したremote defaultとmain**でbranch方針を決める。local default疑義を理由に余分なdefault質問をしない。
 
 ## 1. materials: 新commit要否とpush材料
 
