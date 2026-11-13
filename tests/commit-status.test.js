@@ -515,9 +515,10 @@ await test("commit_inspect stops at its fixed input and protected runtime bounda
 await test("commit_inspect cancels a running child before reference without claiming cleanup", async (t) => {
   const f = inspectFixture(t);
   unlinkSync(join(f.bin, "git"));
+  // Publish readiness only after the PID is written, never an empty marker.
   writeFileSync(
     join(f.bin, "git"),
-    '#!/bin/sh\nif [ "$1" = status ]; then\n  /bin/echo "$$" > "$HOME/paused-git"\n  exec /bin/sleep 30\nfi\nexec /usr/bin/git "$@"\n',
+    '#!/bin/sh\nif [ "$1" = status ]; then\n  /bin/echo "$$" > "$HOME/paused-git.tmp"\n  /bin/mv "$HOME/paused-git.tmp" "$HOME/paused-git"\n  exec /bin/sleep 30\nfi\nexec /usr/bin/git "$@"\n',
   );
   chmodSync(join(f.bin, "git"), 0o700);
   const controller = new AbortController();
@@ -552,6 +553,10 @@ await test("commit_inspect cancels a running child before reference without clai
   assert.match(result.details.privatePreparation, /Unconfirmed.*may remain/);
   assert.equal(updates, 0);
   const pid = Number(readFileSync(join(f.owned, "paused-git"), "utf8").trim());
+  assert.ok(
+    Number.isSafeInteger(pid) && pid > 0,
+    "fixture must publish a complete child PID",
+  );
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
 });
 
