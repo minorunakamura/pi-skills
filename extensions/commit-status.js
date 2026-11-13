@@ -254,7 +254,13 @@ function runBun(bun, scripts, args, input, signal, timeout, limit) {
           "--no-install",
           ...args,
         ],
-        { cwd: scripts, env, detached: true, stdio: ["pipe", "pipe", "pipe"] },
+        {
+          cwd: scripts,
+          env,
+          detached: true,
+          // --version can exit before an empty stdin write reaches its pipe.
+          stdio: [input.length === 0 ? "ignore" : "pipe", "pipe", "pipe"],
+        },
       );
     } catch {
       done({ failure: "launch_failed", exited: true, code: null, stdout: "" });
@@ -291,7 +297,7 @@ function runBun(bun, scripts, args, input, signal, timeout, limit) {
       clearTimeout(killTimer);
       clearTimeout(deadline);
       signal?.removeEventListener("abort", abort);
-      child.stdin.destroy();
+      child.stdin?.destroy();
       child.stdout.destroy();
       child.stderr.destroy();
       if (!exited) child.unref();
@@ -317,7 +323,7 @@ function runBun(bun, scripts, args, input, signal, timeout, limit) {
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
     child.on("error", () => stop("launch_failed"));
-    child.stdin.on("error", () => stop("stdin_failed"));
+    child.stdin?.on("error", () => stop("stdin_failed"));
     for (const [stream, retain] of [
       [child.stdout, true],
       [child.stderr, false],
@@ -346,7 +352,7 @@ function runBun(bun, scripts, args, input, signal, timeout, limit) {
       };
       confirm();
     });
-    child.stdin.end(input);
+    child.stdin?.end(input);
   });
 }
 
