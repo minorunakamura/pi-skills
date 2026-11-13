@@ -27,6 +27,25 @@ const hostModules = {
 };
 registerHooks({
   resolve(specifier, context, nextResolve) {
+    if (
+      specifier === "node:child_process" &&
+      context.parentURL?.endsWith("/distribution/extensions/commit-status.js")
+    ) {
+      // Keep real children, but let --version exit before the parent can send stdin.
+      const source = `
+        import { spawn as realSpawn } from "node:child_process";
+        export function spawn(...args) {
+          const child = realSpawn(...args);
+          if (args[1].includes("--version"))
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+          return child;
+        }
+      `;
+      return {
+        url: `data:text/javascript,${encodeURIComponent(source)}`,
+        shortCircuit: true,
+      };
+    }
     if (Object.hasOwn(hostModules, specifier)) {
       return {
         url: `data:text/javascript,${encodeURIComponent(hostModules[specifier])}`,
@@ -658,7 +677,7 @@ await test("commit_inspect rejects corrupt or oversized subprocess output rather
       );
       assert.equal(result.isError, true);
       assert.equal(result.details.result, undefined);
-      assert.equal(result.details.error, error);
+      assert.equal(result.details.error, error, JSON.stringify(result.details));
       assert.equal(result.details.processExitConfirmed, true);
       assert.match(result.details.privatePreparation, /Unconfirmed/);
       assert.doesNotMatch(
