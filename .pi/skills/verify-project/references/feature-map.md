@@ -63,8 +63,12 @@
 | commit後／送信後drift・異常応答 | 公開Git hooks／TS gh faultとfresh Pi代表 | commit／送信先行成功を保持し後続PR0、異常create応答は作成済み可能性・readback失敗を区別。Python／手書き代替／install／retry／rollbackなし |
 | Bun不足停止 | 起動前からowned PATHにBunなし、絶対Nodeでfresh Pi PR／PR-only別状態。共有経路の非対応／不正probe代表 | Bun1.3.0以上案内、index bytes／HEAD／全refs／branch／upstream／worktree／bare不変、Stage/commit/push/PR0、代替経路未試行。version応答fixtureはAgent停止分岐だけ |
 
-小diff一括／大diffの複数固定範囲読取・未表示明示、全Staged検査、private・秘密非出力・未知file保持は共通公開Bun suiteの対応代表で確認する。新PR helper／fixtureにもsource-named testsを持つ。廃止したPython専用の大容量／不正応答／中断／限定分岐例は再建しない。大材料まとめ読取・非object入力拒否・秘密非表示・失敗後停止・所有外保持・既存PR非重複は同じ公開Bun suiteで照合し、任意中断時のcleanup必達は保証しない。証拠／metric／cleanup／全参照実readはPR手順どおり、Rootは別fresh状態で独立確認する。
+小diff一括／大diffの材料名→返却cursorによる自動page・未表示明示、全Staged検査、private・秘密非出力・未知file保持は共通公開Bun suiteの対応代表で確認する。新PR helper／fixtureにもsource-named testsを持つ。廃止したPython専用の大容量／不正応答／中断／限定分岐例は再建しない。大材料まとめ読取・非object入力拒否・秘密非表示・失敗後停止・所有外保持・既存PR非重複は同じ公開Bun suiteで照合し、任意中断時のcleanup必達は保証しない。証拠／metric／cleanup／全参照実readはPR手順どおり、Rootは別fresh状態で独立確認する。
 
 ## 後続固定tool（Issue #60）
 
-4入口は両tool必須、後続materials/read/release/plan/execute/cleanupはcommit_workflowのみ。[localの形式修正](local-bun.md#固定tool-同一承認planの形式修正)で同一承認planの余分field拒否→同ref形式修正→commit1回・再承認0、toolなしStage0を確認する。PR中間／完成／終端／部分成功／cleanup不完全は専用手順と公開tool testsで区別する。[reload](commit-inspect.md#実tuiとreload)は再inspectなしの同Bun lookup／cleanupを確認する。自動page/cursor・宛先候補取得は対象外。
+4入口は両tool必須、後続materials/read/release/plan/execute/cleanupはcommit_workflowのみ。[localの形式修正](local-bun.md#固定tool-同一承認planの形式修正)で同一承認planの余分field拒否→同ref形式修正→commit1回・再承認0、toolなしStage0を確認する。PR中間／完成／終端／部分成功／cleanup不完全は専用手順と公開tool testsで区別する。[reload](commit-inspect.md#実tuiとreload)は再inspectなしの同Bun lookup／cleanupを確認する。宛先候補取得は対象外。
+
+## 固定材料の自動page（Issue #61）
+
+[localの大UTF-8手順](local-bun.md#大utf-8固定材料-namescursor通常承認commit)でfresh Piの材料名→返却cursor→実際の完成提示・承認質問→真の回答→固定tool commitを確認する。read JSONのみ32KiB以内、全page復元・strict progress・未表示、AI offset/length計算・起動コマンド生成0、質問前payload削除、承認前後の親/tree/index/raw本文/元ref/対象外保持を照合。PR全6材料とprFiles、binary/invalid UTF8/base64、BOM、escape、空/EOF、cursor結合/不正、不可分metadata/要素、旧parts回復・全Staged scannerは公開CLI/toolの実Git代表。既存RPC/observerのworkflow記録を再利用し、新観測基盤・4入口大差分直積・TUI保証は追加しない。

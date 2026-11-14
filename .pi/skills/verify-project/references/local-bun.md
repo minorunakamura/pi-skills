@@ -114,6 +114,27 @@ wait "$DRIVER_PID"
 
 `--no-confirm`代表ではanswer-fileなし、requestに明示`--no-confirm`。通常承認だけ省略し、予定表示／plan保持／検査／直前照合は同じ。独立したfresh状態で行う。
 
+## 大UTF-8固定材料: names→cursor→通常承認→commit
+
+Issue #61の代表は上記fresh setup・通常承認と同じ経路を使う。小diff追記の代わりに、起動前に以下でREADMEを大UTF-8材料にし、対象外bytesも作る。fixtureの作成は検証者だけが行い、Agentにoffset／length計算やCLI起動を指示しない。
+
+```bash
+"$VERIFY_NODE" --input-type=module -e 'import {writeFileSync} from "node:fs"; writeFileSync("README.md", "\ufeff# Example\n" + Array.from({length:1200}, (_,i) => `- 説明 ${i}: 日本語と😀でローカル実行を案内します。\n`).join("") + "\n最終確認: ローカル実行の説明のみ。\n"); writeFileSync("outside.txt", "keep outside\n");'
+```
+
+通常RPCのrequestは`/skill:commit README.mdだけを対象。commit messageは正確に docs: explain local example と末尾LF。`、明示extensionとread,bash,commit_inspect,commit_workflowだけ、通常model/thinking解決・answer-fileを使う。準備→全page→完成plan提示・一括承認質問を実readしてから回答する。source／手順／RPC／observer／driver／全製品TS（material-page.tsを含む）／validatorを起動前manifestへ固定する。実行中は編集しない。
+
+期待・照合:
+
+- materials.displayed=false、初回read.input.materialsは存在する固定名（diff/history/files等）、続きは返却nextを無改変にinput.cursorとして渡すだけ。parts/fileOffset/fileCountなし、assistantのoffset加算／length計算・起動コマンド生成0。全tool start/end/updateは既存RPCが記録するので別runnerを作らない。
+- operations.jsonlのread tool resultの**content[0].textそのもの**（唯一のread JSON）をparseし、JSON.stringify bytes<=32768、fixed=true、返却byte範囲／totalBytes・一覧位置／count／totalCount、strict progress、next／done／unreadと次callのcursor一致を検証者が照合する。tool wrapper全体のresultBytesは上限対象でない。検証者のbytes照合はAgentの位置計算と区別する。
+- 検証者が起動前の`git diff --no-ext-diff --no-textconv --binary --no-color --no-renames --ignore-submodules=none HEAD -- README.md`相当の期待diff bytes（GIT_NO_LAZY_FETCH=1）を保存し、全diff partをencodingに従い復元したbytesと一致させる。Stage後の固定diffDigestも対応させる。新しいdiffをAgentの材料に代用しない。元bytes／リストの厳密一致は公開CLI/tool testsとも照合する。
+- 通常assistantが全文の主目的と末尾の説明を把握し、完成本文・予定branch・全操作・scanner未導入なら未検査を表示して実際に承認質問する。cursor終端を意味理解済みと呼ばない。
+- 承認前は元main／HEAD／全refs不変・予定branch未存在、Stage済み、今回privateの6 bin不在・stateのみ。実回答後だけbranch1件／commit1回、元main保持・親=元HEAD・tree=承認時index・index=実tree・raw本文bytes一致・outside bytes保持・upstreamなし、reference-only execute、AI起動コマンド0を既存観測と実Gitで照合する。
+- RPCは通常テキスト承認の証拠であってTUI実証でない。PRの6材料／prFiles、invalid UTF8／NUL base64、escape増幅、BOM、空／EOF、cursor不正、不可分metadata／一覧要素、旧parts回復は同一repositoryの公開CLI/tool代表で確認し、4入口×大材料の全pipelineを反復しない。
+
+親shellのwait／exit、helperのstdin close・Pi wait・groupGone、manifest不変、証拠をowned外へ保持→所有環境だけcleanup→全参照実readは共有の手順どおり。Rootはこの節から別fresh状態で独立再実行する。
+
 ## default疑義: 実質問・未回答Stage0
 
 fresh setupのbase commit後、README追記前にfixtureを追加する。通信しない。

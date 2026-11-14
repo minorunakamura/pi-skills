@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
 
 const object = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -63,7 +64,7 @@ export function validWorkflowInput(params) {
   const v = params.input;
   const allowed = {
     materials: ["defaultBranch", "includeOutsideStaged", "reviewedPaths"],
-    read: ["parts", "fileOffset", "fileCount"],
+    read: ["parts", "fileOffset", "fileCount", "materials", "cursor"],
     release: [],
     plan: ["message", "newBranch", "pr"],
     execute: [],
@@ -78,6 +79,14 @@ export function validWorkflowInput(params) {
       (v.includeOutsideStaged === undefined ||
         typeof v.includeOutsideStaged === "boolean") &&
       (v.reviewedPaths === undefined || strings(v.reviewedPaths))
+    );
+  if (
+    params.operation === "read" &&
+    (v.materials !== undefined || v.cursor !== undefined)
+  )
+    return (
+      keys(v, ["reference", v.cursor !== undefined ? "cursor" : "materials"]) &&
+      (v.cursor !== undefined ? pageCursor(v.cursor) : pageNames(v.materials))
     );
   if (params.operation === "read")
     return (
@@ -320,7 +329,7 @@ function materialResult(v, ref) {
   return v.displayed
     ? v.note === undefined
     : v.note ===
-        "Full fixed diff/history not displayed; read required ranges together before planning.";
+        "Fixed materials omitted; read by materials names, then returned cursor before planning. Omitted files/prFiles are page reachable; PR reusable paths are also marked by prFiles.reusedStaged.";
 }
 
 function prPlan(v, pending) {
@@ -624,6 +633,7 @@ const failureCodes = new Set([
   "invalid_scope",
   "invalid_template_response",
   "material_display_budget_exceeded",
+  "material_metadata_budget_exceeded",
   "merge_in_progress",
   "missing_base_branch",
   "missing_pr_parent",
@@ -735,6 +745,11 @@ function failureResult(v, operation, ref) {
       sameRun(v.reference, ref) &&
       v.cleanup === undefined
     );
+  if (
+    v.error === "material_metadata_budget_exceeded" &&
+    (operation !== "materials" || v.cleanup === undefined)
+  )
+    return false;
   return v.materialsPreserved === undefined && v.reference === undefined;
 }
 
@@ -792,6 +807,10 @@ export function workflowResult(v, operation, reference, exitCode, input) {
           valid = executeResult(v);
           break;
         case "read":
+          if (input.materials !== undefined || input.cursor !== undefined) {
+            valid = automaticRead(v, input);
+            break;
+          }
           valid =
             keys(v, ["parts", "fixed", "prFiles", "files"]) &&
             v.fixed === true &&
@@ -870,5 +889,103 @@ export function inspectFields(v) {
           ["originalPath", "originalBytes"],
         ) && (c.originalPath === undefined) === (c.originalBytes === undefined),
     )
+  );
+}
+
+const pageNames = (v) =>
+  strings(v) &&
+  v.length > 0 &&
+  v.every((n) => [...names, "files", "prFiles"].includes(n)) &&
+  new Set(v).size === v.length;
+const pageCursor = (v) =>
+  keys(v, ["binding", "materials", "index", "offset"]) &&
+  digest(v.binding) &&
+  pageNames(v.materials) &&
+  integer(v.index) &&
+  v.index <= v.materials.length &&
+  integer(v.offset) &&
+  (v.index < v.materials.length || v.offset === 0);
+function automaticRead(v, input) {
+  if (
+    !keys(v, ["fixed", "parts", "next", "done", "unread"]) ||
+    v.fixed !== true ||
+    !Array.isArray(v.parts) ||
+    !bool(v.done) ||
+    !strings(v.unread) ||
+    Buffer.byteLength(JSON.stringify(v)) > 32768
+  )
+    return false;
+  const ref = input.reference;
+  const binding = (materials, index, offset) =>
+    createHash("sha256")
+      .update(
+        JSON.stringify([
+          ref.repository,
+          ref.directory,
+          ref.run,
+          ref.dev,
+          ref.ino,
+          Object.entries(ref.files).sort(([a], [b]) => a.localeCompare(b)),
+          materials,
+          index,
+          offset,
+        ]),
+      )
+      .digest("hex");
+  const materials = input.materials ?? input.cursor.materials;
+  let index = input.cursor?.index ?? 0;
+  let offset = input.cursor?.offset ?? 0;
+  if (
+    input.cursor &&
+    input.cursor.binding !== binding(materials, index, offset)
+  )
+    return false;
+  let progressed = false;
+  for (const p of v.parts) {
+    if (!object(p) || p.name !== materials[index] || p.offset !== offset)
+      return false;
+    const list = ["files", "prFiles"].includes(p.name);
+    const count = list ? p.count : p.length;
+    const total = list ? p.totalCount : p.totalBytes;
+    if (!integer(count) || !integer(total) || offset + count > total)
+      return false;
+    if (
+      list
+        ? !keys(p, ["name", "offset", "count", "totalCount", "items"]) ||
+          !Array.isArray(p.items) ||
+          p.items.length !== count ||
+          !p.items.every(p.name === "files" ? change : prFile)
+        : !keys(p, [
+            "name",
+            "offset",
+            "length",
+            "totalBytes",
+            "encoding",
+            "text",
+          ]) ||
+          !encoded(p) ||
+          byteLength(p) !== count ||
+          ref.files[`${p.name}.bin`]?.bytes !== total
+    )
+      return false;
+    if (count === 0 && offset !== total) return false;
+    offset += count;
+    progressed = true;
+    if (offset === total) {
+      index++;
+      offset = 0;
+    }
+  }
+  if (JSON.stringify(v.unread) !== JSON.stringify(materials.slice(index)))
+    return false;
+  if (index === materials.length) return v.done === true && v.next === null;
+  return (
+    progressed &&
+    v.done === false &&
+    pageCursor(v.next) &&
+    v.next.binding === binding(materials, index, offset) &&
+    v.next.index === index &&
+    v.next.offset === offset &&
+    JSON.stringify(v.next.materials) === JSON.stringify(materials)
   );
 }

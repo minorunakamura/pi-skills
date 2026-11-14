@@ -41,8 +41,8 @@ Stageは通常承認より先。キャンセル・失敗でもStageが残り得�
 
 - `phase=empty`はcommitなし・通常承認なしで結果だけ報告する。
 - `phase=materials`は返された新しいreferenceだけを使う。小diffなら一覧／本文／HEADから直近最大5件の件名・本文（`history`）を一括で返す（JSON表示予算約32KiB）。履歴は下記の言語・形式判定に使い、WHY・Issue番号・未実施テスト成功を創作しない。
-- `displayed=false`なら未表示を明示する。全体一覧と量を把握し、必要な複数箇所を固定材料から一括読取する。`read`へ`{"reference":REFERENCE,"parts":[{"name":"diff","offset":0,"length":4000},{"name":"diff","offset":12000,"length":3000},{"name":"history","offset":0,"length":300}]}`のようにbytes範囲をまとめる。実際のtotalBytesを超えない。表示予算はread応答JSON全体で1回あたり32KiB（累計ではない）。本文のescape／base64化とメタデータも含むため余裕を取る。追加一覧は`fileOffset`／`fileCount`、partsは空配列でもよい。`encoding=base64`はbytesを失わず解釈し、binary／不明変更の意味は推測しない。
-- `read`のexit1／`error=material_display_budget_exceeded`かつ`materialsPreserved=true`は例外的に回復可能。応答の`reference`は同じ固定材料を保持する。cleanup／inspect／materialsや利用者へのSkill再実行依頼は行わず、`parts`の範囲・数や`fileCount`を減らして同じreadを再要求する。commit／push／PRの実行を許可する応答ではない。続行しないならcleanupし、質問前のrelease規則も維持する。他の失敗は従来どおり停止する。
+- `displayed=false`／`filesOmitted`／PRの省略数から未表示を明示する。初回readは`{"reference":REFERENCE,"materials":["diff","history","files"]}`、続きは`{"reference":REFERENCE,"cursor":NEXT}`だけ。返された`next`を無改変で渡し、`done=true,next=null,unread=[]`まで必要材料を読む。offset加算・length計算・cursor編集をしない。固定名は`diff`／`history`／`recent-history`／`pr-diff`／`pr-history`／`pr-templates`／一覧`files`／`prFiles`（その入口で存在するものだけ）。複数材料を同じ総予算内で順に送る。本文はbyte範囲／totalBytes、一覧は位置／count／totalCountを返す。UTF-8文字境界とBOM bytesを保持し、不正UTF-8／NUL binaryは明示`encoding=base64`でlossless。binaryの意味を推測しない。read応答JSON全体で1回32KiB以下（escape／base64／metadata／cursor込み、累計でない）。tool contentにはJSONが一度だけ載る。空／EOFは正常、未読時は前進または明示エラー。cursor完了は送出完了であり意味理解・安全認定ではない。最新Git diffに置換しない。
+- 開発用CLIの旧`parts`／`fileOffset`／`fileCount`は残すが、新しい`materials`／`cursor`と混在不可。旧readのexit1／`error=material_display_budget_exceeded`かつ`materialsPreserved=true`だけは、応答のreferenceで要求量を減らして縮小再読取できる（準備／Skill再実行不要）。自動pageでこのエラーなら単一metadata／一覧要素等が収まらないため、同cursorの無限retryや手動offset計算をせず停止・残存を報告する。続行しない場合はcleanup。初期materialsの不可分metadataは`material_metadata_budget_exceeded`で停止・所有cleanupを確認する。他の失敗の停止と質問前release規則は変えない。
 - `filesOmitted>0`／各totalBytesから未表示部分を説明する。file名・stat・lockfile／生成物という理由だけで理解済みにしない。機械的検査範囲は表示量で縮めない。固定材料を最新Git diffで置換しない。
 
 固定材料を理解し、追加質問なくplanへ進める場合は**独立releaseを省く**。直接`plan`を呼び、完成plan（PRは中間結果も）の`payloadRemoved=true`を確認してから完成提示・質問へ進む。先に疑義質問が必要な場合だけ`release`（input `{"reference":REFERENCE}`）を呼び、削除成功と返された新referenceを確認・採用してから質問する。保持するのは必要根拠／digest／確定文章だけ。
@@ -57,7 +57,7 @@ Stageは通常承認より先。キャンセル・失敗でもStageが残り得�
 
 commit文章は今回のStaged材料から作る。タイトルはWHAT、本文は根拠のあるWHY・制約だけ。自明な小変更はタイトルだけでよい。明示言語・形式・固定タイトル／本文を一字一句維持する。明確な指示を聞き直さず、引数全体を固定タイトルにしない。
 
-言語・形式はそれぞれ明示指定を優先し、未指定の項目は固定材料のHEADから直近最大5件をassistantが読んで決める。形式は既存のものに合わせる。commit／commit-mainは`history`、push／PRの新commitは`recentHistory`（`read`では`recent-history`）を使い、送信履歴やPR全体履歴で代用しない。未表示なら判定前に該当する固定履歴全体を必要な範囲に分けて読む。
+言語・形式はそれぞれ明示指定を優先し、未指定の項目は固定材料のHEADから直近最大5件をassistantが読んで決める。形式は既存のものに合わせる。commit／commit-mainは`history`、push／PRの新commitは`recentHistory`（`read`では`recent-history`）を使い、送信履歴やPR全体履歴で代用しない。未表示なら判定前に該当する固定履歴名と返却cursorだけで全pageを読む。
 
 - 各commitの件名を主に、必要なら本文も参考に日本語／英語を判定する。type・scopeや識別子だけでは判定しない。
 - 判定可能なcommit単位の多数派を採用し、同数なら最も新しい判定可能なcommitに合わせる。判定不能なcommitを除いても6件目以前へ範囲を広げない。

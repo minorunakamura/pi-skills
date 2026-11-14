@@ -27,7 +27,7 @@ Bun 1.3.0以上は必須です。不在／非対応version／起動異常／不�
 
 `commit_inspect`と`commit_workflow`の両toolを必須にし、未導入／非公開ならStage前に停止してextensionの導入・有効化と新sessionまたは`/reload`を案内します。手書きCLI fallbackはありません。`commit_inspect`を実repositoryと明示modeで直接1回呼び、手動probe／inspect／JSON転記／重複一覧を省きます。完全referenceを無改変で後続の`commit_workflow`へ渡し、materials→plan→executeへ進みます。必要な固定材料まとめ読取／release／cleanupだけを補います。defaultは全local remote HEADのsymbolic target／解決OIDと対応remote／順序付きfetch設定から**宛先→送信元**へ逆mappingします。一意default優先、真に情報なしの場合だけmain／master fallback。競合・broken・orphan・non-symbolic・不明mapping・観測不能を情報なしにせず、候補／理由を表示して実質問し、未回答はStage0。commit-mainは回答後も作業branchなら拒否、commitは回答に応じて作業branchを計画します。通信・自動補修なし、Stage前／操作直前の根拠driftを拒否します。ローカル情報は古い可能性があり最新defaultを保証しません。
 
-materialsで全Staged diffをGitleaks検査します。未導入だけunavailable、検出／失敗は停止。scanner／hook／子CLIの生出力・秘密値は会話へ流しません。小diffは一覧・本文・必要履歴を約32KiBの予算内で一括、大diffは未表示を明示して固定材料の必要複数範囲をまとめて読み、検査範囲を縮めません。不要diff／履歴payloadはどの質問前にも削除します。追加質問なくplanへ進める場合は独立releaseを省き、完成planまたはPR中間結果の`payloadRemoved=true`を確認してから提示・質問します。先に疑義質問が必要ならrelease成功と返された新referenceを確認・採用してから質問します。PRの`phase=materials, executable=false`は承認・execute不可で、新referenceで不足文章を補います。`already_pushed`／`existing_pr`等の終了結果はcleanup成否・残存を確認し、残操作なしなら不要承認をしません。plan失敗／削除拒否／cleanup失敗は停止して残存を報告し、所有検証不能時にcleanup成功を推定したり承認で迂回したりしません。readの表示予算はJSON全体で1回あたり32KiB（累計ではない）。`material_display_budget_exceeded`かつ`materialsPreserved=true`だけは準備を削除せず、応答の同じreferenceで要求量を減らして読み直せます。Skill全体の再実行は不要です。続行しない場合はcleanupし、他の失敗時の停止／cleanupは維持します。
+materialsで全Staged diffをGitleaks検査します。未導入だけunavailable、検出／失敗は停止。scanner／hook／子CLIの生出力・秘密値は会話へ流しません。小diffは一覧・本文・必要履歴を約32KiBの予算内で一括、大diffは未表示を明示して固定材料名と返却cursorで読み、検査範囲を縮めません。不要diff／履歴payloadはどの質問前にも削除します。追加質問なくplanへ進める場合は独立releaseを省き、完成planまたはPR中間結果の`payloadRemoved=true`を確認してから提示・質問します。先に疑義質問が必要ならrelease成功と返された新referenceを確認・採用してから質問します。PRの`phase=materials, executable=false`は承認・execute不可で、新referenceで不足文章を補います。`already_pushed`／`existing_pr`等の終了結果はcleanup成否・残存を確認し、残操作なしなら不要承認をしません。plan失敗／削除拒否／cleanup失敗は停止して残存を報告し、所有検証不能時にcleanup成功を推定したり承認で迂回したりしません。readの表示予算はJSON全体で1回あたり32KiB（累計ではない）。旧partsの`material_display_budget_exceeded`かつ`materialsPreserved=true`だけは準備を削除せず、応答の同じreferenceで要求量を減らして読み直せます。Skill全体の再実行は不要です。続行しない場合はcleanupし、他の失敗時の停止／cleanupは維持します。
 
 完成文章は承認前にrepo外private directory0700／file0600へ排他的保持。owner／非symlink／regular file／実体／bytes digest・repo／runを照合し、修正時は旧版削除成功後だけ新参照を返します。executeは参照だけで文章／設定を再送せず、途中LLM判断／処理コード生成なし。通常hooks、raw本文（末尾LFなし入力への1 LF追加だけ許容）／全親／tree／branch ref／index／他refsを事後照合します。失敗／drift／成否不明で後続停止し、Git成功応答後の確認失敗・cleanup失敗を区別します。所有実体だけcleanupし未知sentinel／他実行は消しません。完全atomic性・任意強制中断時のcleanup／報告必達は保証しません。
 
@@ -41,9 +41,19 @@ Bun lookupは `ctx.sessionManager.getBranch()` のmessage/toolResult/commit_insp
 
 子process起動前の構造／許可field誤りだけが `input_rejected, childStarted=false, inputCorrectionAllowed=true` です。Bun/Git起動0・private準備不変で、同じ承認planの余分field等の形式修正だけなら同referenceで再要求でき、再承認不要です。文章／対象／操作変更は新plan提示・実承認が必要で、driftやruntime／repository／run／所有不一致はこの例外にしません。cancel済みsignalも対象外です。CLI exit1はallowlistと型検証済みの先行成功flags／SHA／cleanupを保持しますが入力修正可能にはしません。
 
-起動後失敗／timeout／cancel／不正応答／成否不明は無断retry／rollbackなし。終了未確認ならcleanupを競合させず、CLI cleanup済みなら二重cleanupしません。transition後の応答喪失等で安全な最新referenceが不明なら古ref更新・探索・強制削除せず残存報告します。executeへinspectの成功update後cancel処理を流用しません。read予算超過のmaterialsPreservedだけは従来の縮小read例外を維持します。低水準parts読取を固定tool経由にする範囲であり、自動page／cursor／宛先候補取得は提供していません。
+起動後失敗／timeout／cancel／不正応答／成否不明は無断retry／rollbackなし。終了未確認ならcleanupを競合させず、CLI cleanup済みなら二重cleanupしません。transition後の応答喪失等で安全な最新referenceが不明なら古ref更新・探索・強制削除せず残存報告します。executeへinspectの成功update後cancel処理を流用しません。read予算超過のmaterialsPreservedだけは従来の縮小read例外を維持します。自動pageは下記の契約で提供し、宛先候補取得は提供していません。
 
 同梱CLIは開発用公開テスト入口として維持します。開発者はtrusted scripts cwdで `env -u BUN_OPTIONS -u NODE_OPTIONS "$BUN" --config="$SCRIPTS/bunfig.toml" --env-file=/dev/null --no-install "$SCRIPTS/commit-workflow.ts" OPERATION --repository "$REPOSITORY"` へstdin JSONを渡せます。これはSkillのtool未導入時fallbackではありません。
+
+### 固定材料の自動page JSON
+
+標準readのinputは初回`{"reference":REFERENCE,"materials":["diff","history","files"]}`、続きは`{"reference":REFERENCE,"cursor":NEXT}`です。固定名はdiff/history/recent-history/pr-diff/pr-history/pr-templatesと一覧files/prFiles。未知・その入口で利用不能な材料は拒否します。複数名は重複なしで順に読みます。小材料の既存一括返却は維持し、大材料の初期metadataも32KiB以内、省略一覧はfiles/prFilesから到達可能です。PRの省略した再利用pathもprFiles.reusedStagedで確認できます。不可分metadataが収まらなければ`material_metadata_budget_exceeded`で明示停止し、通常の所有cleanupを報告します（旧readの保持／縮小回復とは別）。
+
+応答は`{fixed:true,parts:[...],next:CURSOR_OR_NULL,done:BOOLEAN,unread:[残る材料名]}`。本文partは`{name,offset,length,totalBytes,encoding,text}`（byte位置／長さ）、一覧partは`{name,offset,count,totalCount,items}`（要素位置／数）です。read応答をJSON.stringifyした全体が32768 bytes以下で、escape・base64・metadata・cursor・next/doneを含みます。tool contentは同じJSONを一度だけ載せ、referenceを重複追加しません（Pi details／描画wrapper全体の上限ではありません）。有効UTF-8の文字境界とBOM bytesを保ち、不正UTF-8／NULを含むbinaryはbase64でlosslessに返します。
+
+cursorは自己完結JSON object`{binding,materials,index,offset}`。bindingは完全referenceのrepository/directory/run/dev/ino／名前順のfiles identityと材料名列／位置を結ぶSHA-256です。保存先・registry・署名・承認tokenではなく、認可は従来の所有／digest検証です。別run／reference／材料、改変、不正・非整数・負数・範囲外・UTF-8途中位置を拒否します。assistantはcursorを無改変で渡すだけで、offset加算／length計算をしません。
+
+空／EOFは正常終了、未読時はstrict progressまたは明示エラー。`done=true,next=null,unread=[]`は要求材料の送出完了だけで、理解・安全認定ではありません。不可分要素の`material_display_budget_exceeded`で同cursorを無限retryしません。開発用CLIの旧parts/fileOffset/fileCountは別schemaで残し、新旧混在は拒否します。旧readの予算超過だけは従来のmaterialsPreserved／縮小再読取を維持。全Staged scanner、固定材料、plan/release/cleanupの安全規則は変えません。
 
 ### push入口のBun標準経路
 
@@ -96,6 +106,7 @@ ln -s "$PWD/extensions/commit-status.js" ~/.pi/agent/extensions/commit-status.js
 ```
 
 その後Piで`/reload`を実行してください。
+
 
 ## 開発時の検証
 

@@ -30,7 +30,7 @@ export PATH="$OWNED/bin:$(dirname "$VERIFY_BUN"):/usr/bin:/bin"
 
 通常pre-push hookが受け取るSHA refspec／通常hook有効、followTags／mirror／submodule設定があっても余分refsなし、最初のpositive fetch mapping先だけが元値のままか予定SHAとなることを確認する。negative等のrefspecにより未更新の場合もあるので、wildcard更新／exact＋negative未更新（後続local-head mappingの有無）／予定upstreamの正常対照と、任意SHA／他ref変更の拒否を選ぶ。mapping先がlocal branch／tagまたはsymbolic ref（未解決含む）ならcommit／branch／push前に拒否し、元ref／HEAD／全refs／設定／Stageを保持する。plan後のsymbolic化も操作前拒否、正常custom mapping／mappingなしは成功する対照を選ぶ。準備後宛先／remote drift、commit後URL変更停止、hook非0、送信後local drift／upstream失敗の先行成功と後続停止を選ぶ。内部handler成功固定で実操作を消さない。local2入口の無通信等の回帰も保持する。
 
-[共有W2接続・read／release照合](local-bun.md#w2-通常skill接続readrelease分岐の照合)も適用する。
+[共有W2接続・read／release照合](local-bun.md#w2-通常skill接続readrelease分岐の照合)も適用する。 大材料は[local自動page代表](local-bun.md#大utf-8固定材料-namescursor通常承認commit)を再利用し、材料名→返却cursorだけ・JSON全体32KiB・未表示／終端を確認する。PR素材／prFilesは公開CLI/toolの同一repository fixtureで照合し、各入口の大差分full pipelineを直積反復しない。
 
 ## fresh Pi通常一括承認
 

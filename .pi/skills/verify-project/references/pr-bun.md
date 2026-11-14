@@ -29,7 +29,7 @@ source版／dirty・関連SHA256 manifestをdocs/verification/<issue-number>/<�
 
 新commit／既存HEAD／PR-only、base全体固定材料と一致単位、固定特殊文字／片側修正と旧参照拒否、未確定materials参照execute拒否、OPEN/CLOSED/MERGED非編集／非重複、準備PR消失／作成前競合、base/Draft再準備、commit後URL drift／送信後local ref drift、create異常応答／readback異常を選ぶ。scope外bytes保持、通常hooks、秘密非出力・未知file保持は共有Bun suiteのscanner／hook／private代表と対応する。内部handler成功mockで代用しない。
 
-[共有W2接続・read／release照合](local-bun.md#w2-通常skill接続readrelease分岐の照合)も適用する。
+[共有W2接続・read／release照合](local-bun.md#w2-通常skill接続readrelease分岐の照合)も適用する。 大材料は[local自動page代表](local-bun.md#大utf-8固定材料-namescursor通常承認commit)を再利用し、材料名→返却cursorだけ・JSON全体32KiB・未表示／終端を確認する。PR素材／prFilesは公開CLI/toolの同一repository fixtureで照合し、各入口の大差分full pipelineを直積反復しない。
 
 ## fresh Pi: 通常承認と本当のfollow-up
 
