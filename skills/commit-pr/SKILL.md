@@ -2,10 +2,12 @@
 name: commit-pr
 description: Review and stage repository changes, commit and push if needed, then create a normal GitHub pull request or report an existing one.
 disable-model-invocation: true
-compatibility: Requires Git, shell access, Bun 1.3.0+ and authenticated gh. Missing, unsupported or unverified Bun stops before any Git mutation, including no-confirm. No fallback or automatic install. Gitleaks is optional. Same-repository PRs only.
+compatibility: Requires commit_inspect and commit_workflow tools, Git, shell access, Bun 1.3.0+ and authenticated gh. Missing, unsupported or unverified Bun stops before any Git mutation, including no-confirm. No fallback or automatic install. Gitleaks is optional. Same-repository PRs only.
 ---
 
 # commit-pr
+
+両tool `commit_inspect`・`commit_workflow` が必須。未導入／非公開ならStage前に停止し、pi-skills extensionの導入・有効化と新sessionまたは `/reload` を案内する。手書きCLI fallbackは使わない。後続は固定toolのみ、起動コマンドを生成しない。
 
 ## 開始時の全文read一式
 

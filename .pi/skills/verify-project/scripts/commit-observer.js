@@ -27,10 +27,13 @@ export function observeCommit(pi, record, abortAfterReference) {
           (entry) =>
             entry.type === "message" &&
             entry.message.role === "toolResult" &&
-            entry.message.toolName === "commit_inspect",
+            ["commit_inspect", "commit_workflow"].includes(
+              entry.message.toolName,
+            ),
         )
         .map((entry) => ({
           toolCallId: entry.message.toolCallId,
+          toolName: entry.message.toolName,
           content: entry.message.content,
           details: entry.message.details,
           isError: entry.message.isError,
@@ -60,11 +63,15 @@ export function observeCommit(pi, record, abortAfterReference) {
   ]) {
     pi.on(type, (event, ctx) => {
       if (
-        !["read", "bash", "commit_status_display", "commit_inspect"].includes(
-          event.toolName,
-        ) ||
+        ![
+          "read",
+          "bash",
+          "commit_status_display",
+          "commit_inspect",
+          "commit_workflow",
+        ].includes(event.toolName) ||
         (type === "tool_execution_update" &&
-          event.toolName !== "commit_inspect")
+          !["commit_inspect", "commit_workflow"].includes(event.toolName))
       )
         return;
       const observation = { ...event };

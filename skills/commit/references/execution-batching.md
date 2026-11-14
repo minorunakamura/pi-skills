@@ -1,10 +1,12 @@
 # 承認後は保持済み参照だけで実行する
 
-現行4入口はBun必須。旧Python／Codemodeの生成コード集約は使用しない。
+現行4入口はBunとcommit_inspect／commit_workflowの両tool必須。未導入時はStage前停止・導入後reload、手書きCLI fallbackなし。旧Python／Codemodeの生成コード集約は使用しない。
 [local](local-bun.md)／[push](push-bun.md)／[PR](pr-bun.md)の起動・準備・表示・承認手順を全文読む。
 
-追加質問なしなら独立releaseを省き直接planへ進む。完成planをprivate0700／0600で保持し、完成／PR中間結果の`payloadRemoved=true`を確認してから提示・質問する。先に疑義質問が必要ならrelease成功と返された新referenceを採用してから質問する。PR中間の`phase=materials, executable=false`は承認・execute不可で、新referenceで不足文章を補う。終了結果はcleanupを確認し、plan失敗／削除拒否／cleanup失敗なら停止して残存を報告する。通常assistant表示で一括承認した後、同じ確認済みBun実体・trusted scripts cwd・保護起動条件でcommit-workflow.ts executeを呼ぶ。stdinはreferenceだけで、文章や設定の再送・途中LLM判断・毎回の機械処理コード生成は0。参照やscript成功は承認証明でない。
+追加質問なしなら独立releaseを省き直接planへ進む。完成planをprivate0700／0600で保持し、完成／PR中間結果の`payloadRemoved=true`を確認してから提示・質問する。先に疑義質問が必要ならrelease成功と返された新referenceを採用してから質問する。PR中間の`phase=materials, executable=false`は承認・execute不可で、新referenceで不足文章を補う。終了結果はcleanupを確認し、plan失敗／削除拒否／cleanup失敗なら停止して残存を報告する。通常assistant表示で一括承認した後、commit_workflowをrepository・operation:"execute"・input:{reference:REFERENCE}で直接呼ぶ。inputはreferenceだけで、文章や設定の再送・途中LLM判断・毎回の機械処理コード生成は0。参照やscript成功は承認証明でない。
 
 CLIが必要branch→必要commit→raw本文／親／tree／index／refs照合→必要固定SHA push／readback／予定upstream→必要PR／title/body/Draft/head/base/SHA readback→cleanupを行う。localは通信なし、pushはPR API0。既存HEADはcommitなし、同SHA再pushなし、既存PRは非編集・非重複。
 
 失敗／drift／異常応答／成否不明では後続mutation停止。先行成功・操作済みの可能性・事後確認失敗・cleanup失敗を区別し、自動retry／rollback／resume／別経路へ切り替えない。所有確認した実体だけcleanupし、未知sentinel／差替え／別runは消さない。完全atomic性・任意中断必達を保証しない。
+
+明示的な起動前input_rejected／childStarted=false／inputCorrectionAllowed=trueだけは同一承認planの形式修正を同referenceで再要求でき、再承認不要。対象／文章／操作変更やdriftは不可。起動後の失敗・cancelは再試行せず、child終了未確認ならcleanup競合禁止、CLI cleanup済みは二重cleanup禁止、最新reference不明なら探索削除せず残存報告する。

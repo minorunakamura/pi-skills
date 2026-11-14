@@ -6,9 +6,9 @@
 
 ## 0. 起動とinspect
 
-共有local手順のtool選択を使う。利用可能な`commit_inspect`を実repositoryと以下の完全なinspect入力で直接1回呼び、完全結果／referenceと返されたBun絶対実体を後続の全保護CLI呼出しへ引き継ぐ。PR-onlyも同じ。手動probe・inspect・JSON転記・重複一覧は不要。開始時から`commit_inspect`が利用不能な場合だけ既存Bun確認＋CLI inspect＋通常テキスト表示。Bun 1.3.0以上の確認不能／開始後の失敗はStageを含むGit変更前に停止し、fallback／installしない。
+共有local手順どおり `commit_inspect` と `commit_workflow` の両tool必須。未導入／非公開ならStageを含むGit変更前に停止し、導入・新sessionまたは `/reload` を案内する。Bun 1.3.0以上の確認不能／開始後失敗も停止し、手書きCLI fallback／installしない。inspectは以下の完全入力で直接1回、後続は全て `commit_workflow` の固定operationとJSON object inputを使う。完全referenceを無改変で引き継ぐ。PR-onlyも同じ。手動probe・inspect・JSON転記・重複一覧は不要。
 
-**`commit_inspect`でもCLIでも、既存HEADまたは対象変更がある場合は`mode:"pr"`に加え、`push.remote`と`pr.repository`が必須。modeだけでは呼ばない。** inspect前に、ユーザーの明示先とlocal設定（`git remote`／push URL、必要なら`ssh -G`のalias解決）から宛先を確認し、曖昧なら実質問する。例のorigin／owner／repoを推測採用しない。HEADも対象変更もない場合だけ宛先設定を省略できる。
+**`commit_inspect`では、既存HEADまたは対象変更がある場合は`mode:"pr"`に加え、`push.remote`と`pr.repository`が必須。modeだけでは呼ばない。** inspect前に、ユーザーの明示先とlocal設定（`git remote`／push URL、必要なら`ssh -G`のalias解決）から宛先を確認し、曖昧なら実質問する。例のorigin／owner／repoを推測採用しない。HEADも対象変更もない場合だけ宛先設定を省略できる。
 
 `commit_inspect`呼び出し例（`repository`はlocal実ルート、`input`内の`pr.repository`はGitHub宛先）：
 
@@ -16,20 +16,15 @@
 {"repository":"/absolute/path/to/repo","input":"{\"mode\":\"pr\",\"push\":{\"remote\":\"origin\"},\"pr\":{\"repository\":\"github.com/owner/repo\"}}"}
 ```
 
-以下は**`commit_inspect`が開始時から利用不能な場合だけ**使う同じ入力のCLI実行例。保護probeと全起動条件は共有local手順どおり。
 
-```bash
-cd "$SCRIPTS" || exit 1
-printf '%s\n' '{"mode":"pr","push":{"remote":"origin"},"pr":{"repository":"github.com/owner/repo"}}' | env -u BUN_OPTIONS -u NODE_OPTIONS "$BUN" --config="$SCRIPTS/bunfig.toml" --env-file=/dev/null --no-install "$SCRIPTS/commit-workflow.ts" inspect --repository "$REPOSITORY"
-```
 
 `pr.repository`は`[HOST/]OWNER/REPO`、`base`省略はremote／GitHubの一致したdefault、`draft`省略はfalse。`push.target`省略は予定branch名、同一repositoryの**予定branch＝push target＝PR head**を要する。upstreamはpush手順と同じく未設定なら自動設定し、既存設定は保持する。PR-onlyでも未設定なら同SHAを再pushせず設定する。fork／別target／初回main例外は扱わない。HTTPS／通常SSHとssh -G解決aliasを使える。資格情報URL・custom SSH・rewrite後の別repo／file URLは拒否する。
 
-scopeはall／限定literal paths／staged-only。Untracked・部分Stageの残りを含む既定、対象外既存Stageの確認・対象外保持、dirty submodule／detached／競合／merge／矛盾のStage前停止は共有どおり。一覧は共有のtool表示（開始時から`commit_inspect`が利用不能な場合だけ通常テキスト）とし、重複表示や通常assistant文章・承認への転用をしない。
+scopeはall／限定literal paths／staged-only。Untracked・部分Stageの残りを含む既定、対象外既存Stageの確認・対象外保持、dirty submodule／detached／競合／merge／矛盾のStage前停止は共有どおり。一覧は共有のtool表示とし、重複表示や通常assistant文章・承認への転用をしない。
 
 ## 1. materials: branch名に依存しない全体材料
 
-stdinは`{"reference":REFERENCE}`と必要な実回答だけ。状態照合→必要Stage→**全Staged Gitleaks検査**→remote／PR準備を行う。Stageは通常承認前で、キャンセル・失敗でも残り得る。reset／unstageしない。HEADも対象diffもなければ通信なし・空commitなし・branch作成なしで終了。
+inputは`{"reference":REFERENCE}`と必要な実回答だけ。状態照合→必要Stage→**全Staged Gitleaks検査**→remote／PR準備を行う。Stageは通常承認前で、キャンセル・失敗でも残り得る。reset／unstageしない。HEADも対象diffもなければ通信なし・空commitなし・branch作成なしで終了。
 
 - `commitNeeded=true`: commit文章は固定Stagedだけに基づく。scanner=unavailableは新commit未検査と明示。
 - `commitNeeded=false`: message／空commit／amendなし。既存HEADのbranch全体を扱い、既存履歴を今回Gitleaks検査済みと呼ばない。必要pushだけ、同SHA再pushなし。

@@ -19,6 +19,10 @@ await test("migrated commit entries require Bun and remove only their dedicated 
     );
     assert.ok(source.includes(`到達点は **${endpoint}**`));
     assert.ok(source.includes(reference) && source.includes("全文"));
+    assert.match(source, /commit_inspect.*commit_workflow/);
+    assert.match(source, /Stage前.*停止/);
+    assert.match(source, /reload/);
+    assert.match(source, /手書きCLI fallbackは使わない/);
     assert.match(source, /disable-model-invocation: true/);
     assert.match(source, /^description: [\x20-\x7e]+$/m);
     assert.match(source, /矛盾[\s\S]*Git変更前/);
@@ -89,6 +93,10 @@ await test("shared startup and release contracts distinguish direct plan, questi
     "無改変",
     "開始時からtool未導入",
     "旧表示toolは使わない",
+    "inputCorrectionAllowed=true",
+    "再承認は不要",
+    "終了未確認ならcleanup",
+    "最終成功inspect",
     "独立releaseを省く",
     "payloadRemoved=true",
     "返された新reference",

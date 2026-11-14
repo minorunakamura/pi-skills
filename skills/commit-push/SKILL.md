@@ -2,10 +2,12 @@
 name: commit-push
 description: Review and stage repository changes, commit if needed, then push the current HEAD without creating a pull request.
 disable-model-invocation: true
-compatibility: Requires Git, shell access, and Bun 1.3.0+. Missing, unsupported, or unverifiable Bun stops before any Git mutation, even with no-confirm. No fallback or automatic installation. Gitleaks is optional. A configured push remote is required; gh is not required.
+compatibility: Requires commit_inspect and commit_workflow tools, Git, shell access, and Bun 1.3.0+. Missing, unsupported, or unverifiable Bun stops before any Git mutation, even with no-confirm. No fallback or automatic installation. Gitleaks is optional. A configured push remote is required; gh is not required.
 ---
 
 # commit-push
+
+両tool `commit_inspect`・`commit_workflow` が必須。未導入／非公開ならStage前に停止し、pi-skills extensionの導入・有効化と新sessionまたは `/reload` を案内する。手書きCLI fallbackは使わない。後続は固定toolのみ、起動コマンドを生成しない。
 
 ## 開始時の全文read一式
 

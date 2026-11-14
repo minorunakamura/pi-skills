@@ -12,7 +12,7 @@
 
 [共有W2照合](local-bun.md#w2-通常skill接続readrelease分岐の照合)を通常extension有効のfresh Skillから行う。同ターン全文read一式／tail／PR > push > local、新tool直接1回・完全結果／同Bun引継ぎ・重複なし、独立releaseなしの直接plan・payloadRemovedと6 bin不在（recent-history.binを含む）、疑義質問前release成功・新reference、PR中間非実行可能→新参照で文章補完、終了cleanup・不要承認なし、失敗／削除拒否の停止・残存を観測する。CLI assertionsや文言testをAgent動作実証にしない。無extension対照は別freshで維持し、開始後失敗のfallbackにしない。
 
-local／PR各1組の同条件baseline/finalを同じ固定helperで比較する。旧表示extensionは当時sourceを明示し、新toolへ差し替えない。全assistant request／turn read／probe／inspect転記／release／payload bytesを手分類し、LLM・tool・利用者待機／usage／unknownと実TUI描画時刻を分ける。秒数／固定短縮率を合否にしない。
+性能比較を選ぶ場合だけlocal／PR各1組の同条件baseline/finalを同じ固定helperで比較する。旧表示extensionは当時sourceを明示し、新toolへ差し替えない。全assistant request／turn read／probe／inspect転記／release／payload bytesを手分類し、LLM・tool・利用者待機／usage／unknownと実TUI描画時刻を分ける。秒数／固定短縮率を合否にしない。
 
 ## commit / commit-main Bun標準入口（現行）
 
@@ -64,3 +64,7 @@ local／PR各1組の同条件baseline/finalを同じ固定helperで比較する�
 | Bun不足停止 | 起動前からowned PATHにBunなし、絶対Nodeでfresh Pi PR／PR-only別状態。共有経路の非対応／不正probe代表 | Bun1.3.0以上案内、index bytes／HEAD／全refs／branch／upstream／worktree／bare不変、Stage/commit/push/PR0、代替経路未試行。version応答fixtureはAgent停止分岐だけ |
 
 小diff一括／大diffの複数固定範囲読取・未表示明示、全Staged検査、private・秘密非出力・未知file保持は共通公開Bun suiteの対応代表で確認する。新PR helper／fixtureにもsource-named testsを持つ。廃止したPython専用の大容量／不正応答／中断／限定分岐例は再建しない。大材料まとめ読取・非object入力拒否・秘密非表示・失敗後停止・所有外保持・既存PR非重複は同じ公開Bun suiteで照合し、任意中断時のcleanup必達は保証しない。証拠／metric／cleanup／全参照実readはPR手順どおり、Rootは別fresh状態で独立確認する。
+
+## 後続固定tool（Issue #60）
+
+4入口は両tool必須、後続materials/read/release/plan/execute/cleanupはcommit_workflowのみ。[localの形式修正](local-bun.md#固定tool-同一承認planの形式修正)で同一承認planの余分field拒否→同ref形式修正→commit1回・再承認0、toolなしStage0を確認する。PR中間／完成／終端／部分成功／cleanup不完全は専用手順と公開tool testsで区別する。[reload](commit-inspect.md#実tuiとreload)は再inspectなしの同Bun lookup／cleanupを確認する。自動page/cursor・宛先候補取得は対象外。

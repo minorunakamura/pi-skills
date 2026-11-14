@@ -25,11 +25,25 @@
 
 Bun 1.3.0以上は必須です。不在／非対応version／起動異常／不正probe／確認不能では必要条件を案内し、Stageを含むGit変更前に停止します。no-confirmでも省略しません。開始前後を問わず手書きBash／旧Python／互換へのfallback・自動install・PATH／利用者設定変更で迂回しません。新launcherやruntime管理は追加しません。
 
-利用可能な`commit_inspect`を実repositoryと明示modeで直接1回呼び、手動probe／inspect／JSON転記／重複一覧を省きます。完全結果と返された絶対Bun・完全referenceを以後の保護CLIへ引き継ぎ、materials→plan→executeへ進みます。開始時からtool利用不能の場合だけ既存Bun確認＋CLI inspect＋通常テキスト表示を使い、旧表示toolは呼びません。必要な固定材料まとめ読取／release／cleanupだけを補います。defaultは全local remote HEADのsymbolic target／解決OIDと対応remote／順序付きfetch設定から**宛先→送信元**へ逆mappingします。一意default優先、真に情報なしの場合だけmain／master fallback。競合・broken・orphan・non-symbolic・不明mapping・観測不能を情報なしにせず、候補／理由を表示して実質問し、未回答はStage0。commit-mainは回答後も作業branchなら拒否、commitは回答に応じて作業branchを計画します。通信・自動補修なし、Stage前／操作直前の根拠driftを拒否します。ローカル情報は古い可能性があり最新defaultを保証しません。
+`commit_inspect`と`commit_workflow`の両toolを必須にし、未導入／非公開ならStage前に停止してextensionの導入・有効化と新sessionまたは`/reload`を案内します。手書きCLI fallbackはありません。`commit_inspect`を実repositoryと明示modeで直接1回呼び、手動probe／inspect／JSON転記／重複一覧を省きます。完全referenceを無改変で後続の`commit_workflow`へ渡し、materials→plan→executeへ進みます。必要な固定材料まとめ読取／release／cleanupだけを補います。defaultは全local remote HEADのsymbolic target／解決OIDと対応remote／順序付きfetch設定から**宛先→送信元**へ逆mappingします。一意default優先、真に情報なしの場合だけmain／master fallback。競合・broken・orphan・non-symbolic・不明mapping・観測不能を情報なしにせず、候補／理由を表示して実質問し、未回答はStage0。commit-mainは回答後も作業branchなら拒否、commitは回答に応じて作業branchを計画します。通信・自動補修なし、Stage前／操作直前の根拠driftを拒否します。ローカル情報は古い可能性があり最新defaultを保証しません。
 
 materialsで全Staged diffをGitleaks検査します。未導入だけunavailable、検出／失敗は停止。scanner／hook／子CLIの生出力・秘密値は会話へ流しません。小diffは一覧・本文・必要履歴を約32KiBの予算内で一括、大diffは未表示を明示して固定材料の必要複数範囲をまとめて読み、検査範囲を縮めません。不要diff／履歴payloadはどの質問前にも削除します。追加質問なくplanへ進める場合は独立releaseを省き、完成planまたはPR中間結果の`payloadRemoved=true`を確認してから提示・質問します。先に疑義質問が必要ならrelease成功と返された新referenceを確認・採用してから質問します。PRの`phase=materials, executable=false`は承認・execute不可で、新referenceで不足文章を補います。`already_pushed`／`existing_pr`等の終了結果はcleanup成否・残存を確認し、残操作なしなら不要承認をしません。plan失敗／削除拒否／cleanup失敗は停止して残存を報告し、所有検証不能時にcleanup成功を推定したり承認で迂回したりしません。readの表示予算はJSON全体で1回あたり32KiB（累計ではない）。`material_display_budget_exceeded`かつ`materialsPreserved=true`だけは準備を削除せず、応答の同じreferenceで要求量を減らして読み直せます。Skill全体の再実行は不要です。続行しない場合はcleanupし、他の失敗時の停止／cleanupは維持します。
 
 完成文章は承認前にrepo外private directory0700／file0600へ排他的保持。owner／非symlink／regular file／実体／bytes digest・repo／runを照合し、修正時は旧版削除成功後だけ新参照を返します。executeは参照だけで文章／設定を再送せず、途中LLM判断／処理コード生成なし。通常hooks、raw本文（末尾LFなし入力への1 LF追加だけ許容）／全親／tree／branch ref／index／他refsを事後照合します。失敗／drift／成否不明で後続停止し、Git成功応答後の確認失敗・cleanup失敗を区別します。所有実体だけcleanupし未知sentinel／他実行は消しません。完全atomic性・任意強制中断時のcleanup／報告必達は保証しません。
+
+### 後続の固定tool境界
+
+model-onlyの `commit_workflow` は `{repository,operation,input}` を受け、inputはJSON objectです。固定operationは materials/read/release/plan/execute/cleanup のみ。executeのinputは完全referenceだけで、Bun/config/entrypoint/cwd/env/timeout/commandは公開しません。Piの公開 `executionMode: 'sequential'` で同じturnの並列起動を避け、既存spawn＋stdinとCLIのGit検証・通常hooksを再利用します。複数stepと子command各60秒を考慮してoperation別の時間／出力上限を固定します。
+
+Bun lookupは `ctx.sessionManager.getBranch()` のmessage/toolResult/commit_inspect最終isError=falseだけ。完全検証済みdetails.bunを、caller referenceのrun/repository/directory/dev/ino一致で一意に特定し、遷移するfilesは一致を要求しません。途中update・通常text・失敗・別branch・別repo・証拠不足／矛盾は使いません。同じ絶対実体・実行可能性・保護probeを再確認し、PATH再探索しません。reload後もこの証拠が必要です。最新reference・承認・復旧状態を履歴から導出せず、callerの完全referenceの所有／digest／phaseはCLIが検証します。
+
+正常応答は終了確認／exit0／完全JSONと操作別検証が必要です。materialsとempty、phaseなしread／release、完成planとPR中間materials(executable=false)、already_pushed／existing_pr終端、executeのcommitted／pushed／already_pushed／existing_pr／pr_created、cleanupのcancelled／stagedChangesPreserved／complete／remainingを区別します。固定文章・新reference・部分成功・cleanup不完全を落とさず、contentとdetailsを同じ検証済みデータから作ります。未知field・生scanner／hook／child出力は返しません。
+
+子process起動前の構造／許可field誤りだけが `input_rejected, childStarted=false, inputCorrectionAllowed=true` です。Bun/Git起動0・private準備不変で、同じ承認planの余分field等の形式修正だけなら同referenceで再要求でき、再承認不要です。文章／対象／操作変更は新plan提示・実承認が必要で、driftやruntime／repository／run／所有不一致はこの例外にしません。cancel済みsignalも対象外です。CLI exit1はallowlistと型検証済みの先行成功flags／SHA／cleanupを保持しますが入力修正可能にはしません。
+
+起動後失敗／timeout／cancel／不正応答／成否不明は無断retry／rollbackなし。終了未確認ならcleanupを競合させず、CLI cleanup済みなら二重cleanupしません。transition後の応答喪失等で安全な最新referenceが不明なら古ref更新・探索・強制削除せず残存報告します。executeへinspectの成功update後cancel処理を流用しません。read予算超過のmaterialsPreservedだけは従来の縮小read例外を維持します。低水準parts読取を固定tool経由にする範囲であり、自動page／cursor／宛先候補取得は提供していません。
+
+同梱CLIは開発用公開テスト入口として維持します。開発者はtrusted scripts cwdで `env -u BUN_OPTIONS -u NODE_OPTIONS "$BUN" --config="$SCRIPTS/bunfig.toml" --env-file=/dev/null --no-install "$SCRIPTS/commit-workflow.ts" OPERATION --repository "$REPOSITORY"` へstdin JSONを渡せます。これはSkillのtool未導入時fallbackではありません。
 
 ### push入口のBun標準経路
 
@@ -45,15 +59,15 @@ commit-prは[PR用Bun手順](skills/commit/references/pr-bun.md)でbranch全体�
 
 関連Issueはユーザー指定・明示文脈を根拠に`gh issue view`等で内容と完了条件を確認します。PR全体で解決するなら本文に`Closes #123`、関連のみ／一部なら`Refs #123`（別repositoryは`owner/repo#123`）を記し、最終一括確認に含めます。番号を創作せず、固定本文に無断追記せず、既存PRを編集せず、Issueを直接closeしません。自動Closeはdefault branchへのmerge時で、別baseではそのmergeで自動Closeされないことを説明します。
 
-直接確認は[検証Skill](.pi/skills/verify-project/SKILL.md)から[ローカルBun手順](.pi/skills/verify-project/references/local-bun.md)を選びます。fresh Piの通常承認／cancel／no-confirm／default実質問・未回答Stage0／Bun不足／非対応／確認不能のGit変更前停止と実Gitを照合します。pushは[専用Bun検証手順](.pi/skills/verify-project/references/push-bun.md)、PR入口は[PR用Bun検証手順](.pi/skills/verify-project/references/pr-bun.md)を使います。共有RPC／metric／fixture helperはNode24で実行し、helperの既定read,bashだけはtool未導入対照として保持し、通常Skill検証では明示extensionとread,bash,commit_inspectを使います。専用toolの直接確認は[commit_inspect検証手順](.pi/skills/verify-project/references/commit-inspect.md)で明示extensionとplain allowlistを選択し、実TUI／nonTUI／cancel／reloadを区別して確認します。model/thinkingは通常解決を記録し比較条件と照合、認証の独自read/copy/logは禁止。RPC通常テキスト承認はask_user_questionのTUI実証でありません。
+直接確認は[検証Skill](.pi/skills/verify-project/SKILL.md)から[ローカルBun手順](.pi/skills/verify-project/references/local-bun.md)を選びます。fresh Piの通常承認／cancel／no-confirm／default実質問・未回答Stage0／Bun不足／非対応／確認不能のGit変更前停止と実Gitを照合します。pushは[専用Bun検証手順](.pi/skills/verify-project/references/push-bun.md)、PR入口は[PR用Bun検証手順](.pi/skills/verify-project/references/pr-bun.md)を使います。共有RPC／metric／fixture helperはNode24で実行し、helperの既定read,bashだけはtool未導入対照として保持し、通常Skill検証では明示extensionとread,bash,commit_inspect,commit_workflowを使います。専用toolの直接確認は[commit_inspect検証手順](.pi/skills/verify-project/references/commit-inspect.md)で明示extensionとplain allowlistを選択し、実TUI／nonTUI／cancel／reloadを区別して確認します。model/thinkingは通常解決を記録し比較条件と照合、認証の独自read/copy/logは禁止。RPC通常テキスト承認はask_user_questionのTUI実証でありません。
 
-production変更前のread-only archiveでlocal commitとcommit-prを各1組、同じ小diff／history／明示文章／通常承認で比較します。新旧とも同じ観測helperを固定し、baselineは当時の表示extensionを使います。inspect取得→一覧までのLLM介在、probe／転記／release／全文readの同ターン性も操作記録から分類します。provider／model／thinkingは通常解決を照合し、無断変更しません。承認前／後／全体時間、利用者待機、全assistant request、生成codeと固定呼出し／payload、取得可能usage・失敗・unknownを分け、nested toolを二重加算しません。構造改善と時間効果を分け、単発観測を安定した高速化の証明と呼びません。変更前baselineがすでにBun版ならPython→Bunの速度効果とは呼ばず、条件差・比較不能・未実証を明記します。
+性能比較を対象に選ぶ場合だけ、production変更前のread-only archiveでlocal commitとcommit-prを各1組、同じ小diff／history／明示文章／通常承認で比較します。新旧とも同じ観測helperを固定し、baselineは当時の表示extensionを使います。inspect取得→一覧までのLLM介在、probe／転記／release／全文readの同ターン性も操作記録から分類します。provider／model／thinkingは通常解決を照合し、無断変更しません。承認前／後／全体時間、利用者待機、全assistant request、生成codeと固定呼出し／payload、取得可能usage・失敗・unknownを分け、nested toolを二重加算しません。構造改善と時間効果を分け、単発観測を安定した高速化の証明と呼びません。変更前baselineがすでにBun版ならPython→Bunの速度効果とは呼ばず、条件差・比較不能・未実証を明記します。
 
 #### 状態一覧の色付き表示
 
 同梱の`extensions/commit-status.js`はmodel-onlyの`commit_inspect`でBun確認→保護起動inspect→状態表示を1回に連結します。入力はrepository実ルート絶対pathと、明示mode（commit／commit-main／push／pr）を含む既存inspectのJSON文字列です。任意command／runtime／scripts指定は受け付けず、symlink導入でも配布元実体のCLIを使います。Bun 1.3.0以上の実行可能な絶対実体を確認し、trusted scripts cwd・空の同梱TOML・env-file=/dev/null・no-install・BUN_OPTIONS／NODE_OPTIONS除去をprobeとinspectの両方に適用します。開始後の失敗からfallback／installはしません。
 
-成功にはexit0・完全JSON・inspect固有のreference／branchPolicy／default／evidence／questions／pathBytes等の構造検証が必要です（正常inspectにphaseなし）。content末尾JSONとdetailsは同じ`{bun,result}`で完全材料を保持し、後続CLIは同じBun絶対実体と完全referenceを無改変で使います。CLIの所有・digest・repository検証は維持し、Stage以降を自動連結しません。inspectはGit mutationなしでもprivate準備を作るため、readOnlyHint／idempotentHintはfalseです。
+成功にはexit0・完全JSON・inspect固有のreference／branchPolicy／default／evidence／questions／pathBytes等の構造検証が必要です（正常inspectにphaseなし）。content末尾JSONとdetailsは同じ`{bun,result}`で完全材料を保持し、後続toolは同じBun絶対実体と完全referenceを使います。CLIの所有・digest・repository検証は維持し、Stage以降を自動連結しません。inspectはGit mutationなしでもprivate準備を作るため、readOnlyHint／idempotentHintはfalseです。
 
 実行と描画を分離し、TUIはdetailsからrenderResultで次LLM応答を待たず表示、通常assistantに同じ一覧を繰り返しません。RPC／JSON／printには色なし一覧と完全材料をcontentに残します。print stdoutは最終assistantだけなので標準sessionのtoolResultも観測します。rendererの色生成失敗だけ同じデータで色なしへ代替し、再inspectしません。不正応答・取得失敗は代替対象でありません。PiのrenderResult第一引数はcontent/details、失敗判定は第四引数context.isErrorです。取得後cancelのdetails.resultを成功一覧として描きません。
 
@@ -72,7 +86,7 @@ inspectがexit1で終了確認済み、timeout／cancel等なし、完全JSONの
 | Added | `success` | 緑色 |
 | Deleted | `error` | 赤色 |
 
-部分StageはStaged/Unstagedを分け、rename/copyは元パスも表示します。色は有効なthemeに従います。toolが開始時から未導入／非公開なら既存Bun確認＋CLI inspect＋通常textを使います（開始後失敗のfallbackとは区別）。TUI以外ではtool contentの通常textを使います。完成commit／PR文章・操作一式と明示承認は通常assistantで別途表示し、tool contentを承認表示に流用しません。承認・検査の手順は変わりません。
+部分StageはStaged/Unstagedを分け、rename/copyは元パスも表示します。色は有効なthemeに従います。両toolのいずれかが未導入／非公開ならStage前に停止し、手書きCLIへfallbackしません。TUI以外ではtool contentの通常textを使います。完成commit／PR文章・操作一式と明示承認は通常assistantで別途表示し、tool contentを承認表示に流用しません。承認・検査の手順は変わりません。
 
 スキルだけをsymlinkで導入している場合は、cloneしたリポジトリのルートから表示extensionもリンクできます。既存ファイルは上書きしません。
 
