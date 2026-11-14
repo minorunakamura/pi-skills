@@ -57,7 +57,9 @@ Pi を作業対象のプロジェクトで起動し、`/skill:<スキル名>` �
 
 defaultへの直接commitは`/skill:commit-main`を選びます。同じ共通判定でmain／master／その他のdefault相当と確認できた現在branchだけにcommitし、作業branch上や新branch作成・切替・push／PRの矛盾指示ではStageを含むGit変更前に停止します。defaultへ自動切替せず、未commit変更も持ち運びません。両ローカル入口ともremote準備・通信は追加せず、対象差分がなければbranch・commitを作りません。`--no-confirm`でもbranch条件は維持します。
 
-`commit`・`commit-main`・`commit-push`・`commit-pr`は`commit_inspect`と`commit_workflow`の両toolが必須です。toolが同梱TypeScriptをBun 1.3.0以上で固定起動し、assistantは起動コマンドを生成しません。未導入／非公開ならStage前に停止するため、packageのextensionを有効化して新sessionまたは`/reload`で両toolを公開してください。手書きCLI fallbackはありません。開始時は`commit_inspect`、後続は完全参照を渡す`commit_workflow`を使います。完成文章を承認前にprivate保持し、承認後は参照だけで必要なcommit・push・事後確認・cleanupまで進みます。Codemodeは不要です。PR-onlyも同じBun経路です。Bun不在・非対応・確認不能はStageを含むGit変更前に停止し、no-confirmでも省略しません。起動・停止条件と詳細は[詳細仕様](CONTRIBUTING.md#ローカル2入口のbun標準経路)を参照してください。
+`commit`・`commit-main`・`commit-push`・`commit-pr`は`commit_inspect`と`commit_workflow`の両toolが必須です。toolが同梱TypeScriptをBun 1.3.0以上で固定起動し、assistantは起動コマンドを生成しません。未導入／非公開ならStage前に停止するため、packageのextensionを有効化して新sessionまたは`/reload`で両toolを公開してください。手書きCLI fallbackはありません。開始時は`commit_inspect`、後続は完全参照を渡す`commit_workflow`を使います。push／PRで宛先が未指定なら、先にreference不要の`commit_workflow destinations`でlocal候補・設定根拠を取得し、曖昧ならStage前に実質問します。完全な明示先を優先し、origin等を推測しません。詳細は[宛先候補取得](CONTRIBUTING.md#pushprのlocal宛先候補)を参照してください。完成文章を承認前にprivate保持し、承認後は参照だけで必要なcommit・push・事後確認・cleanupまで進みます。Codemodeは不要です。PR-onlyも同じBun経路です。Bun不在・非対応・確認不能はStageを含むGit変更前に停止し、no-confirmでも省略しません。起動・停止条件と詳細は[詳細仕様](CONTRIBUTING.md#ローカル2入口のbun標準経路)を参照してください。
+
+TUIの `commit_workflow` は呼出し・結果を短く表示します。詳細は tool 出力の展開（標準 `Ctrl+O`）で確認できます。model に渡す完全な結果は省略しません。
 
 大きな固定差分は材料名を選び、続きは返されたcursorだけで読みます。assistantによるoffset／length計算は不要で、read JSON全体は1回32KiB以内です。詳細は[自動page契約](CONTRIBUTING.md#固定材料の自動page-json)を参照してください。
 

@@ -6,6 +6,8 @@
 
 [commit_inspect手順](commit-inspect.md)でfresh setupからmodel-only toolをmodelに直接呼ばせる。部分Stage／renameを実Gitと照合し、content末尾JSONとdetailsの完全一致・同じBun/referenceの後続cleanup・Git不変を確認する。実TUIは次assistant本文より前の一覧snapshot・重複なし・dotのみ色、reload後の過去details描画と新callだけの再inspectを観測する。RPCとprint／JSONは色なし一覧と完全判断材料、通常cancelは参照前後をmarker／公開updateで区別しcleanup報告と実状態、Bun不足はGit変更前停止・fallback0を確認する。色失敗／不正応答は限定testで分離する。
 
+`commit_workflow` の[短い表示と展開](commit-inspect.md#commit_workflowの短いtui表示と展開)は同じowned tmuxで大きいread結果を実際に折り畳み→展開→折り畳み、長い引数・payloadの通常非表示と詳細保持を照合する。失敗の実表示、部分成功／cleanup未完了・未確認の要約と完全content不変の公開renderer testsも使う。RPCをTUI実証と呼ばず、Git操作・検証・承認契約は変えない。
+
 証拠は時刻付き実PTYセルsnapshot（物理screenshotでない）・必要tool結果・版／dirty／digest／exit／unknown／metricと所有PID wait／group・server不存在／owned cleanup／全参照readback。専用tool単独成功で4入口の接続・release・同ターンreadやW2前後比較を保証しない。
 
 ## 4入口のW2接続・往復削減
@@ -67,8 +69,12 @@
 
 ## 後続固定tool（Issue #60）
 
-4入口は両tool必須、後続materials/read/release/plan/execute/cleanupはcommit_workflowのみ。[localの形式修正](local-bun.md#固定tool-同一承認planの形式修正)で同一承認planの余分field拒否→同ref形式修正→commit1回・再承認0、toolなしStage0を確認する。PR中間／完成／終端／部分成功／cleanup不完全は専用手順と公開tool testsで区別する。[reload](commit-inspect.md#実tuiとreload)は再inspectなしの同Bun lookup／cleanupを確認する。宛先候補取得は対象外。
+4入口は両tool必須、後続materials/read/release/plan/execute/cleanupはcommit_workflowのみ。[localの形式修正](local-bun.md#固定tool-同一承認planの形式修正)で同一承認planの余分field拒否→同ref形式修正→commit1回・再承認0、toolなしStage0を確認する。PR中間／完成／終端／部分成功／cleanup不完全は専用手順と公開tool testsで区別する。[reload](commit-inspect.md#実tuiとreload)は再inspectなしの同Bun lookup／cleanupを確認する。宛先候補取得は下記Issue #62の専用代表を使う。
 
 ## 固定材料の自動page（Issue #61）
 
 [localの大UTF-8手順](local-bun.md#大utf-8固定材料-namescursor通常承認commit)でfresh Piの材料名→返却cursor→実際の完成提示・承認質問→真の回答→固定tool commitを確認する。read JSONのみ32KiB以内、全page復元・strict progress・未表示、AI offset/length計算・起動コマンド生成0、質問前payload削除、承認前後の親/tree/index/raw本文/元ref/対象外保持を照合。PR全6材料とprFiles、binary/invalid UTF8/base64、BOM、escape、空/EOF、cursor結合/不正、不可分metadata/要素、旧parts回復・全Staged scannerは公開CLI/toolの実Git代表。既存RPC/observerのworkflow記録を再利用し、新観測基盤・4入口大差分直積・TUI保証は追加しない。
+
+## push／PR local宛先候補（Issue #62）
+
+[push未指定正常と曖昧質問](push-bun.md#local宛先候補と曖昧実質問)、[PR未指定正常](pr-bun.md#local宛先候補から通常pr)を別fresh状態で実行する。reference不要destinations→根拠付き採用または実質問→inspect以後の再検証を照合。候補取得までprivate／Stage／設定変更／製品fetch・ls-remote・push・gh0、Match exec等のssh -G副作用限界を区別。未回答曖昧はStage0、停止報告だけは不成立。完全な明示先の不要調査なし・内容なしempty・設定優先／無効／複数／空／値なし／unknown・HTTPS／SSH alias／local bare／rewrite／不適合候補と非漏洩・同repo不一致／driftは公開CLI/toolの実Git代表。RPC/observerは既存workflow記録を再利用し新runnerなし。Rootは別fresh確認・正式checks・Reviewを担当する。

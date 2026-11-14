@@ -17,6 +17,7 @@ import {
   validReference,
   workflowResult,
   inspectFields,
+  workflowOperations,
 } from "./commit-workflow-validation.js";
 
 const states = {
@@ -424,6 +425,72 @@ function inspectFailure(error, extra = {}) {
   };
 }
 
+function workflowSummary(details, isError) {
+  const data = object(details) ? details : {};
+  const value = object(data.result) ? data.result : data;
+  const error = data.error ?? value.error;
+  const failed = isError || typeof error === "string";
+  const label = (text) =>
+    typeof text === "string" ? quoted(text).slice(0, 160) : "unavailable";
+  const phase =
+    value.phase ??
+    (value.fixed
+      ? "read"
+      : Array.isArray(value.remotes)
+        ? "destinations"
+        : value.payloadRemoved
+          ? "release"
+          : "result");
+  const lines = [
+    failed ? `Failed · ${label(error)}` : `Result · ${label(phase)}`,
+  ];
+  if (failed && typeof value.phase === "string")
+    lines.push(`Reported result · ${label(value.phase)}`);
+  if (Array.isArray(value.parts))
+    lines.push(
+      `${value.parts.length} parts · ${value.done === true ? "read complete" : value.done === false ? "more to read" : "fixed ranges"}`,
+    );
+  if (Array.isArray(value.files))
+    lines.push(
+      `${value.files.length} files${value.filesOmitted ? ` (+${value.filesOmitted} omitted)` : ""}${value.displayed === false ? " · materials omitted" : ""}`,
+    );
+  if (Array.isArray(value.remotes))
+    lines.push(
+      `${value.remotes.length} candidates · ${value.needed ? "destination needed" : "not needed"}${value.reasons?.length ? " · unresolved" : ""}`,
+    );
+  if (value.phase === "plan")
+    lines.push("Plan prepared; separate approval required.");
+  if (value.executable === false)
+    lines.push("Not executable; additional inputs required.");
+  const flags = [
+    "branchCreated",
+    "branchMayHaveChanged",
+    "commitSucceeded",
+    "commitVerified",
+    "pushAttempted",
+    "pushSucceeded",
+    "pushVerified",
+    "prAttempted",
+    "prVerified",
+    "upstreamConfigured",
+    "remoteMayHaveChanged",
+    "operationMayHaveSucceeded",
+    "stagedChangesPreserved",
+  ].filter((flag) => value[flag] === true);
+  if (flags.length) lines.push(flags.join(", "));
+  const cleanup = value.cleanup ?? data.cleanup;
+  if (cleanup?.complete === true) lines.push("Cleanup complete.");
+  else if (cleanup?.complete === false)
+    lines.push(
+      `Cleanup incomplete · ${cleanup.remaining?.length ?? "unknown"} remaining.`,
+    );
+  else if (failed) lines.push("Cleanup unconfirmed.");
+  if (data.processExitConfirmed === false)
+    lines.push("Child exit unconfirmed.");
+  lines.push("Expand tool output for details.");
+  return lines.join("\n");
+}
+
 export default function (pi) {
   pi.registerTool({
     name: "commit_workflow",
@@ -431,7 +498,7 @@ export default function (pi) {
     exposure: "model-only",
     executionMode: "sequential",
     description:
-      "Run bundled materials/read/release/plan/execute/cleanup with an explicit complete reference. Input is a JSON object; execute accepts reference only. Read starts with materials names and continues with the returned cursor unchanged; never calculate offsets or lengths. Bun is obtained only from the matching final successful commit_inspect on this conversation branch. Never retry after a started failure or infer approval from a reference.",
+      "Run reference-free destinations (mode push/pr, optional scope) for local destination evidence without Stage/private preparation/network; SSH -G may run Match exec. Other operations materials/read/release/plan/execute/cleanup require an explicit complete reference. Input is a JSON object; execute accepts reference only. Read starts with materials names and continues with the returned cursor unchanged; never calculate offsets or lengths. For reference operations Bun is obtained only from the matching final successful commit_inspect on this conversation branch. Never retry after a started failure or infer approval from a reference.",
     parameters: Type.Object(
       {
         repository: Type.String(),
@@ -467,13 +534,17 @@ export default function (pi) {
         const { repository, operation, input } = params;
         if (
           realpathSync(repository) !== repository ||
-          input.reference.repository !== repository
+          (operation !== "destinations" &&
+            input.reference.repository !== repository)
         )
           return inspectFailure("repository_mismatch", {
             childStarted,
             processExitConfirmed,
           });
-        const bun = inspectBun(ctx, input.reference);
+        const bun =
+          operation === "destinations"
+            ? discoverBun()
+            : inspectBun(ctx, input.reference);
         stage = "Bun 1.3.0+ executable required; protected probe failed";
         const scripts = realpathSync(
           join(
@@ -507,6 +578,7 @@ export default function (pi) {
           );
         stage = "workflow_result_unknown";
         const limits = {
+          destinations: [600_000, 1024 * 1024],
           materials: [600_000, 64 * 1024],
           read: [120_000, 64 * 1024],
           release: [120_000, 64 * 1024],
@@ -584,6 +656,23 @@ export default function (pi) {
         return inspectFailure(stage, { childStarted, processExitConfirmed });
       }
     },
+    renderCall(args, _theme, context) {
+      const operation = workflowOperations.includes(args.operation)
+        ? ` · ${args.operation}`
+        : "";
+      return new Text(`Git workflow${operation}`, context.outputPad, 0);
+    },
+    renderResult(result, { expanded, isPartial }, _theme, context) {
+      const text = isPartial
+        ? "Running…"
+        : expanded
+          ? result.content
+              .filter((part) => part.type === "text")
+              .map((part) => part.text)
+              .join("\n")
+          : workflowSummary(result.details, context.isError);
+      return new Text(text, context.outputPad, 0);
+    },
   });
   pi.registerTool({
     name: "commit_inspect",
@@ -592,7 +681,7 @@ export default function (pi) {
     renderShell: "self",
     executionMode: "sequential",
     description:
-      "Discover and verify Bun 1.3.0+, run the bundled inspect CLI and display Git status. Creates private preparation, but does not Stage or commit. Supply the real absolute repository root and existing inspect JSON with explicit mode (commit, commit-main, push, pr). With HEAD or selected changes, push/pr require push.remote and pr also requires pr.repository ([HOST/]OWNER/REPO). Resolve destinations from explicit instructions/local config before calling; ask if ambiguous. Preserve the complete result/reference for subsequent commit_workflow calls; never construct CLI commands. Do not repeat the TUI list; approval remains separate. No fallback or automatic install after failure.",
+      "Discover and verify Bun 1.3.0+, run the bundled inspect CLI and display Git status. Creates private preparation, but does not Stage or commit. Supply the real absolute repository root and existing inspect JSON with explicit mode (commit, commit-main, push, pr). With HEAD or selected changes, push/pr require push.remote and pr also requires pr.repository ([HOST/]OWNER/REPO). Honor complete explicit destinations; otherwise use commit_workflow destinations before inspect, and ask before Stage if ambiguous, invalid or unsupported. Preserve the complete result/reference for subsequent commit_workflow calls; never construct CLI commands. Do not repeat the TUI list; approval remains separate. No fallback or automatic install after failure.",
     parameters: Type.Object(
       { repository: Type.String(), input: Type.String() },
       { additionalProperties: false },

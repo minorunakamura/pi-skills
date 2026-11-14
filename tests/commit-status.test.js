@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -213,6 +214,129 @@ await test("rejects malformed metadata without echoing invalid JSON", async () =
     tool.execute("display", { status: "SECRET_INVALID_JSON" }, null, null, {}),
     { message: "Invalid Git status metadata" },
   );
+});
+
+function renderWorkflow(details, options = {}, isError = false) {
+  const result = {
+    content: [{ type: "text", text: JSON.stringify(details) }],
+    details,
+  };
+  const before = JSON.stringify(result);
+  const rendered = tools
+    .get("commit_workflow")
+    .renderResult(result, options, {}, { outputPad: 2, isError });
+  assert.equal(JSON.stringify(result), before);
+  assert.equal(rendered.paddingX, 2);
+  return rendered.text;
+}
+
+await test("workflow renderer hides call references and collapses large results without changing their data", () => {
+  const workflow = tools.get("commit_workflow");
+  assert.equal(
+    workflow.renderCall(
+      { operation: "read", input: { reference: "PRIVATE_REFERENCE" } },
+      {},
+      { outputPad: 2 },
+    ).text,
+    "Git workflow · read",
+  );
+  assert.equal(
+    workflow.renderCall({ operation: "SECRET_INVALID" }, {}, { outputPad: 2 })
+      .text,
+    "Git workflow",
+  );
+  const page = {
+    fixed: true,
+    parts: [{ name: "diff", text: "LARGE_PAYLOAD".repeat(2000) }],
+    next: { binding: "PRIVATE_CURSOR" },
+    done: false,
+    unread: ["diff"],
+  };
+  const collapsed = renderWorkflow(page);
+  assert.match(collapsed, /read/);
+  assert.match(collapsed, /1 part.*more to read/);
+  assert.doesNotMatch(collapsed, /LARGE_PAYLOAD|PRIVATE_CURSOR/);
+  assert.ok(collapsed.length < 200);
+  assert.equal(renderWorkflow(page, { expanded: true }), JSON.stringify(page));
+  assert.match(renderWorkflow({ ...page, done: true }), /read complete/);
+  assert.match(renderWorkflow(page, { isPartial: true }), /Running/);
+});
+
+await test("workflow renderer keeps incomplete cleanup, partial success and uncertainty visible while collapsed", () => {
+  const partial = {
+    error: "cancelled",
+    processExitConfirmed: false,
+    result: {
+      commitSucceeded: true,
+      commitVerified: true,
+      pushAttempted: true,
+      pushVerified: false,
+      cleanup: { complete: false, remaining: ["PRIVATE_REMAINDER"] },
+    },
+  };
+  const collapsed = renderWorkflow(partial, {}, true);
+  assert.match(collapsed, /Failed.*cancelled/);
+  assert.match(collapsed, /commitSucceeded.*commitVerified.*pushAttempted/);
+  assert.match(collapsed, /Cleanup incomplete.*1 remaining/);
+  assert.match(collapsed, /Child exit unconfirmed/);
+  assert.doesNotMatch(collapsed, /PRIVATE_REMAINDER|pushVerified/);
+  const completedBeforeCancel = renderWorkflow(
+    {
+      error: "cancelled",
+      result: {
+        phase: "committed",
+        cleanup: { complete: true, remaining: [] },
+      },
+    },
+    {},
+    true,
+  );
+  assert.match(completedBeforeCancel, /Failed.*cancelled/);
+  assert.match(completedBeforeCancel, /Reported result.*committed/);
+  assert.match(
+    renderWorkflow({ error: "workflow_result_unknown" }, {}, true),
+    /Cleanup unconfirmed/,
+  );
+  assert.match(
+    renderWorkflow({
+      phase: "cancelled",
+      cleanup: { complete: true, remaining: [] },
+    }),
+    /Cleanup complete/,
+  );
+  assert.match(
+    renderWorkflow({ phase: "plan", payloadRemoved: true }),
+    /separate approval/,
+  );
+  assert.match(
+    renderWorkflow({ phase: "materials", executable: false }),
+    /Not executable/,
+  );
+  assert.match(
+    renderWorkflow({
+      mode: "pr",
+      needed: true,
+      remotes: [{}, {}],
+      reasons: ["multiple_remotes"],
+    }),
+    /2 candidates.*unresolved/,
+  );
+  assert.match(
+    renderWorkflow({ phase: "materials", files: [{}, {}], displayed: false }),
+    /2 files.*omitted/,
+  );
+  const unknown = tools
+    .get("commit_workflow")
+    .renderResult(
+      { content: [] },
+      {},
+      {},
+      { outputPad: 2, isError: true },
+    ).text;
+  assert.match(unknown, /Failed.*unavailable/);
+  const control = renderWorkflow({ error: "bad\n\u001b[31m\u202e" }, {}, true);
+  assert.equal(control.includes("\u001b"), false);
+  assert.equal(control.includes("\u202e"), false);
 });
 
 const scripts = resolve(
@@ -1516,6 +1640,16 @@ await test("commit_workflow automatic read returns the bounded JSON once and fol
     assert.equal(response.content.length, 1);
     assert.deepEqual(JSON.parse(response.content[0].text), response.details);
     assert.ok(Buffer.byteLength(response.content[0].text) <= 32768);
+    const beforeRender = JSON.stringify(response);
+    const workflow = tools.get("commit_workflow");
+    const collapsed = workflow.renderResult(response, {}, {}, { outputPad: 1 });
+    assert.ok(collapsed.text.length < 200);
+    assert.equal(
+      workflow.renderResult(response, { expanded: true }, {}, { outputPad: 1 })
+        .text,
+      response.content[0].text,
+    );
+    assert.equal(JSON.stringify(response), beforeRender);
     for (const part of response.details.parts)
       if (part.name === "diff")
         chunks.push(Buffer.from(part.text, part.encoding));
@@ -1587,4 +1721,150 @@ await test("commit_workflow explicitly reports unfit initial metadata with owned
   assert.equal(result.details.materialsPreserved, undefined);
   assert.equal(existsSync(f.reference.directory), false);
   assert.equal(f.git("rev-list", "--count", "HEAD").toString().trim(), "1");
+});
+
+await test("commit_workflow destinations starts with discovery without inspect history and never prepares private state", async (t) => {
+  const f = inspectFixture(t);
+  f.git("remote", "add", "backup", "https://example.invalid/owner/repo.git");
+  const index = readFileSync(join(f.repo, ".git/index"));
+  const config = readFileSync(join(f.repo, ".git/config"));
+  process.env.BUN_OPTIONS = "--preload=SECRET_STARTUP";
+  process.env.NODE_OPTIONS = "--require=SECRET_STARTUP";
+  const workflow = tools.get("commit_workflow");
+  const call = (input, operation = "destinations") =>
+    workflow.execute(
+      "destinations",
+      { repository: f.repo, operation, input },
+      undefined,
+      undefined,
+      {
+        mode: "rpc",
+        sessionManager: {
+          getBranch() {
+            assert.fail("destinations must not consult inspect history");
+          },
+        },
+      },
+    );
+  const result = await call({ mode: "pr", scope: { kind: "staged" } });
+  assert.notEqual(result.isError, true, JSON.stringify(result));
+  assert.deepEqual(JSON.parse(result.content[0].text), result.details);
+  assert.equal(result.details.needed, true);
+  assert.deepEqual(result.details.basis, {
+    source: "singleRemote",
+    remote: "backup",
+  });
+  assert.equal(
+    result.details.remotes[0].repository,
+    "example.invalid/owner/repo",
+  );
+  assert.equal(result.details.reference, undefined);
+  assert.deepEqual(readFileSync(join(f.repo, ".git/index")), index);
+  assert.deepEqual(readFileSync(join(f.repo, ".git/config")), config);
+  assert.equal(
+    readdirSync(f.owned).some((name) => name.startsWith("pi-commit-")),
+    false,
+  );
+  for (const input of [
+    {},
+    { mode: "commit" },
+    { mode: "push", reference: {} },
+    { mode: "push", scope: { kind: "all", raw: "SECRET" } },
+  ]) {
+    const denied = await call(input);
+    assert.equal(denied.details.error, "input_rejected");
+    assert.equal(denied.details.childStarted, false);
+  }
+  const mutation = await call({ reference: {} }, "execute");
+  assert.equal(mutation.details.error, "input_rejected");
+});
+await test("destinations result validator rejects raw fields and credential URLs at the public boundary", async (t) => {
+  const f = inspectFixture(t);
+  f.git("remote", "add", "backup", "https://example.invalid/owner/repo.git");
+  const result = await tools.get("commit_workflow").execute(
+    "destinations",
+    {
+      repository: f.repo,
+      operation: "destinations",
+      input: { mode: "push" },
+    },
+    undefined,
+    undefined,
+    { mode: "rpc" },
+  );
+  assert.notEqual(result.isError, true);
+  const { workflowResult } = await import(
+    "../extensions/commit-workflow-validation.js"
+  );
+  for (const mutate of [
+    (v) => {
+      v.rawConfig = "SECRET";
+    },
+    (v) => {
+      v.remotes[0].rawSsh = "SECRET";
+    },
+    (v) => {
+      v.remotes[0].url = "https://SECRET@example.invalid/owner/repo";
+    },
+    (v) => {
+      v.remotes[0].url = "ssh://git:SECRET@example.invalid/owner/repo";
+    },
+    (v) => {
+      v.config.branchRemote.values = [{ kind: "invalid", raw: "SECRET" }];
+    },
+    (v) => {
+      v.config.branchPushRemote = {
+        state: "single",
+        values: [
+          { kind: "value", value: "https://TOKEN@example.invalid/owner/repo" },
+        ],
+      };
+    },
+    (v) => {
+      v.reasons = ["SECRET"];
+    },
+  ]) {
+    const value = structuredClone(result.details);
+    mutate(value);
+    assert.throws(
+      () =>
+        workflowResult(value, "destinations", undefined, 0, { mode: "push" }),
+      /Invalid workflow result/,
+    );
+  }
+});
+
+await test("commit_workflow destinations sanitizes unmatched config while preserving observed Unicode remote evidence", async (t) => {
+  const f = inspectFixture(t);
+  f.git("remote", "add", "共有@work", "/owned/local.git");
+  const call = () =>
+    tools.get("commit_workflow").execute(
+      "destinations",
+      {
+        repository: f.repo,
+        operation: "destinations",
+        input: { mode: "push" },
+      },
+      undefined,
+      undefined,
+      { mode: "rpc" },
+    );
+  f.git(
+    "config",
+    "branch.main.pushRemote",
+    "https://TOKEN@example.invalid/owner/repo",
+  );
+  const denied = await call();
+  assert.notEqual(denied.isError, true, JSON.stringify(denied));
+  assert.deepEqual(denied.details.config.branchPushRemote.values, [
+    { kind: "missingRemote" },
+  ]);
+  assert.doesNotMatch(JSON.stringify(denied), /TOKEN|https:/);
+  f.git("config", "branch.main.pushRemote", "共有@work");
+  const control = await call();
+  assert.notEqual(control.isError, true, JSON.stringify(control));
+  assert.deepEqual(control.details.basis, {
+    source: "branchPushRemote",
+    remote: "共有@work",
+  });
 });

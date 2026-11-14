@@ -7,9 +7,9 @@ description: Verify pi-skills commit_inspect acquisition, real TUI/nonTUI displa
 
 今回関係する機能を[Feature Map](references/feature-map.md)から選ぶ。**専用toolの取得／即時表示／nonTUI／cancel／reloadは[commit_inspect手順](references/commit-inspect.md)**を使う。通常Skill操作も明示製品extensionとread,bash,commit_inspect,commit_workflowを使い、無extension経路は開始時toolなし対照として維持する。実TUIは導入Pi 1.4.0とowned tmuxで別に観測し、RPCをTUI実証と呼ばない。**commit／commit-mainの現行Bun入口・branch方針・通常承認／cancel／no-confirm・default実質問の未回答Stage0・Bun不足のGit変更前停止は[共有local手順](references/local-bun.md)**を使う。起動前に関連source／手順／helperと使捨てdriverのdigestを固定し、run中は編集しない。観測者のPIDを同じ親shellで記録しwaitする。実Gitの元ref／予定branch／親／tree／raw本文／index／upstream、全tool操作・Git子processの通信0、小diff一括・[大UTF-8の自動page](references/local-bun.md#大utf-8固定材料-namescursor通常承認commit)、質問前の不要payload削除を照合する。入口の全文read一式の同ターン性・tail取得・PR > push > local、新tool1回と同Bun／完全reference引継ぎ、追加質問なしの独立release0・plan payloadRemoved=true／6 bin不在（recent-history.binを含む）、先に疑義質問ならrelease成功後、新参照の採用を確認する。PR中間materialsは非実行可能、終了結果はcleanup・不要承認0、失敗／削除拒否は停止と残存を別に照合する。script単体・文言assert・Pi起動成功だけでAgent判断を保証しない。RPCの通常テキスト承認はTUI実証でない。
 
-**commit-pushは[push専用Bun／runtime停止手順](references/push-bun.md)**を使う。新commit／既存HEAD、remote／実URL／target／予定upstreamの一括確認、固定SHA送信・PR API0、先行成功と後続停止を実Gitで照合する。
+**commit-pushは[push専用Bun／runtime停止手順](references/push-bun.md)**を使う。reference不要destinationsによる未指定remote候補取得・別fresh曖昧実質問／未回答Stage0、新commit／既存HEAD、remote／実URL／target／予定upstreamの一括確認、固定SHA送信・PR API0、先行成功と後続停止を実Gitで照合する。
 
-**commit-prは[PR用Bun／修正／部分成功／runtime停止手順](references/pr-bun.md)**を使う。新commit／既存HEAD／PR-only／全state既存PR、固定文章と片側修正・設定再準備、commit後／送信後driftを同一repositoryの架空GitHub URL→owned local bare／TS gh+ssh fixtureで照合する。廃止したPython専用手順は使わず、共有保証は公開Bun suiteと各専用手順で確認する。
+**commit-prは[PR用Bun／修正／部分成功／runtime停止手順](references/pr-bun.md)**を使う。未指定remote／repositoryのlocal候補取得、新commit／既存HEAD／PR-only／全state既存PR、固定文章と片側修正・設定再準備、commit後／送信後driftを同一repositoryの架空GitHub URL→owned local bare／TS gh+ssh fixtureで照合する。廃止したPython専用手順は使わず、共有保証は公開Bun suiteと各専用手順で確認する。
 
 ## 分離・証拠・再利用
 

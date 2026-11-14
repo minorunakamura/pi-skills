@@ -1,3 +1,4 @@
+import { destinations } from "./destinations.ts";
 import { materialPage, view, displayBudget } from "./material-page.ts";
 import {
   prOptions,
@@ -24,6 +25,7 @@ import {
 import { delimiter, join, resolve } from "node:path";
 import {
   cleanSubmodules,
+  hasDestinationContent,
   indexEntries,
   inScope,
   isStaged,
@@ -440,6 +442,14 @@ function main() {
       ? JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))
       : {},
   );
+  if (operation === "destinations") {
+    requireThat(
+      Object.keys(input).every((key) => ["mode", "scope"].includes(key)),
+      "invalid_input",
+    );
+    requireThat(input.mode === "push" || input.mode === "pr", "invalid_mode");
+    return destinations(repo, input.mode, scope(input.scope, repo));
+  }
   if (operation === "inspect") {
     requireThat(
       Object.keys(input).every((key) =>
@@ -462,14 +472,7 @@ function main() {
       "invalid_input",
     );
     requireThat(mode === "pr" || input.pr === undefined, "invalid_input");
-    const hasContent =
-      state.head !== null ||
-      state.changes.some(
-        (change) =>
-          isStaged(change) ||
-          (selected.kind !== "staged" &&
-            inScope(Buffer.from(change.pathBytes, "base64"), selected)),
-      );
+    const hasContent = hasDestinationContent(state, selected);
     const push =
       (mode === "push" || mode === "pr") && hasContent
         ? pushOptions(input.push)

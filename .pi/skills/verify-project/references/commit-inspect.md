@@ -92,6 +92,14 @@ date -u '+%Y-%m-%dT%H:%M:%SZ'
 
 一覧は一度だけ、部分Stage／renameは実Gitと一致、path／状態名にdotの専用色なし、通常assistantに同じ一覧なし、content末尾JSON=detailsを照合する。idle後`/reload`を入力し、`session_start reason=reload`と過去detailsの一致・実画面の一覧保持・新inspect call0を確認する。その後新promptで同じ完全referenceをcommit_workflowのcleanupへ渡し、再inspect／手動probe／PATH再探索なしでlookup成功・cleanupを確認する。永続registry・reference再解決を作らない。終了はidleでCtrl-D、必要ならもう一度。所有Pi group不存在とpane親wait後、専用tmux serverだけ終了しsocket/server不存在を確認する。
 
+## commit_workflowの短いTUI表示と展開
+
+上のowned tmux／明示extension／observer／sandboxを再利用する。新しいrunnerや利用者設定は追加しない。起動前にREADMEへ無秘密の識別文字列を繰り返した大きいUTF-8差分を作り、source／driver／本手順のmanifestを固定する。実modelへinspect(mode=commit)→materials→read(materials:["diff"])を直接呼び、最初のpage取得後はplan／commitせず停止するよう依頼する。Stageはowned fixture内だけ。完了後の実画面で呼出しが `Git workflow · read`、結果がread・parts数・続きありの短い要約、長いreference／cursor／差分本文なしであることを確認する。
+
+Piのtool出力展開（標準Ctrl+O）を実際に操作し、snapshotに固定差分の識別文字列とread JSONが出ること、再度折り畳むと消えることを照合する。observerの完全tool resultは表示前後で変わらず、contentのJSON＝details、read JSON全体32KiB以内、固定referenceとcursor保持を確認する。実tool call0の描画単体テストを実TUI操作の代用にしない。read pageを完了認定せず、実際にdone=falseなら続きありと表示する。
+
+同じsessionで所有referenceのcleanupを直接呼び、完了要約とprivate不在を確認する。その後、reference:{}等の明示的な不正inputを1回だけ呼ばせ、input_rejected／childStarted=falseと折り畳み画面のFailedを確認し、retry／Git操作なしで停止する。部分成功flags／cleanup未完了／終了未確認・PR中間非実行性は公開renderer testsで正常対照と照合する。既存実Git read testで完全content／detailsを描画前後に比較する。所有PID/group wait→owned tmux終了→owned cleanup→全証拠readbackは上の共通手順のとおり。通常assistantの完成文章・承認をtool描画へ移さない。
+
 ## 通常cancelの取得前後とBun不足
 
 - **取得前**: owned Git logging wrapperで実Git status到達marker（PID付き）を書いてから、同じstatus引数を実Gitへ渡す直前で保持する。markerとsuccess update0を確認した後、TUI EscapeまたはRPC abort-file（private regular fileに`abort\n`）で通常cancelする。単なるsleep時刻だけで境界認定しない。childとgroup終了、最終isError／processExitConfirmed、referenceなし・cleanup未確認／残存可能性・未知directory探索削除0を照合する。fixture全体の検証者cleanupと製品所有cleanupを混同しない。

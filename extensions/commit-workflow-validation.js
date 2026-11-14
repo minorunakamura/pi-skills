@@ -19,6 +19,7 @@ const names = [
   "pr-templates",
 ];
 export const workflowOperations = [
+  "destinations",
   "materials",
   "read",
   "release",
@@ -62,6 +63,12 @@ export function validWorkflowInput(params) {
   )
     return false;
   const v = params.input;
+  if (params.operation === "destinations")
+    return (
+      keys(v, ["mode"], ["scope"]) &&
+      ["push", "pr"].includes(v.mode) &&
+      (v.scope === undefined || scope(v.scope))
+    );
   const allowed = {
     materials: ["defaultBranch", "includeOutsideStaged", "reviewedPaths"],
     read: ["parts", "fileOffset", "fileCount", "materials", "cursor"],
@@ -777,6 +784,9 @@ export function workflowResult(v, operation, reference, exitCode, input) {
       valid = failureResult(v, operation, reference);
     } else if (exitCode === 0) {
       switch (operation) {
+        case "destinations":
+          valid = destinationResult(v, input);
+          break;
         case "cleanup":
           valid =
             keys(v, ["phase", "stagedChangesPreserved", "cleanup"]) &&
@@ -988,4 +998,143 @@ function automaticRead(v, input) {
     v.next.offset === offset &&
     JSON.stringify(v.next.materials) === JSON.stringify(materials)
   );
+}
+
+const safeDestinationName = (v) =>
+  text(v) &&
+  v.length > 0 &&
+  !v.startsWith("-") &&
+  Buffer.from(v).toString() === v &&
+  !Array.from(v).some(
+    (char) => char.charCodeAt(0) <= 32 || char.charCodeAt(0) === 127,
+  );
+const destinationReasons = (v, allowed) =>
+  strings(v) && v.every((r) => allowed.includes(r));
+function destinationResult(v, input) {
+  if (
+    !keys(v, [
+      "mode",
+      "needed",
+      "branch",
+      "head",
+      "config",
+      "remotes",
+      "basis",
+      "reasons",
+      "localInformationMayBeStale",
+      "sshEvaluationMayHaveSideEffects",
+    ]) ||
+    v.mode !== input.mode ||
+    !bool(v.needed) ||
+    !nullableText(v.branch) ||
+    !nullableSha(v.head) ||
+    v.localInformationMayBeStale !== true ||
+    v.sshEvaluationMayHaveSideEffects !== true ||
+    !keys(v.config, [
+      "branchPushRemote",
+      "remotePushDefault",
+      "branchRemote",
+      "branchMerge",
+    ]) ||
+    !Object.values(v.config).every(
+      (e) =>
+        keys(e, ["state", "values"]) &&
+        ["absent", "single", "multiple", "unknown"].includes(e.state) &&
+        Array.isArray(e.values) &&
+        (e.state === "single"
+          ? e.values.length === 1
+          : e.state === "multiple"
+            ? e.values.length > 1
+            : e.values.length === 0) &&
+        e.values.every((entry) =>
+          entry.kind === "value"
+            ? keys(entry, ["kind", "value"]) && safeDestinationName(entry.value)
+            : keys(entry, ["kind"]) &&
+              ["valueless", "empty", "invalid", "missingRemote"].includes(
+                entry.kind,
+              ),
+        ),
+    ) ||
+    !keys(v.basis, ["source", "remote"]) ||
+    ![
+      null,
+      "branchPushRemote",
+      "remotePushDefault",
+      "branchRemote",
+      "singleRemote",
+    ].includes(v.basis.source) ||
+    !(v.basis.remote === null || safeDestinationName(v.basis.remote)) ||
+    !destinationReasons(v.reasons, [
+      "remote_observation_failed",
+      "invalid_destination_config",
+      "configured_remote_missing",
+      "multiple_remotes",
+      "no_remotes",
+      "unsupported_candidates",
+    ]) ||
+    !Array.isArray(v.remotes)
+  )
+    return false;
+  if (
+    !["branchPushRemote", "remotePushDefault", "branchRemote"].every((key) =>
+      v.config[key].values.every(
+        (entry) =>
+          entry.kind !== "value" ||
+          v.remotes.some((remote) => remote.name === entry.value),
+      ),
+    ) ||
+    !v.config.branchMerge.values.every(
+      (entry) =>
+        entry.kind !== "value" || entry.value.startsWith("refs/heads/"),
+    )
+  )
+    return false;
+  return v.remotes.every(
+    (r) =>
+      keys(r, ["name", "url", "repository", "reasons"]) &&
+      (r.name === null || safeDestinationName(r.name)) &&
+      (r.url === null || safePushUrl(r.url)) &&
+      (r.repository === null ||
+        (text(r.repository) &&
+          /^[a-zA-Z0-9.-]+\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(
+            r.repository,
+          ))) &&
+      destinationReasons(r.reasons, [
+        "unsupported_remote_name",
+        "unknown_remote",
+        "multiple_push_urls",
+        "unsupported_push_url",
+        "credentials_in_remote_url",
+        "custom_ssh_command_unsupported",
+        "ssh_host_unresolved",
+        "push_config_observation_failed",
+        "git_observation_failed",
+        "unsupported_pr_repository",
+      ]),
+  );
+}
+function safePushUrl(v) {
+  if (
+    !text(v) ||
+    !v ||
+    Array.from(v).some(
+      (char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127,
+    ) ||
+    v.startsWith("-") ||
+    v.startsWith("ext::")
+  )
+    return false;
+  if (!v.includes("://")) return true;
+  try {
+    const url = new URL(v);
+    return (
+      ["https:", "http:", "ssh:", "file:"].includes(url.protocol) &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      (url.protocol === "ssh:" || !url.username)
+    );
+  } catch {
+    return false;
+  }
 }

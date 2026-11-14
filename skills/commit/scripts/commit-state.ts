@@ -150,6 +150,20 @@ export function snapshot(repo: string) {
     default: localDefault(repo, branch),
   };
 }
+export function hasDestinationContent(
+  state: Snapshot,
+  selected: Scope,
+): boolean {
+  return (
+    state.head !== null ||
+    state.changes.some(
+      (change) =>
+        isStaged(change) ||
+        (selected.kind !== "staged" &&
+          inScope(Buffer.from(change.pathBytes, "base64"), selected)),
+    )
+  );
+}
 export function sameSnapshot(repo: string, expected: Snapshot): void {
   requireThat(
     JSON.stringify(snapshot(repo)) === JSON.stringify(expected),

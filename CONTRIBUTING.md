@@ -33,19 +33,31 @@ materialsで全Staged diffをGitleaks検査します。未導入だけunavailabl
 
 ### 後続の固定tool境界
 
-model-onlyの `commit_workflow` は `{repository,operation,input}` を受け、inputはJSON objectです。固定operationは materials/read/release/plan/execute/cleanup のみ。executeのinputは完全referenceだけで、Bun/config/entrypoint/cwd/env/timeout/commandは公開しません。Piの公開 `executionMode: 'sequential'` で同じturnの並列起動を避け、既存spawn＋stdinとCLIのGit検証・通常hooksを再利用します。複数stepと子command各60秒を考慮してoperation別の時間／出力上限を固定します。
+model-onlyの `commit_workflow` は `{repository,operation,input}` を受け、inputはJSON objectです。固定operationは destinations/materials/read/release/plan/execute/cleanup。executeのinputは完全referenceだけで、Bun/config/entrypoint/cwd/env/timeout/commandは公開しません。Piの公開 `executionMode: 'sequential'` で同じturnの並列起動を避け、既存spawn＋stdinとCLIのGit検証・通常hooksを再利用します。複数stepと子command各60秒を考慮してoperation別の時間／出力上限を固定します。
 
 Bun lookupは `ctx.sessionManager.getBranch()` のmessage/toolResult/commit_inspect最終isError=falseだけ。完全検証済みdetails.bunを、caller referenceのrun/repository/directory/dev/ino一致で一意に特定し、遷移するfilesは一致を要求しません。途中update・通常text・失敗・別branch・別repo・証拠不足／矛盾は使いません。同じ絶対実体・実行可能性・保護probeを再確認し、PATH再探索しません。reload後もこの証拠が必要です。最新reference・承認・復旧状態を履歴から導出せず、callerの完全referenceの所有／digest／phaseはCLIが検証します。
 
 正常応答は終了確認／exit0／完全JSONと操作別検証が必要です。materialsとempty、phaseなしread／release、完成planとPR中間materials(executable=false)、already_pushed／existing_pr終端、executeのcommitted／pushed／already_pushed／existing_pr／pr_created、cleanupのcancelled／stagedChangesPreserved／complete／remainingを区別します。固定文章・新reference・部分成功・cleanup不完全を落とさず、contentとdetailsを同じ検証済みデータから作ります。未知field・生scanner／hook／child出力は返しません。
 
+TUIの `commit_workflow` は `renderCall` で操作名だけ、`renderResult` でphase・件数・読取の続き／終端などを短く表示します。Piのtool出力展開（標準 `Ctrl+O`、現在の割当は `/hotkeys`）で完全な結果を表示できます。失敗・先行成功flags・cleanup未完了／未確認・child終了未確認は折り畳み時も残します。描画だけの変更で、model-facing content／details、完全reference、read JSONの予算・bytes、RPC／JSON／printの結果は削りません。完成文章・通常承認は引き続きassistantで別途提示します。
+
 子process起動前の構造／許可field誤りだけが `input_rejected, childStarted=false, inputCorrectionAllowed=true` です。Bun/Git起動0・private準備不変で、同じ承認planの余分field等の形式修正だけなら同referenceで再要求でき、再承認不要です。文章／対象／操作変更は新plan提示・実承認が必要で、driftやruntime／repository／run／所有不一致はこの例外にしません。cancel済みsignalも対象外です。CLI exit1はallowlistと型検証済みの先行成功flags／SHA／cleanupを保持しますが入力修正可能にはしません。
 
-起動後失敗／timeout／cancel／不正応答／成否不明は無断retry／rollbackなし。終了未確認ならcleanupを競合させず、CLI cleanup済みなら二重cleanupしません。transition後の応答喪失等で安全な最新referenceが不明なら古ref更新・探索・強制削除せず残存報告します。executeへinspectの成功update後cancel処理を流用しません。read予算超過のmaterialsPreservedだけは従来の縮小read例外を維持します。自動pageは下記の契約で提供し、宛先候補取得は提供していません。
+起動後失敗／timeout／cancel／不正応答／成否不明は無断retry／rollbackなし。終了未確認ならcleanupを競合させず、CLI cleanup済みなら二重cleanupしません。transition後の応答喪失等で安全な最新referenceが不明なら古ref更新・探索・強制削除せず残存報告します。executeへinspectの成功update後cancel処理を流用しません。read予算超過のmaterialsPreservedだけは従来の縮小read例外を維持します。自動pageとreference不要の宛先候補取得は下記の契約で提供します。
 
 同梱CLIは開発用公開テスト入口として維持します。開発者はtrusted scripts cwdで `env -u BUN_OPTIONS -u NODE_OPTIONS "$BUN" --config="$SCRIPTS/bunfig.toml" --env-file=/dev/null --no-install "$SCRIPTS/commit-workflow.ts" OPERATION --repository "$REPOSITORY"` へstdin JSONを渡せます。これはSkillのtool未導入時fallbackではありません。
 
-### 固定材料の自動page JSON
+### push／PRのlocal宛先候補
+
+`commit_workflow`の`operation:"destinations"`、`input:{"mode":"push"}`または`{"mode":"pr","scope":{"kind":"paths","paths":["README.md"]}}`はreference不要。同梱公開CLIにも同operationを提供し、既存の初回Bun発見・保護probe、固定spawn＋stdinを使います。mutation操作の完全reference＋一致inspect Bun証拠は変更しません。
+
+結果は`needed`（HEADまたは選択内容）、`remotes`（name／安全なrewrite後url／PR repository候補／理由）、`config`（branchPushRemote／remotePushDefault／branchRemote／branchMerge）、`basis`（source／remote）と未解決`reasons`。config stateのabsent／single／multiple／unknown、値のvalueless／empty／invalid／missingRemote／valueを保存し、remote値は観測済みremote名と一致するものだけを返し、不一致はmissingRemote（値非表示）、不正merge refはinvalidとします。生設定・SSH出力・資格情報URLを返しません。内容なしは必要ないremote照会・質問をせず既存empty経路へ。
+
+toolは観測だけ。assistantは完全な明示先を尊重し、なければbranch.pushRemote → remote.pushDefault → branch.remoteの根拠を区別します。無効／空／複数／存在しないremote／観測失敗から次へfallbackせず、根拠が全てabsentのときだけ単一remoteを提案できます。origin推測なし。曖昧／非対応候補を黙って消さず、安全な候補・理由と実際の宛先質問をStage前に示し、未回答Stage0。PRは共有URL／SSH host正規化だけを使いpreparePrを呼ばず、明示repository不一致・同repo制約を維持します。
+
+private準備／Stage／設定書込・補修／fetch／ls-remote／push／ghなし。SSHの`ssh -G`はMatch exec等を実行し得るので任意外部processまで副作用ゼロとは保証しません。検証はowned設定・fixtureのみ。候補は権限・最新default／SHAの保証ではなく、選択後のinspect／materials／plan／execute再検証とdrift検出を迂回しません。local commit／commit-mainへremote調査を追加しません。直接確認はpush／PR専用手順の未指定正常と別fresh曖昧質問、公開CLI/tool実Git testsを使います。
+
+## 固定材料の自動page JSON
 
 標準readのinputは初回`{"reference":REFERENCE,"materials":["diff","history","files"]}`、続きは`{"reference":REFERENCE,"cursor":NEXT}`です。固定名はdiff/history/recent-history/pr-diff/pr-history/pr-templatesと一覧files/prFiles。未知・その入口で利用不能な材料は拒否します。複数名は重複なしで順に読みます。小材料の既存一括返却は維持し、大材料の初期metadataも32KiB以内、省略一覧はfiles/prFilesから到達可能です。PRの省略した再利用pathもprFiles.reusedStagedで確認できます。不可分metadataが収まらなければ`material_metadata_budget_exceeded`で明示停止し、通常の所有cleanupを報告します（旧readの保持／縮小回復とは別）。
 

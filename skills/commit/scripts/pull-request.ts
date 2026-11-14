@@ -69,12 +69,7 @@ function gh(repo: string, args: string[]) {
     new TextDecoder("utf-8", { fatal: true }).decode(result.stdout),
   ) as unknown;
 }
-function sameRepository(
-  repo: string,
-  context: PushContext,
-  options: PrOptions,
-) {
-  const url = context.url;
+export function repositoryFromUrl(repo: string, url: string) {
   let host: string;
   let path: string;
   if (url.includes("://")) {
@@ -119,9 +114,17 @@ function sameRepository(
     host = rows[0].slice(9);
     path = match[3];
   }
+  return { host, slug: path.replace(/\.git$/, "") };
+}
+function sameRepository(
+  repo: string,
+  context: PushContext,
+  options: PrOptions,
+) {
+  const candidate = repositoryFromUrl(repo, context.url);
   requireThat(
-    host.toLowerCase() === options.host.toLowerCase() &&
-      path.replace(/\.git$/, "").toLowerCase() === options.slug.toLowerCase(),
+    candidate.host.toLowerCase() === options.host.toLowerCase() &&
+      candidate.slug.toLowerCase() === options.slug.toLowerCase(),
     "github_remote_mismatch",
   );
 }

@@ -8,7 +8,17 @@
 
 共有local手順どおり `commit_inspect` と `commit_workflow` の両tool必須。未導入／非公開ならStageを含むGit変更前に停止し、導入・新sessionまたは `/reload` を案内する。Bun 1.3.0以上の確認不能／開始後失敗も停止し、手書きCLI fallback／installしない。inspectは以下の完全入力で直接1回、後続は全て `commit_workflow` の固定operationとJSON object inputを使う。完全referenceを無改変で引き継ぐ。PR-onlyも同じ。手動probe・inspect・JSON転記・重複一覧は不要。
 
-**`commit_inspect`では、既存HEADまたは対象変更がある場合は`mode:"push"`に加え、`push.remote`が必須。modeだけでは呼ばない。** inspect前に`git remote`とlocal設定で宛先を確認し、ユーザーの明示先を優先、曖昧なら実質問する。例のoriginを推測採用しない。HEADも対象変更もない場合だけ宛先設定を省略できる。
+**`commit_inspect`では、既存HEADまたは対象変更がある場合は`mode:"push"`に加え、`push.remote`が必須。modeだけでは呼ばない。** 完全な明示先があれば尊重し、不要な調査・質問はしない。未指定ならinspectより先にreference不要の固定toolを呼ぶ（scopeは今回の対象と同じ）。手動の`git remote`／設定／URL調査コマンドを組み立てない。
+
+```json
+{"repository":"/absolute/path/to/repo","operation":"destinations","input":{"mode":"push"}}
+```
+
+`needed=false`なら宛先質問なしでpush設定を省略したinspect→既存のempty終了へ進む。HEADまたは対象内容ありなら`needed=true`。候補にはlocal remote一覧・rewrite後の実push URL・現在branchのremote／merge／pushRemoteとremote.pushDefault根拠・未解決理由がある。toolは候補観測だけで選択・設定・送信しない。
+
+明示先なしでは`basis.source`の **branchPushRemote（branch.pushRemote）→remotePushDefault（remote.pushDefault）→branchRemote（branch.remote）** の優先順を使う。上位の無効／空値／値なし／複数／存在しないremote／観測失敗は次へfallbackしない。3設定ともabsentの場合だけsingleRemoteを提案でき、origin名を推測採用しない。`config.*.state`のabsent／single／multiple／unknownと各値のvalue／empty／valueless／invalid／missingRemoteを区別する。`remotes[].reasons`の非対応候補も黙って除外しない。競合・複数候補・無効根拠・観測不足・非対応候補があれば安全な候補／理由を示し、**「どのremoteへpushしますか？」と実際に質問**し、候補選択＋自由回答を求める。未回答はStage0、no-confirmでも省略しない。停止報告／再実行案内だけは質問でない。
+
+候補取得はprivate準備／Stage／Git設定変更・補修／fetch／ls-remote／push／gh呼出しなし。SSH aliasは既存の`ssh -G`で評価するため、**Match exec等の任意外部processまで副作用ゼロとは保証しない**。生設定／SSH出力／資格情報URLを表示しない。候補はlocal観測時点の情報で、remoteの存在・権限・default・最新SHAを保証しない。採用後もinspect→materials→plan→executeの既存検証・drift検出を必ず通す。local commit／commit-mainには宛先調査を追加しない。
 
 `commit_inspect`呼び出し例：
 
