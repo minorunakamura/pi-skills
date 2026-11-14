@@ -335,7 +335,8 @@ async function main() {
               type === "tool_execution_start" ||
               type === "tool_execution_end" ||
               (type === "tool_execution_update" &&
-                event.toolName === "commit_inspect")
+                (event.toolName === "commit_inspect" ||
+                  event.toolName === "commit_workflow"))
             ) {
               if (event.result)
                 event.resultBytes = Buffer.byteLength(

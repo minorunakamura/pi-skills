@@ -33,11 +33,11 @@ source版／dirty・関連SHA256 manifestをdocs/verification/<issue-number>/<�
 
 ## fresh Pi: 通常承認と本当のfollow-up
 
-既存RPC helperを明示製品extensionとread,bash,commit_inspectで起動する。使捨てdriverを完成・digest固定してから起動し、親PID／DRIVER_PIDを直後に記録、同じ親shellでwait／exit保存する。以下は片側修正→設定再準備→通常承認を同一sessionで観測する例。
+既存RPC helperを明示製品extensionとread,bash,commit_inspect,commit_workflowで起動する。使捨てdriverを完成・digest固定してから起動し、親PID／DRIVER_PIDを直後に記録、同じ親shellでwait／exit保存する。以下は片側修正→設定再準備→通常承認を同一sessionで観測する例。
 
 ```bash
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.ts" \
-  --extension "$SOURCE/extensions/commit-status.js" --tools read,bash,commit_inspect \
+  --extension "$SOURCE/extensions/commit-status.js" --tools read,bash,commit_inspect,commit_workflow \
  "$OWNED/repo" "$SOURCE/skills/commit-pr/SKILL.md" "$OWNED/evidence" \
  --fixture-remote --answer-file "$OWNED/answer1" \
  --follow-up-file "$OWNED/answer2" --follow-up-file "$OWNED/answer3" \
@@ -74,7 +74,7 @@ printf '%s\n' "$?" > "$OWNED/driver-exit"
 ```bash
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/push-fixture.ts" snapshot "$OWNED" "$GIT" > "$OWNED/before-stop.json"
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.ts" \
-  --extension "$SOURCE/extensions/commit-status.js" --tools read,bash,commit_inspect \
+  --extension "$SOURCE/extensions/commit-status.js" --tools read,bash,commit_inspect,commit_workflow \
  "$OWNED/repo" "$SOURCE/skills/commit-pr/SKILL.md" "$OWNED/evidence" --fixture-remote \
  --request '/skill:commit-pr --no-confirm README.mdだけ。remote origin、repository github.example.invalid/example/project。'
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/push-fixture.ts" snapshot "$OWNED" "$GIT" > "$OWNED/after-stop.json"

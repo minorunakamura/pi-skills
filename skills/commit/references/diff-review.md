@@ -1,6 +1,6 @@
 # 固定差分の意味確認と再利用
 
-[local](local-bun.md)／[push](push-bun.md)／[PR](pr-bun.md)の公開Bun CLIを使う。旧Python／手書き互換や独自一時diffを生成しない。材料の機械的一致と意味理解は別である。
+[local](local-bun.md)／[push](push-bun.md)／[PR](pr-bun.md)のcommit_inspect／commit_workflow固定toolを使う。readはoperation:"read"のinputにreference・parts・必要なfileOffset/fileCountを渡す。旧Python／手書き互換や独自一時diffを生成しない。材料の機械的一致と意味理解は別である。
 
 - 小diffは一覧／本文／必要履歴を一括。PRはbaseに対するbranch全体diff／既存履歴／templateを並行準備し、新commit前に確認する。送信履歴はPR全体の代用でない。
 - 表示予算はread応答JSON全体で1回あたり32KiB（累計ではない）。escape／base64化とメタデータも含む。displayed=false／filesOmitted／bytesから未表示を明示し、readへ複数の必要bytes範囲と追加一覧範囲をまとめる。最新Git diffに置換しない。未表示部分を確認済みと呼ばず、lockfile／生成物／binaryも名前だけで推測しない。

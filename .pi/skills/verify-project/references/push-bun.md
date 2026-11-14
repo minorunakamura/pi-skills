@@ -34,11 +34,11 @@ export PATH="$OWNED/bin:$(dirname "$VERIFY_BUN"):/usr/bin:/bin"
 
 ## fresh Pi通常一括承認
 
-明示製品extensionとread,bash,commit_inspectの既存RPCを使い、Codemode／ambient extensionなし。以下を完成・digest固定済みの使捨てdriver、または保持する同じ対話Bashで実行し、PIDと親PIDを直後に記録する。
+明示製品extensionとread,bash,commit_inspect,commit_workflowの既存RPCを使い、Codemode／ambient extensionなし。以下を完成・digest固定済みの使捨てdriver、または保持する同じ対話Bashで実行し、PIDと親PIDを直後に記録する。
 
 ```bash
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.ts" \
-  --extension "$SOURCE/extensions/commit-status.js" --tools read,bash,commit_inspect \
+  --extension "$SOURCE/extensions/commit-status.js" --tools read,bash,commit_inspect,commit_workflow \
   "$OWNED/repo" "$SOURCE/skills/commit-push/SKILL.md" "$OWNED/evidence" \
   --fixture-remote --answer-file "$OWNED/answer" \
   --request '/skill:commit-push README.mdだけ。remote origin。upstreamを設定。commit messageは正確に docs: explain local example と末尾LF。' \

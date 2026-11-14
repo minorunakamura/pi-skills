@@ -22,12 +22,12 @@ base作成時に`old.txt`もcommitし、pending変更で`git mv old.txt renamed.
 "$VERIFY_NODE" "$SOURCE/.pi/skills/verify-project/scripts/commit-rpc.ts" \
  "$OWNED/repo" "$SOURCE/skills/commit/SKILL.md" "$OWNED/evidence" \
  --extension "$SOURCE/extensions/commit-status.js" \
- --tools read,bash,commit_inspect --request "この隔離repository $OWNED/repo をcommit_inspectで直接1回inspect。inputはJSON文字列でmode=commit。Stage等はせず停止。結果の一覧は繰り返さずINSPECT_DONEだけ回答。"
+ --tools read,bash,commit_inspect,commit_workflow --request "この隔離repository $OWNED/repo をcommit_inspectで直接1回inspect。inputはJSON文字列でmode=commit。Stage等はせず停止。結果の一覧は繰り返さずINSPECT_DONEだけ回答。"
 ```
 
-`tool_execution_update`成功は1回、最終resultのcontent末尾JSONとdetailsが完全一致すること（`{bun,result}`）、reference／branchPolicy／default／evidence／questions／pathBytesを確認する。正常inspectにphaseはない。一覧は色なしでcontentに残る。同じ確認済みBun絶対実体と完全referenceで、trusted scripts cwd・同梱config・env-file=/dev/null・no-install・環境変数除去の既存CLI cleanupを実行し、cleanup.completeとdirectory不在を確認する。所有検証を迂回しない。
+`tool_execution_update`成功は1回、最終resultのcontent末尾JSONとdetailsが完全一致すること（`{bun,result}`）、reference／branchPolicy／default／evidence／questions／pathBytesを確認する。正常inspectにphaseはない。一覧は色なしでcontentに残る。現在branchの最終成功inspect detailsからBunを取得するcommit_workflowへoperation:"cleanup", input:{reference:REFERENCE}を直接渡し、cleanup.completeとdirectory不在を確認する。所有検証を迂回しない。
 
-print／JSONは同じ隔離引数（`--no-extensions -e EXT --no-mcp --no-skills --no-context-files --no-prompt-templates --no-themes --offline --no-approve --tools read,bash,commit_inspect`）でそれぞれfresh Piを起動する。`--print` stdoutはfinal assistantだけなので一覧保持の証拠にしない。`--session-dir "$OWNED/sessions"`で作る標準sessionのtoolResultからcontent/detailsを抽出する。JSONは`--mode json`のtool_execution_endを抽出する。raw provider／system prompt／thinking／signatureは証拠へcopyしない。
+print／JSONは同じ隔離引数（`--no-extensions -e EXT --no-mcp --no-skills --no-context-files --no-prompt-templates --no-themes --offline --no-approve --tools read,bash,commit_inspect,commit_workflow`）でそれぞれfresh Piを起動する。`--print` stdoutはfinal assistantだけなので一覧保持の証拠にしない。`--session-dir "$OWNED/sessions"`で作る標準sessionのtoolResultからcontent/detailsを抽出する。JSONは`--mode json`のtool_execution_endを抽出する。raw provider／system prompt／thinking／signatureは証拠へcopyしない。
 
 ## 実TUIとreload
 
@@ -56,7 +56,7 @@ unset VERIFY_COMMIT_ABORT_AFTER_REFERENCE
  --no-extensions --extension "$SOURCE/extensions/commit-status.js" \
  --extension "$SOURCE/.pi/skills/verify-project/scripts/commit-observer.js" \
  --no-mcp --no-skills --no-prompt-templates --no-context-files --no-themes \
- --offline --no-approve --tools read,bash,commit_inspect \
+ --offline --no-approve --tools read,bash,commit_inspect,commit_workflow \
  --session-dir "$OWNED/sessions" < "$PANE_TTY" &
 p=\$!
 printf '%s %s\\n' "\$\$" "\$p" > "$OWNED/pids"
@@ -72,7 +72,7 @@ EOF
 
 `session_start`だけで入力可能とせず、`capture-pane -p`でeditor／footerと[Context]がowned空fileだけ、[Extensions]が明示2つだけと確認する。`pids`のparentとPi PIDを外側`ps -o pid,ppid,pgid,stat,comm -p ...`で照合し、専有PGIDを記録する（Pi PID=PGIDとは限らない）。sandbox内ps禁止を迂回しない。pane内の同じ親がwaitしてexitを保存するので、別shellから無効なwaitをしない。外側controllerをbackgroundにするならそのcontrollerも同じ親でwaitする。
 
-無秘密fixture専用の観測extension`../scripts/commit-observer.js`を明示`-e`で追加できる。`VERIFY_COMMIT_OBSERVATIONS="$OWNED/observations.jsonl"`（parent0700・file0600、symlink不可）を指定する。read／bash／commit_status_display／commit_inspectの公開start/end（read結果本文は除去、resultBytesとread引数は保持）、commit_inspectだけの公開update、user時刻／assistantの非thinking記録／最初の本文delta時刻／reload時の過去commit_inspect content/detailsを記録し、tool実行・renderer・provider応答を置換しない。run前self-checkは`node --test .pi/skills/verify-project/scripts/commit-rpc.test.ts`。logに秘密を含まないfixtureだけで使う。
+無秘密fixture専用の観測extension`../scripts/commit-observer.js`を明示`-e`で追加できる。`VERIFY_COMMIT_OBSERVATIONS="$OWNED/observations.jsonl"`（parent0700・file0600、symlink不可）を指定する。read／bash／commit_status_display／commit_inspectの公開start/end（read結果本文は除去、resultBytesとread引数は保持）、commit_inspect／commit_workflowの公開update、user時刻／assistantの非thinking記録／最初の本文delta時刻／reload時の過去commit_inspect／commit_workflow content/detailsを記録し、tool実行・renderer・provider応答を置換しない。run前self-checkは`node --test .pi/skills/verify-project/scripts/commit-rpc.test.ts`。logに秘密を含まないfixtureだけで使う。
 
 `send-keys -l`でprompt、入力反映を待って別呼出しで`send-keys Enter`（paste処理が未完了なら再度Enter）。`capture-pane -p`と`capture-pane -p -e`（属性付き）を時刻付きで取得する。`-a`はinactive alternate screenなので使わない。tool更新を検知したら繰り返しcaptureし、一覧の見えるsnapshotと次assistant本文の最初のdeltaを対応させる。**tool終了時刻を描画時刻と呼ばない**。モデルが速すぎて間のsnapshotがなければ順序は未確認。snapshotは実PTYのtmux解釈済みセルであり物理terminal screenshotではない。
 
@@ -90,7 +90,7 @@ date -u '+%Y-%m-%dT%H:%M:%SZ'
 "$TMUX_BIN" -S "$OWNED/socket" capture-pane -p -e -t verify
 ```
 
-一覧は一度だけ、部分Stage／renameは実Gitと一致、path／状態名にdotの専用色なし、通常assistantに同じ一覧なし、content末尾JSON=detailsを照合する。idle後`/reload`を入力し、`session_start reason=reload`と過去detailsの一致・実画面の一覧保持・新inspect call0を確認する。その後新promptでだけ2回目のinspectを行う。永続registry・reference再解決を作らない。終了はidleでCtrl-D、必要ならもう一度。所有Pi group不存在とpane親wait後、専用tmux serverだけ終了しsocket/server不存在を確認する。
+一覧は一度だけ、部分Stage／renameは実Gitと一致、path／状態名にdotの専用色なし、通常assistantに同じ一覧なし、content末尾JSON=detailsを照合する。idle後`/reload`を入力し、`session_start reason=reload`と過去detailsの一致・実画面の一覧保持・新inspect call0を確認する。その後新promptで同じ完全referenceをcommit_workflowのcleanupへ渡し、再inspect／手動probe／PATH再探索なしでlookup成功・cleanupを確認する。永続registry・reference再解決を作らない。終了はidleでCtrl-D、必要ならもう一度。所有Pi group不存在とpane親wait後、専用tmux serverだけ終了しsocket/server不存在を確認する。
 
 ## 通常cancelの取得前後とBun不足
 

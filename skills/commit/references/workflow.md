@@ -1,6 +1,6 @@
 # commit系4入口の共有手順
 
-4入口すべてBun 1.3.0以上必須。到達点とbranch方針を入口で確定し、入口の必要な全文read一式を同じassistant turnから呼び、切断時はtailを取得する。規則はPR > push > localを優先する。
+4入口すべてBun 1.3.0以上とcommit_inspect／commit_workflowの両tool必須。toolなしではStage前停止、導入後新session／reloadを案内し手書きCLI fallbackなし。到達点とbranch方針を入口で確定し、入口の必要な全文read一式を同じassistant turnから呼び、切断時はtailを取得する。規則はPR > push > localを優先する。
 
 - commit／commit-main: [local-bun.md](local-bun.md)
 - commit-push: [local-bun.md](local-bun.md)・[push-bun.md](push-bun.md)

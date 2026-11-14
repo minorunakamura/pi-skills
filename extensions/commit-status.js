@@ -12,6 +12,12 @@ import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
+import {
+  validWorkflowInput,
+  validReference,
+  workflowResult,
+  inspectFields,
+} from "./commit-workflow-validation.js";
 
 const states = {
   M: ["Modified", "warning"],
@@ -195,7 +201,75 @@ function inspectResult(json, repository, mode) {
     )
   )
     throw new Error("Invalid inspect result");
+  if (!inspectFields(result)) throw new Error("Invalid inspect result");
   return result;
+}
+
+function inspectBun(ctx, reference) {
+  const matches = [];
+  for (const entry of ctx.sessionManager.getBranch()) {
+    const message = entry.type === "message" ? entry.message : undefined;
+    if (
+      message?.role !== "toolResult" ||
+      message.toolName !== "commit_inspect" ||
+      message.isError !== false ||
+      message.details?.result?.reference?.run !== reference.run
+    )
+      continue;
+    const details = message.details;
+    const mode = details.result.branchPolicy?.mode;
+    if (
+      !Object.keys(details).every((key) => ["bun", "result"].includes(key)) ||
+      !["commit", "commit-main", "push", "pr"].includes(mode)
+    )
+      throw new Error("Invalid inspect evidence");
+    const result = inspectResult(
+      JSON.stringify(details.result),
+      reference.repository,
+      mode,
+    );
+    if (
+      !validReference(result.reference) ||
+      !["run", "repository", "directory", "dev", "ino"].every(
+        (key) => result.reference[key] === reference[key],
+      )
+    )
+      throw new Error("Conflicting inspect evidence");
+    matches.push(details.bun);
+  }
+  if (matches.length !== 1)
+    throw new Error("Unique final inspect evidence required");
+  const bun = matches[0];
+  if (typeof bun !== "string" || !isAbsolute(bun) || realpathSync(bun) !== bun)
+    throw new Error("Bun executable required");
+  accessSync(bun, constants.X_OK);
+  if (!statSync(bun).isFile()) throw new Error("Bun executable required");
+  nativeBun(bun);
+  return bun;
+}
+
+function nativeBun(bun) {
+  const fd = openSync(bun, "r");
+  const header = Buffer.alloc(4);
+  try {
+    readSync(fd, header, 0, 4, 0);
+  } finally {
+    closeSync(fd);
+  }
+  // A script shim is not the runtime; do not execute it or skip to another Bun.
+  if (
+    ![
+      "7f454c46",
+      "cffaedfe",
+      "cefaedfe",
+      "feedfacf",
+      "feedface",
+      "cafebabe",
+      "bebafeca",
+    ].includes(header.toString("hex")) &&
+    header.subarray(0, 2).toString() !== "MZ"
+  )
+    throw new Error("Bun executable required");
 }
 
 function discoverBun() {
@@ -208,27 +282,7 @@ function discoverBun() {
     }
     const bun = realpathSync(candidate);
     if (!statSync(bun).isFile()) continue;
-    const fd = openSync(bun, "r");
-    const header = Buffer.alloc(4);
-    try {
-      readSync(fd, header, 0, 4, 0);
-    } finally {
-      closeSync(fd);
-    }
-    // A script shim is not the runtime; do not execute it or skip to another Bun.
-    if (
-      ![
-        "7f454c46",
-        "cffaedfe",
-        "cefaedfe",
-        "feedfacf",
-        "feedface",
-        "cafebabe",
-        "bebafeca",
-      ].includes(header.toString("hex")) &&
-      header.subarray(0, 2).toString() !== "MZ"
-    )
-      throw new Error("Bun executable required");
+    nativeBun(bun);
     return bun;
   }
   throw new Error("Bun executable required");
@@ -372,12 +426,173 @@ function inspectFailure(error, extra = {}) {
 
 export default function (pi) {
   pi.registerTool({
+    name: "commit_workflow",
+    label: "Git workflow",
+    exposure: "model-only",
+    executionMode: "sequential",
+    description:
+      "Run bundled materials/read/release/plan/execute/cleanup with an explicit complete reference. Input is a JSON object; execute accepts reference only. Bun is obtained only from the matching final successful commit_inspect on this conversation branch. Never retry after a started failure or infer approval from a reference.",
+    parameters: Type.Object(
+      {
+        repository: Type.String(),
+        operation: Type.String(),
+        input: Type.Object({}, { additionalProperties: true }),
+      },
+      { additionalProperties: false },
+    ),
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    async execute(_id, params, signal, _onUpdate, ctx) {
+      if (signal?.aborted)
+        return inspectFailure("cancelled", {
+          childStarted: false,
+          processExitConfirmed: true,
+        });
+      if (!validWorkflowInput(params))
+        return inspectFailure("input_rejected", {
+          childStarted: false,
+          processExitConfirmed: true,
+          inputCorrectionAllowed: true,
+          privatePreparation:
+            "Unchanged. Correct only the call format for the same preparation and approved plan; changes to text, target or operation need fresh approval.",
+        });
+      let childStarted = false;
+      let processExitConfirmed = true;
+      let stage = "inspect_evidence_unavailable";
+      try {
+        const { repository, operation, input } = params;
+        if (
+          realpathSync(repository) !== repository ||
+          input.reference.repository !== repository
+        )
+          return inspectFailure("repository_mismatch", {
+            childStarted,
+            processExitConfirmed,
+          });
+        const bun = inspectBun(ctx, input.reference);
+        stage = "Bun 1.3.0+ executable required; protected probe failed";
+        const scripts = realpathSync(
+          join(
+            dirname(realpathSync(fileURLToPath(import.meta.url))),
+            "../skills/commit/scripts",
+          ),
+        );
+        childStarted = !signal?.aborted;
+        const probe = await runBun(
+          bun,
+          scripts,
+          ["--version"],
+          "",
+          signal,
+          5000,
+          4096,
+        );
+        processExitConfirmed = probe.exited;
+        const version = /^(\d+)\.(\d+)\.(\d+)\r?\n?$/.exec(probe.stdout);
+        if (
+          probe.failure ||
+          probe.code !== 0 ||
+          !probe.exited ||
+          !version ||
+          Number(version[1]) < 1 ||
+          (Number(version[1]) === 1 && Number(version[2]) < 3)
+        )
+          return inspectFailure(
+            probe.failure === "cancelled" ? "cancelled" : stage,
+            { childStarted, processExitConfirmed },
+          );
+        stage = "workflow_result_unknown";
+        const limits = {
+          materials: [600_000, 64 * 1024],
+          read: [120_000, 64 * 1024],
+          release: [120_000, 64 * 1024],
+          plan: [900_000, 16 * 1024 * 1024],
+          execute: [1_800_000, 16 * 1024 * 1024],
+          cleanup: [120_000, 64 * 1024],
+        };
+        const [timeout, limit] = limits[operation];
+        const ran = await runBun(
+          bun,
+          scripts,
+          [
+            join(scripts, "commit-workflow.ts"),
+            operation,
+            "--repository",
+            repository,
+          ],
+          JSON.stringify(input),
+          signal,
+          timeout,
+          limit,
+        );
+        processExitConfirmed = ran.exited;
+        stage = ran.failure ?? stage;
+        const interrupted =
+          ran.failure ||
+          signal?.aborted ||
+          !ran.exited ||
+          (ran.code !== 0 && ran.code !== 1);
+        let data;
+        if (ran.stdout) {
+          const value = JSON.parse(ran.stdout);
+          // Interrupted children can report complete success or failure before exit.
+          const schemaCode = interrupted
+            ? object(value) && Object.hasOwn(value, "error")
+              ? 1
+              : 0
+            : ran.code;
+          data = workflowResult(
+            value,
+            operation,
+            input.reference,
+            schemaCode,
+            input,
+          );
+        }
+        if (interrupted)
+          return inspectFailure(
+            ran.failure ?? (signal?.aborted ? "cancelled" : stage),
+            {
+              childStarted,
+              processExitConfirmed,
+              ...(data
+                ? {
+                    result: data,
+                    ...(data.cleanup
+                      ? {
+                          privatePreparation: data.cleanup.complete
+                            ? "CLI reported owned cleanup complete; do not clean twice."
+                            : "CLI reported incomplete cleanup; retain remaining entries.",
+                        }
+                      : {}),
+                  }
+                : {}),
+            },
+          );
+        if (!data)
+          return inspectFailure(stage, { childStarted, processExitConfirmed });
+        return {
+          isError: ran.code !== 0,
+          content: [{ type: "text", text: JSON.stringify(data) }],
+          details: data,
+        };
+      } catch {
+        return inspectFailure(stage, { childStarted, processExitConfirmed });
+      }
+    },
+  });
+  pi.registerTool({
     name: "commit_inspect",
     label: "Git inspect",
     exposure: "model-only",
     renderShell: "self",
+    executionMode: "sequential",
     description:
-      "Discover and verify Bun 1.3.0+, run the bundled inspect CLI and display Git status. Creates private preparation, but does not Stage or commit. Supply the real absolute repository root and existing inspect JSON with explicit mode (commit, commit-main, push, pr). With HEAD or selected changes, push/pr require push.remote and pr also requires pr.repository ([HOST/]OWNER/REPO). Resolve destinations from explicit instructions/local config before calling; ask if ambiguous. Preserve the complete result/reference and Bun path for subsequent CLI calls. Do not repeat the TUI list; approval remains separate. No fallback or automatic install after failure.",
+      "Discover and verify Bun 1.3.0+, run the bundled inspect CLI and display Git status. Creates private preparation, but does not Stage or commit. Supply the real absolute repository root and existing inspect JSON with explicit mode (commit, commit-main, push, pr). With HEAD or selected changes, push/pr require push.remote and pr also requires pr.repository ([HOST/]OWNER/REPO). Resolve destinations from explicit instructions/local config before calling; ask if ambiguous. Preserve the complete result/reference for subsequent commit_workflow calls; never construct CLI commands. Do not repeat the TUI list; approval remains separate. No fallback or automatic install after failure.",
     parameters: Type.Object(
       { repository: Type.String(), input: Type.String() },
       { additionalProperties: false },

@@ -670,6 +670,12 @@ await test("commit_inspect only exposes allowlisted failure codes and rejects co
     join(fixedScripts, "bunfig.toml"),
     readFileSync(join(scripts, "bunfig.toml")),
   );
+  writeFileSync(
+    join(dirname(extension), "commit-workflow-validation.js"),
+    readFileSync(
+      new URL("../extensions/commit-workflow-validation.js", import.meta.url),
+    ),
+  );
   const { default: registerFaultDistribution } = await import(extension);
   let faultTool;
   registerFaultDistribution({
@@ -779,4 +785,708 @@ await test("commit_inspect only exposes allowlisted failure codes and rejects co
       true,
     );
   }
+});
+
+await test("commit_workflow rejects extra execute input before launch and preserves preparation", async (t) => {
+  const f = inspectFixture(t);
+  const inspected = await inspectTool.execute(
+    "inspect",
+    {
+      repository: f.repo,
+      input: '{"mode":"commit"}',
+    },
+    undefined,
+    undefined,
+    { mode: "rpc" },
+  );
+  assert.notEqual(inspected.isError, true);
+  const reference = inspected.details.result.reference;
+  const stateName = Object.keys(reference.files)[0];
+  const before = readFileSync(join(reference.directory, stateName));
+  const index = readFileSync(join(f.repo, ".git/index"));
+  const workflow = tools.get("commit_workflow");
+  const result = await workflow.execute(
+    "invalid",
+    {
+      repository: f.repo,
+      operation: "execute",
+      input: { reference, message: "not allowed" },
+    },
+    undefined,
+    undefined,
+    {
+      sessionManager: {
+        getBranch() {
+          assert.fail("input rejection must precede Bun lookup");
+        },
+      },
+    },
+  );
+  assert.equal(result.isError, true);
+  assert.equal(result.details.error, "input_rejected");
+  assert.equal(result.details.childStarted, false);
+  assert.equal(result.details.inputCorrectionAllowed, true);
+  assert.deepEqual(readFileSync(join(reference.directory, stateName)), before);
+  assert.deepEqual(readFileSync(join(f.repo, ".git/index")), index);
+  f.cli("cleanup", reference);
+});
+
+await test("commit_workflow uses only final successful inspect evidence on the current branch, not PATH", async (t) => {
+  const f = inspectFixture(t);
+  const inspected = await inspectTool.execute(
+    "inspect",
+    {
+      repository: f.repo,
+      input: '{"mode":"commit"}',
+    },
+    undefined,
+    undefined,
+    { mode: "rpc" },
+  );
+  assert.notEqual(inspected.isError, true);
+  const reference = inspected.details.result.reference;
+  const entry = {
+    type: "message",
+    message: {
+      role: "toolResult",
+      toolName: "commit_inspect",
+      isError: false,
+      details: inspected.details,
+    },
+  };
+  unlinkSync(join(f.bin, "bun"));
+  writeFileSync(
+    join(f.bin, "bun"),
+    `#!/bin/sh\necho forbidden > '${join(f.owned, "lookup-marker")}'\n`,
+    { mode: 0o700 },
+  );
+  const workflow = tools.get("commit_workflow");
+  const call = (branch) =>
+    workflow.execute(
+      "cleanup",
+      { repository: f.repo, operation: "cleanup", input: { reference } },
+      undefined,
+      undefined,
+      { sessionManager: { getBranch: () => branch } },
+    );
+  for (const entries of [
+    [],
+    [{ ...entry, type: "update" }],
+    [{ type: "message", message: { ...entry.message, role: "assistant" } }],
+    [{ type: "message", message: { ...entry.message, isError: true } }],
+  ]) {
+    const denied = await call(entries);
+    assert.equal(denied.isError, true);
+    assert.equal(denied.details.inputCorrectionAllowed, undefined);
+    assert.equal(existsSync(reference.directory), true);
+  }
+  const result = await call([entry]);
+  assert.notEqual(result.isError, true, JSON.stringify(result));
+  assert.equal(result.details.phase, "cancelled");
+  assert.equal(result.details.cleanup.complete, true);
+  assert.equal(existsSync(reference.directory), false);
+  assert.equal(existsSync(join(f.owned, "lookup-marker")), false);
+});
+
+async function workflowFixture(t, mode = "commit-main") {
+  const f = inspectFixture(t);
+  f.git("config", "user.name", "Test User");
+  f.git("config", "user.email", "test@example.invalid");
+  f.git("config", "commit.gpgsign", "false");
+  f.git("add", ".");
+  f.git("commit", "-m", "base");
+  writeFileSync(join(f.repo, "new.txt"), "new content\n");
+  const input = { mode };
+  if (["push", "pr"].includes(mode)) {
+    const remote = join(f.owned, "remote.git");
+    assert.equal(
+      spawnSync("/usr/bin/git", ["init", "--bare", "-b", "main", remote])
+        .status,
+      0,
+    );
+    f.git("remote", "add", "origin", remote);
+    f.git("push", "origin", "main");
+    input.push = { remote: "origin" };
+    if (mode === "pr") {
+      const { configurePrFixture, fixtureRepository } = await import(
+        "../.pi/skills/verify-project/scripts/pr-fixture.ts"
+      );
+      configurePrFixture(f.owned, "/usr/bin/git", process.execPath);
+      input.pr = { repository: fixtureRepository };
+    }
+  }
+  const inspected = await inspectTool.execute(
+    "inspect",
+    { repository: f.repo, input: JSON.stringify(input) },
+    undefined,
+    undefined,
+    { mode: "rpc" },
+  );
+  assert.notEqual(inspected.isError, true, JSON.stringify(inspected));
+  const entry = {
+    type: "message",
+    message: {
+      role: "toolResult",
+      toolName: "commit_inspect",
+      isError: false,
+      details: inspected.details,
+    },
+  };
+  const ctx = { mode: "rpc", sessionManager: { getBranch: () => [entry] } };
+  const call = (
+    operation,
+    input,
+    signal,
+    selectedTool = tools.get("commit_workflow"),
+  ) =>
+    selectedTool.execute(
+      "workflow",
+      { repository: f.repo, operation, input },
+      signal,
+      () => {
+        assert.fail("mutation results must not publish a success update");
+      },
+      ctx,
+    );
+  const ok = async (operation, input) => {
+    const result = await call(operation, input);
+    assert.notEqual(result.isError, true, JSON.stringify(result));
+    assert.deepEqual(JSON.parse(result.content[0].text), result.details);
+    return result.details;
+  };
+  return {
+    ...f,
+    entry,
+    ctx,
+    call,
+    ok,
+    reference: inspected.details.result.reference,
+  };
+}
+
+for (const mode of ["commit", "commit-main", "push", "pr"]) {
+  await test(`commit_workflow ${mode} connects real materials, fixed read, plan and reference-only execute`, async (t) => {
+    const f = await workflowFixture(t, mode);
+    const base = f.git("rev-parse", "HEAD").toString().trim();
+    const materials = await f.ok("materials", { reference: f.reference });
+    assert.equal(materials.phase, "materials");
+    const read = await f.ok("read", {
+      reference: materials.reference,
+      parts: [{ name: "diff", offset: 0, length: materials.diffBytes }],
+      fileOffset: 0,
+      fileCount: 10,
+    });
+    assert.deepEqual(read.parts[0].text, materials.diff.text);
+    let plan = await f.ok("plan", {
+      reference: materials.reference,
+      message: "docs: exact example\n",
+      ...(mode === "commit-main" ? {} : { newBranch: "docs/example" }),
+    });
+    if (mode === "pr") {
+      assert.equal(plan.phase, "materials");
+      assert.equal(plan.executable, false);
+      assert.equal(plan.payloadRemoved, true);
+      plan = await f.ok("plan", {
+        reference: plan.reference,
+        pr: { title: "exact $HOME", body: "日本語 `code`\n\n" },
+      });
+      assert.equal(plan.pr.body, "日本語 `code`\n\n");
+    }
+    assert.equal(plan.phase, "plan");
+    assert.equal(plan.payloadRemoved, true);
+    assert.equal(f.git("rev-parse", "HEAD").toString().trim(), base);
+    const rejected = await f.call("execute", {
+      reference: plan.reference,
+      extra: true,
+    });
+    assert.equal(rejected.details.inputCorrectionAllowed, true);
+    const result = await f.ok("execute", { reference: plan.reference });
+    assert.equal(
+      result.phase,
+      mode === "pr" ? "pr_created" : mode === "push" ? "pushed" : "committed",
+    );
+    assert.equal(result.cleanup.complete, true);
+    assert.equal(f.git("rev-list", "--count", "HEAD").toString().trim(), "2");
+    assert.equal(existsSync(plan.reference.directory), false);
+    const raw = f.git("cat-file", "commit", "HEAD").toString();
+    assert.equal(raw.slice(raw.indexOf("\n\n") + 2), "docs: exact example\n");
+    if (mode !== "commit-main")
+      assert.equal(f.git("rev-parse", "main").toString().trim(), base);
+  });
+}
+
+await test("commit_workflow release, preserved read budget and incomplete cleanup retain their distinct results", async (t) => {
+  const f = await workflowFixture(t);
+  writeFileSync(join(f.repo, "new.txt"), "x".repeat(40000));
+  // Inspect this fresh state; do not update an old reference after drift.
+  f.cli("cleanup", f.reference);
+  const inspected = await inspectTool.execute(
+    "inspect",
+    { repository: f.repo, input: '{"mode":"commit-main"}' },
+    undefined,
+    undefined,
+    { mode: "rpc" },
+  );
+  f.entry.message.details = inspected.details;
+  const materials = await f.ok("materials", {
+    reference: inspected.details.result.reference,
+  });
+  assert.equal(materials.displayed, false);
+  const budget = await f.call("read", {
+    reference: materials.reference,
+    parts: [{ name: "diff", offset: 0, length: materials.diffBytes }],
+  });
+  assert.equal(budget.isError, true);
+  assert.equal(budget.details.error, "material_display_budget_exceeded");
+  assert.equal(budget.details.materialsPreserved, true);
+  const small = await f.ok("read", {
+    reference: budget.details.reference,
+    parts: [{ name: "diff", offset: 0, length: 100 }],
+  });
+  assert.equal(small.parts[0].length, 100);
+  const released = await f.ok("release", {
+    reference: budget.details.reference,
+  });
+  assert.equal(released.payloadRemoved, true);
+  assert.equal(
+    existsSync(join(released.reference.directory, "diff.bin")),
+    false,
+  );
+  writeFileSync(join(released.reference.directory, "unknown"), "keep");
+  const cleaned = await f.ok("cleanup", { reference: released.reference });
+  assert.equal(cleaned.cleanup.complete, false);
+  assert.equal(
+    readFileSync(join(released.reference.directory, "unknown"), "utf8"),
+    "keep",
+  );
+});
+
+await test("commit_workflow retains commit success and observed SHA on post-commit verification failure without retry", async (t) => {
+  const f = await workflowFixture(t);
+  const materials = await f.ok("materials", { reference: f.reference });
+  const plan = await f.ok("plan", {
+    reference: materials.reference,
+    message: "docs: hook boundary\n",
+  });
+  writeFileSync(
+    join(f.repo, ".git/hooks/post-commit"),
+    "#!/bin/sh\n/usr/bin/git update-ref refs/heads/unplanned HEAD\necho SECRET_HOOK >&2\n",
+    { mode: 0o700 },
+  );
+  const result = await f.call("execute", { reference: plan.reference });
+  assert.equal(result.isError, true);
+  assert.equal(result.details.error, "commit_verification_failed");
+  assert.equal(result.details.commitSucceeded, true);
+  assert.equal(result.details.commitVerified, false);
+  assert.equal(
+    result.details.observed.head,
+    f.git("rev-parse", "HEAD").toString().trim(),
+  );
+  assert.equal(result.details.cleanup.complete, true);
+  assert.equal(result.details.inputCorrectionAllowed, undefined);
+  assert.doesNotMatch(JSON.stringify(result), /SECRET_HOOK/);
+  const { workflow } = await faultWorkflow(
+    f,
+    `import { readFileSync } from "node:fs"; readFileSync(0); console.log(${JSON.stringify(JSON.stringify({ ...result.details, error: "SECRET_CHILD", stderr: "SECRET_STDERR" }))}); process.exitCode = 1;`,
+  );
+  const safeFailure = await f.call(
+    "execute",
+    { reference: plan.reference },
+    AbortSignal.timeout(10_000),
+    workflow,
+  );
+  assert.equal(safeFailure.isError, true);
+  assert.equal(safeFailure.details.error, "workflow_failed");
+  assert.equal(safeFailure.details.commitSucceeded, true);
+  assert.equal(safeFailure.details.observed.head, result.details.observed.head);
+  assert.equal(safeFailure.details.cleanup.complete, true);
+  assert.doesNotMatch(JSON.stringify(safeFailure), /SECRET/);
+  assert.equal(f.git("rev-list", "--count", "HEAD").toString().trim(), "2");
+});
+
+await test("commit_workflow denies conflicting, incomplete or non-final Bun evidence before any child", async (t) => {
+  const f = await workflowFixture(t);
+  const before = readFileSync(
+    join(f.reference.directory, Object.keys(f.reference.files)[0]),
+  );
+  const valid = structuredClone(f.entry);
+  const variants = [];
+  for (const key of ["repository", "directory", "dev", "ino"]) {
+    const entry = structuredClone(valid);
+    entry.message.details.result.reference[key] =
+      typeof f.reference[key] === "number" ? f.reference[key] + 1 : "/other";
+    variants.push([entry]);
+  }
+  const missing = structuredClone(valid);
+  delete missing.message.details.result.evidence;
+  const unknown = structuredClone(valid);
+  unknown.message.details.result.secret = "SECRET_OUTPUT";
+  const noFinal = structuredClone(valid);
+  delete noFinal.message.isError;
+  variants.push([missing], [unknown], [noFinal], [valid, valid]);
+  for (const entries of variants) {
+    const result = await tools.get("commit_workflow").execute(
+      "denied",
+      {
+        repository: f.repo,
+        operation: "cleanup",
+        input: { reference: f.reference },
+      },
+      undefined,
+      undefined,
+      { sessionManager: { getBranch: () => entries } },
+    );
+    assert.equal(result.isError, true);
+    assert.equal(result.details.childStarted, false);
+    assert.equal(result.details.inputCorrectionAllowed, undefined);
+    assert.doesNotMatch(JSON.stringify(result), /SECRET_OUTPUT/);
+    assert.deepEqual(
+      readFileSync(
+        join(f.reference.directory, Object.keys(f.reference.files)[0]),
+      ),
+      before,
+    );
+  }
+  const cancelled = new AbortController();
+  cancelled.abort();
+  const result = await f.call(
+    "execute",
+    { reference: f.reference, extra: true },
+    cancelled.signal,
+  );
+  assert.equal(result.details.error, "cancelled");
+  assert.equal(result.details.inputCorrectionAllowed, undefined);
+  await f.ok("cleanup", { reference: f.reference });
+});
+
+async function faultWorkflow(f, script) {
+  const distribution = join(f.owned, "distribution");
+  const extension = join(distribution, "extensions/commit-status.js");
+  const fixedScripts = join(distribution, "skills/commit/scripts");
+  mkdirSync(dirname(extension), { recursive: true });
+  mkdirSync(fixedScripts, { recursive: true });
+  for (const name of ["commit-status.js", "commit-workflow-validation.js"])
+    writeFileSync(
+      join(dirname(extension), name),
+      readFileSync(new URL(`../extensions/${name}`, import.meta.url)),
+    );
+  writeFileSync(join(fixedScripts, "bunfig.toml"), "");
+  writeFileSync(join(fixedScripts, "commit-workflow.ts"), script);
+  const { default: registerFault } = await import(extension);
+  let workflow;
+  registerFault({
+    registerTool(value) {
+      if (value.name === "commit_workflow") workflow = value;
+    },
+  });
+  return { workflow, fixedScripts };
+}
+
+await test("commit_workflow rejects unknown and incomplete responses without echoing child output or deleting preparation", async (t) => {
+  const f = await workflowFixture(t);
+  const materials = await f.ok("materials", { reference: f.reference });
+  const plan = await f.ok("plan", {
+    reference: materials.reference,
+    message: "docs: exact\n",
+  });
+  const { workflow, fixedScripts } = await faultWorkflow(f, "");
+  for (const data of [
+    { ...plan, unknown: "SECRET_OUTPUT" },
+    { ...plan, message: undefined },
+    { ...plan, cleanup: { complete: true, remaining: [] } },
+    { ...plan, pr: { repository: "owner/repo" } },
+    {
+      phase: "committed",
+      commit: "a".repeat(40),
+      cleanup: { complete: true, remaining: [] },
+    },
+    {
+      phase: "cancelled",
+      stagedChangesPreserved: true,
+      cleanup: { complete: true, remaining: ["SECRET_OUTPUT"] },
+    },
+  ]) {
+    writeFileSync(
+      join(fixedScripts, "commit-workflow.ts"),
+      `import { readFileSync } from "node:fs"; readFileSync(0); console.log(${JSON.stringify(JSON.stringify(data))}); console.error("SECRET_STDERR");`,
+    );
+    const result = await f.call(
+      data.phase === "plan"
+        ? "plan"
+        : data.phase === "cancelled"
+          ? "cleanup"
+          : "execute",
+      { reference: plan.reference },
+      // Fault children must not wait for the production mutation deadline.
+      AbortSignal.timeout(10_000),
+      workflow,
+    );
+    assert.equal(result.isError, true);
+    assert.equal(result.details.error, "workflow_result_unknown");
+    assert.equal(result.details.processExitConfirmed, true);
+    assert.equal(result.details.inputCorrectionAllowed, undefined);
+    assert.equal(existsSync(plan.reference.directory), true);
+    assert.doesNotMatch(JSON.stringify(result), /SECRET/);
+  }
+  await f.ok("cleanup", { reference: plan.reference });
+});
+
+await test("commit_workflow loses a real transition response without searching, retrying or cleaning an obsolete reference", async (t) => {
+  const f = await workflowFixture(t);
+  const oldNames = Object.keys(f.reference.files);
+  const { workflow } = await faultWorkflow(
+    f,
+    `console.log = () => process.stdout.write('{"cut":'); await import(${JSON.stringify(join(scripts, "commit-workflow.ts"))});`,
+  );
+  const result = await f.call(
+    "materials",
+    { reference: f.reference },
+    AbortSignal.timeout(10_000),
+    workflow,
+  );
+  assert.equal(result.details.error, "workflow_result_unknown");
+  assert.equal(result.details.processExitConfirmed, true);
+  assert.match(result.details.privatePreparation, /Unconfirmed/);
+  assert.equal(existsSync(f.reference.directory), true);
+  assert.equal(existsSync(join(f.reference.directory, oldNames[0])), false);
+  assert.equal(existsSync(join(f.reference.directory, "diff.bin")), true);
+  assert.equal(f.git("rev-list", "--count", "HEAD").toString().trim(), "1");
+  assert.notEqual(f.git("diff", "--cached", "--name-only").length, 0);
+});
+
+await test("commit_workflow running execute cancellation confirms child exit and never retries or rolls back Stage", async (t) => {
+  const f = await workflowFixture(t);
+  const materials = await f.ok("materials", { reference: f.reference });
+  const plan = await f.ok("plan", {
+    reference: materials.reference,
+    message: "docs: cancelled\n",
+  });
+  writeFileSync(
+    join(f.repo, ".git/hooks/pre-commit"),
+    '#!/bin/sh\n/bin/echo "$$" > "$HOME/hook-pid.tmp"\n/bin/mv "$HOME/hook-pid.tmp" "$HOME/hook-pid"\nexec /bin/sleep 30\n',
+    { mode: 0o700 },
+  );
+  const controller = new AbortController();
+  const pending = f.call(
+    "execute",
+    { reference: plan.reference },
+    controller.signal,
+  );
+  for (let i = 0; i < 500 && !existsSync(join(f.owned, "hook-pid")); i++)
+    await new Promise((r) => setTimeout(r, 20));
+  assert.equal(existsSync(join(f.owned, "hook-pid")), true);
+  controller.abort();
+  const result = await pending;
+  assert.equal(result.isError, true);
+  assert.equal(result.details.error, "cancelled");
+  assert.equal(result.details.processExitConfirmed, true);
+  const pid = Number(readFileSync(join(f.owned, "hook-pid"), "utf8"));
+  assert.ok(Number.isSafeInteger(pid) && pid > 0);
+  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  assert.equal(f.git("rev-list", "--count", "HEAD").toString().trim(), "1");
+  assert.notEqual(f.git("diff", "--cached", "--name-only").length, 0);
+  assert.equal(existsSync(plan.reference.directory), true);
+  await f.ok("cleanup", { reference: plan.reference });
+});
+
+await test("commit_workflow recognizes empty materials and already-pushed or existing-PR terminal plans", async (t) => {
+  const f = await workflowFixture(t, "pr");
+  const materials = await f.ok("materials", { reference: f.reference });
+  const plan = await f.ok("plan", {
+    reference: materials.reference,
+    newBranch: "docs/terminal",
+    message: "docs: terminal\n",
+    pr: { title: "terminal", body: "body\n" },
+  });
+  await f.ok("execute", { reference: plan.reference });
+  for (const mode of ["pr", "push", "commit"]) {
+    const inspected = await inspectTool.execute(
+      "inspect",
+      {
+        repository: f.repo,
+        input: JSON.stringify({
+          mode,
+          ...(mode === "commit" ? {} : { push: { remote: "origin" } }),
+          ...(mode === "pr"
+            ? { pr: { repository: "github.example.invalid/example/project" } }
+            : {}),
+        }),
+      },
+      undefined,
+      undefined,
+      { mode: "rpc" },
+    );
+    assert.notEqual(inspected.isError, true, JSON.stringify(inspected));
+    f.entry.message.details = inspected.details;
+    const material = await f.ok("materials", {
+      reference: inspected.details.result.reference,
+    });
+    if (mode === "commit") assert.equal(material.phase, "empty");
+    else {
+      const terminal = await f.ok("plan", { reference: material.reference });
+      assert.equal(
+        terminal.phase,
+        mode === "pr" ? "existing_pr" : "already_pushed",
+      );
+      assert.equal(terminal.cleanup.complete, true);
+      assert.equal(terminal.commitCreated, false);
+    }
+  }
+});
+
+await test("commit_workflow preserves validated responses after cancellation or abnormal exit without treating exit-schema mismatches as success", async (t) => {
+  const f = await workflowFixture(t);
+  const materials = await f.ok("materials", { reference: f.reference });
+  const plan = await f.ok("plan", {
+    reference: materials.reference,
+    message: "docs: response boundary\n",
+  });
+  // These child responses exercise validation, not actual commit success.
+  const failure = {
+    error: "commit_verification_failed",
+    commitVerified: false,
+    prAttempted: false,
+    prVerified: false,
+    pushAttempted: false,
+    pushSucceeded: false,
+    pushVerified: false,
+    upstreamConfigured: false,
+    remoteMayHaveChanged: false,
+    operationMayHaveSucceeded: true,
+    commitSucceeded: true,
+    branchMayHaveChanged: false,
+    branchCreated: false,
+    stagedChangesPreserved: true,
+    observed: { branch: "main", head: "a".repeat(40) },
+    cleanup: { complete: false, remaining: [plan.reference.directory] },
+  };
+  const success = {
+    phase: "committed",
+    commit: "a".repeat(40),
+    branch: "main",
+    branchCreated: false,
+    tree: plan.tree,
+    parents: [plan.parent],
+    messageDigest: "b".repeat(64),
+    scanner: plan.scanner,
+    cleanup: { complete: true, remaining: [] },
+  };
+  const before = {
+    head: f.git("rev-parse", "HEAD"),
+    index: readFileSync(join(f.repo, ".git/index")),
+    state: readFileSync(
+      join(plan.reference.directory, Object.keys(plan.reference.files)[0]),
+    ),
+  };
+  const { workflow, fixedScripts } = await faultWorkflow(f, "");
+  for (const { name, output, exitCode, retained } of [
+    {
+      name: "cancel failure",
+      output: JSON.stringify({ ...failure, stderr: "SECRET_CHILD_OUTPUT" }),
+      exitCode: null,
+      retained: failure,
+    },
+    {
+      name: "cancel success",
+      output: JSON.stringify(success),
+      exitCode: null,
+      retained: success,
+    },
+    {
+      name: "cancel invalid failure",
+      output: JSON.stringify({
+        ...failure,
+        commitSucceeded: "SECRET_BAD_TYPE",
+      }),
+      exitCode: null,
+      retained: undefined,
+    },
+    {
+      name: "cancel broken JSON",
+      output: '{"error":"SECRET_BROKEN"',
+      exitCode: null,
+      retained: undefined,
+    },
+    {
+      name: "abnormal failure",
+      output: JSON.stringify(failure),
+      exitCode: 2,
+      retained: failure,
+    },
+    {
+      name: "exit zero failure",
+      output: JSON.stringify(failure),
+      exitCode: 0,
+      retained: undefined,
+    },
+    {
+      name: "exit one success",
+      output: JSON.stringify(success),
+      exitCode: 1,
+      retained: undefined,
+    },
+  ]) {
+    const marker = join(f.owned, `${name}-written`);
+    writeFileSync(
+      join(fixedScripts, "commit-workflow.ts"),
+      `
+      import { readFileSync, writeFileSync, renameSync } from "node:fs";
+      readFileSync(0);
+      process.stdout.write(${JSON.stringify(output)}, () => {
+        writeFileSync(${JSON.stringify(marker + ".tmp")}, String(process.pid));
+        renameSync(${JSON.stringify(marker + ".tmp")}, ${JSON.stringify(marker)});
+        ${exitCode === null ? "setInterval(() => {}, 1000);" : `process.exitCode = ${exitCode};`}
+      });
+    `,
+    );
+    const controller = new AbortController();
+    const deadline = setTimeout(() => controller.abort(), 10_000);
+    let result;
+    try {
+      const pending = f.call(
+        "execute",
+        { reference: plan.reference },
+        controller.signal,
+        workflow,
+      );
+      if (exitCode === null) {
+        for (let i = 0; i < 500 && !existsSync(marker); i++)
+          await new Promise((r) => setTimeout(r, 10));
+        controller.abort();
+      }
+      result = await pending;
+    } finally {
+      clearTimeout(deadline);
+    }
+    assert.equal(existsSync(marker), true, name);
+    const pid = Number(readFileSync(marker, "utf8"));
+    assert.ok(Number.isSafeInteger(pid) && pid > 0, name);
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" }, name);
+    assert.throws(() => process.kill(-pid, 0), { code: "ESRCH" }, name);
+    assert.equal(result.isError, true, name);
+    assert.equal(
+      result.details.error,
+      exitCode === null ? "cancelled" : "workflow_result_unknown",
+      name,
+    );
+    assert.equal(result.details.processExitConfirmed, true, name);
+    assert.equal(result.details.inputCorrectionAllowed, undefined, name);
+    assert.deepEqual(result.details.result, retained, name);
+    assert.deepEqual(JSON.parse(result.content[0].text), result.details, name);
+    assert.doesNotMatch(JSON.stringify(result), /SECRET/);
+    assert.deepEqual(f.git("rev-parse", "HEAD"), before.head, name);
+    assert.deepEqual(
+      readFileSync(join(f.repo, ".git/index")),
+      before.index,
+      name,
+    );
+    assert.deepEqual(
+      readFileSync(
+        join(plan.reference.directory, Object.keys(plan.reference.files)[0]),
+      ),
+      before.state,
+      name,
+    );
+  }
+  await f.ok("cleanup", { reference: plan.reference });
 });

@@ -327,6 +327,10 @@ await test("commit-observer records the public reference update before ordinary 
   };
   handlers.get("tool_execution_update")?.({ toolName: "read" }, ctx);
   handlers.get("tool_execution_update")?.({ toolName: "commit_inspect" }, ctx);
+  handlers.get("tool_execution_update")?.(
+    { ...update, toolName: "commit_workflow" },
+    ctx,
+  );
   assert.equal(aborts, 0);
   handlers.get("tool_execution_update")?.(update, ctx);
   handlers.get("tool_execution_update")?.(update, ctx);
@@ -348,6 +352,7 @@ await test("commit-observer records Skill read sets and old/new outer tool paylo
     "bash",
     "commit_status_display",
     "commit_inspect",
+    "commit_workflow",
   ]) {
     const args =
       toolName === "read"

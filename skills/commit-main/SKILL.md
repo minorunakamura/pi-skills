@@ -2,10 +2,12 @@
 name: commit-main
 description: Review and stage changes, hold the complete message for approval, then commit directly on the current local default-equivalent branch using bundled Bun TypeScript.
 disable-model-invocation: true
-compatibility: Requires Git, shell access, and Bun 1.3.0+. Missing, unsupported, or unverifiable Bun stops before any Git mutation, even with no-confirm. No fallback or automatic installation. Gitleaks is optional. No network operations.
+compatibility: Requires commit_inspect and commit_workflow tools, Git, shell access, and Bun 1.3.0+. Missing, unsupported, or unverifiable Bun stops before any Git mutation, even with no-confirm. No fallback or automatic installation. Gitleaks is optional. No network operations.
 ---
 
 # commit-main
+
+両tool `commit_inspect`・`commit_workflow` が必須。未導入／非公開ならStage前に停止し、pi-skills extensionの導入・有効化と新sessionまたは `/reload` を案内する。手書きCLI fallbackは使わない。後続は固定toolのみ、起動コマンドを生成しない。
 
 ## 開始時の全文read一式
 
