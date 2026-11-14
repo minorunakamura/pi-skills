@@ -8,7 +8,9 @@
 
 共有local手順どおり `commit_inspect` と `commit_workflow` の両tool必須。未導入／非公開ならStageを含むGit変更前に停止し、導入・新sessionまたは `/reload` を案内する。Bun 1.3.0以上の確認不能／開始後失敗も停止し、手書きCLI fallback／installしない。inspectは以下の完全入力で直接1回、後続は全て `commit_workflow` の固定operationとJSON object inputを使う。完全referenceを無改変で引き継ぐ。PR-onlyも同じ。手動probe・inspect・JSON転記・重複一覧は不要。
 
-**`commit_inspect`では、既存HEADまたは対象変更がある場合は`mode:"pr"`に加え、`push.remote`と`pr.repository`が必須。modeだけでは呼ばない。** inspect前に、ユーザーの明示先とlocal設定（`git remote`／push URL、必要なら`ssh -G`のalias解決）から宛先を確認し、曖昧なら実質問する。例のorigin／owner／repoを推測採用しない。HEADも対象変更もない場合だけ宛先設定を省略できる。
+**`commit_inspect`では、既存HEADまたは対象変更がある場合は`mode:"pr"`に加え、`push.remote`と`pr.repository`が必須。modeだけでは呼ばない。** 完全な明示先は尊重し不要な調査・質問なし。不足があればpush手順のreference不要`commit_workflow` destinationsを`input:{"mode":"pr"}`（必要なら同じscope）でinspect前に呼ぶ。手動Git／SSH調査コマンドを生成しない。remote根拠の優先順・非対応候補の可視性・無効値からfallbackしない規則はpush手順と同じ。
+
+選んだremoteの`remotes[].repository`は既存のHTTPS／SSH／scp・ssh -G host正規化による`HOST/OWNER/REPO`候補。候補取得にpreparePr／認証／gh APIは使わない。URLからrepositoryを推測し直したり、複数候補を黙って絞らない。明示`pr.repository`と候補が異なる場合は同一repository制約を維持し、勝手に上書きせず停止・相談する。PR repository候補が非対応／未解決なら理由を示し、**「PRのremoteとrepositoryはどれですか？」と実質問**して候補＋自由回答を求め、未回答はStage0。toolが承認・送信先を選ぶわけではない。`needed=false`なら宛先質問なしでpush/pr設定を省略したinspect→empty終了。採用後も既存の同repo照合・状態／URL／SSH drift検証は省略しない。ssh -GのMatch exec等の副作用限界と秘密非表示はpush手順のとおり。
 
 `commit_inspect`呼び出し例（`repository`はlocal実ルート、`input`内の`pr.repository`はGitHub宛先）：
 

@@ -90,3 +90,9 @@ source版／dirty／digest、環境、全コマンドexit、期待／観測／�
 helperのstdin close→Pi wait→所有group不存在、所有DRIVER_PIDの同親waitをcleanup証拠で確認。別groupの所有hook等も終了確認後、source／driver manifest一致と必要証拠をowned外へ保存し、自分のOWNEDだけcleanup。unknown lock／他runは削除せず報告。cleanup後run READMEから全証拠参照を実readする。Mapにrun履歴を混ぜない。
 
 再利用は本repoでproject trust確認、新sessionまたは/reload、`/skill:verify-project commit-pr Bun`またはこの実ファイルを明示read。Rootは別fresh状態でPR正常／commit後停止／修正／runtime停止を独立確認する。
+
+## local宛先候補から通常PR
+
+候補取得の正常代表は別fresh `setup ... new`と上記通常一括承認を再利用し、requestだけ`/skill:commit-pr README.mdだけ。upstream設定。commit messageは正確に docs: explain local example と末尾LF。PR titleは docs: explain local example、bodyは Summary: explain local usage と末尾LF。`とする。remote／repository／Draftは指定せず通常PR、answer-fileは1つ、follow-up-fileなし。中間plan→文章補完も許可するが、中間を承認せず完成一式・実質問を読んでから本当の回答を送る。
+
+最初にreference不要`commit_workflow destinations`のmode=prとscopeを観測する。単一origin／架空SSH URL／repository=github.example.invalid/example/projectをlocal根拠から取得し、明示値を補ったinspectへ進む。候補取得からinspect前まで製品fetch/ls-remote/push/gh0、private／Stage／Git config不変。ssh fixtureは-Gだけ（生出力を候補結果に載せない）、Match exec等の副作用ゼロ保証とは呼ばない。以後は上記の承認前後HEAD/全refs/index/親/tree/raw本文/bare/upstream/outsideとgh全文readback、必要commit/push/PR各1・通常PRを照合する。明示不一致／同repo制約／URL・SSH driftは既存公開CLI regressionsを維持。曖昧はpushの別fresh実質問・未回答Stage0代表を使う。既存RPC/observer/fixtureを使い、新runnerや実GitHub送信なし。manifest固定・親PID wait・groupGone・owned cleanup・全証拠実readは上記のまま。

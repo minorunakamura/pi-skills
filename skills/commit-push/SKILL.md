@@ -16,6 +16,8 @@ compatibility: Requires commit_inspect and commit_workflow tools, Git, shell acc
 - [local-bun.md](../commit/references/local-bun.md)
 - [push-bun.md](../commit/references/push-bun.md)
 
+宛先が完全に明示されていなければ、共有手順のreference不要 `commit_workflow destinations` でlocal候補と根拠を取得する。toolは選択・送信せず、曖昧／無効／非対応なら実質問して未回答Stage0を守る。完全な明示先・内容なしでは不要な質問を増やさない。
+
 到達点は **push** に固定する。対象変更があればStageして新commitを作る。対象差分がなくても既存HEADで必要な残りの操作へ進む。HEADも対象差分もなければ送信なしで終了する。PR準備・作成はしない。
 
 branch方針は通信したremote defaultとmainに基づくpush用の作業branch計画に従う。ローカルcommit入口のdefault判定・直接commit方針は適用しない。

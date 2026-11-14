@@ -18,6 +18,8 @@ compatibility: Requires commit_inspect and commit_workflow tools, Git, shell acc
 - [pr-bun.md](../commit/references/pr-bun.md)
 - [diff-review.md](../commit/references/diff-review.md)
 
+宛先が完全に明示されていなければ、共有手順のreference不要 `commit_workflow destinations` でlocal候補と根拠を取得する。toolは選択・送信せず、曖昧／無効／非対応なら実質問して未回答Stage0を守る。完全な明示先・内容なしでは不要な質問を増やさない。
+
 到達点は **PR** に固定する。対象変更があればStageして新commitを作る。対象差分がなくても既存HEADで必要な残りの操作へ進む。HEADも対象差分もなければ送信なしで終了する。通常PRが既定。明示Draftを優先し、既存PRは報告だけにする。
 
 branch方針は共有手順のpush／PR用の作業branch計画に従う。ローカルcommit入口のdefault判定・直接commit方針は適用しない。

@@ -41,7 +41,7 @@ export PATH="$OWNED/bin:$(dirname "$VERIFY_BUN"):/usr/bin:/bin"
   --extension "$SOURCE/extensions/commit-status.js" --tools read,bash,commit_inspect,commit_workflow \
   "$OWNED/repo" "$SOURCE/skills/commit-push/SKILL.md" "$OWNED/evidence" \
   --fixture-remote --answer-file "$OWNED/answer" \
-  --request '/skill:commit-push README.mdだけ。remote origin。upstreamを設定。commit messageは正確に docs: explain local example と末尾LF。' \
+  --request '/skill:commit-push README.mdだけ。upstreamを設定。commit messageは正確に docs: explain local example と末尾LF。' \
   > "$OWNED/driver.out" 2> "$OWNED/driver.err" &
 DRIVER_PID=$!
 printf '%s %s\n' "$$" "$DRIVER_PID" > "$OWNED/pids"
@@ -73,3 +73,9 @@ source版／dirty／digest、環境、操作／exit／期待／実観測／pass-
 helperはstdin close→Pi終了wait→所有group不存在をcleanup.jsonへ記録。所有DRIVER_PIDも同じ親でwaitし、終了exitを保存。残存group／unknown lockがあれば削除せず報告。必要証拠をowned外へ保存し、source／driver manifest不変を照合後、所有確認したOWNEDだけ削除する。cleanup後、短いrun記録から**全証拠参照を実read**する。Mapにrun履歴を混ぜない。
 
 Piを本repositoryで起動しproject trustを確認、新セッション／reload後、`/skill:verify-project commit-push Bun`または本実ファイルを明示readして再利用する。Rootは別fresh状態で独立確認する。実GitHub／TUI／全OS／任意中断保証は対象外。
+
+## local宛先候補と曖昧実質問
+
+上の通常一括承認はremote未指定で行う。fresh fixtureの単一originは名前推測でなく`destinations.basis.source=singleRemote`を根拠に採用する。最初の`commit_workflow destinations`はreferenceなし`input:{mode:"push",scope:...}`、次に完全push.remoteを含むinspect1回、以後は既存reference経路。候補結果の実URL／config／PR不要を記録する。候補取得時点ではprivateなし・index/config/HEAD/refs/bare不変、git.jsonlの候補取得からinspect前までfetch/ls-remote/push0・gh-calledなし。観測のsnapshotはwrite-treeなしのsnapshot operationを使い、承認前observeと区別する。通常の承認前後照合・親shell wait／groupGone／cleanup/readbackは上記と同じ。
+
+曖昧は別fresh setupで、起動前に`git remote add backup "$OWNED/remote.git"`を追加する（両方owned、送信先を推測させない）。before snapshotを保存し、requestを`/skill:commit-push --no-confirm README.mdだけ。`、answer-fileとabort-fileをowned直下に指定して同じRPCを起動する。operationsの実際の候補・理由と「どのremoteへpushしますか？」相当の宛先質問を読む。未回答時snapshotを保存しbefore完全一致・Stage0・privateなし・製品fetch/ls-remote/push/gh0・手動調査／起動コマンド0を確認する。承認は送らず、その後answer-fileへ「キャンセル」を同sessionに送るか、owned 0600 abort markerへ正確に`abort\n`を書く。abort時helper exitは非0でもcleanupのwait/groupGoneを保存する。曖昧質問へ実行承認を捏造しない。終了待ち・owned group不存在確認後だけowned cleanupし、証拠を保持・全参照readbackする。

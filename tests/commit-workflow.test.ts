@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -3274,4 +3275,310 @@ await test("legacy parts retain unrelated unknown-field compatibility while reje
   });
   assert.equal(mixed.exit, 1);
   assert.equal(mixed.value.error, "invalid_material_request");
+});
+
+function destinationObservation(
+  f: ReturnType<typeof fixture>,
+  mode = "push",
+  scope?: unknown,
+) {
+  const result = f.cli("destinations", {
+    mode,
+    ...(scope === undefined ? {} : { scope }),
+  });
+  assert.equal(result.exit, 0, JSON.stringify(result.value));
+  return result.value as ReturnType<
+    typeof import("../skills/commit/scripts/destinations.ts").destinations
+  >;
+}
+await test("destinations public CLI observes no/single/multiple remotes and config precedence without choosing", (t) => {
+  const f = fixture(t);
+  assert.deepEqual(destinationObservation(f).reasons, ["no_remotes"]);
+  f.git("remote", "add", "backup", "https://example.invalid/owner/repo.git");
+  let value = destinationObservation(f, "pr");
+  assert.deepEqual(value.basis, { source: "singleRemote", remote: "backup" });
+  assert.deepEqual(value.remotes[0], {
+    name: "backup",
+    url: "https://example.invalid/owner/repo.git",
+    repository: "example.invalid/owner/repo",
+    reasons: [],
+  });
+  f.git("remote", "add", "origin", join(f.owned, "owned.git"));
+  assert.deepEqual(destinationObservation(f).reasons, ["multiple_remotes"]);
+  f.git("config", "branch.main.remote", "origin");
+  f.git("config", "branch.main.merge", "refs/heads/main");
+  assert.deepEqual(destinationObservation(f).basis, {
+    source: "branchRemote",
+    remote: "origin",
+  });
+  f.git("config", "remote.pushDefault", "backup");
+  assert.deepEqual(destinationObservation(f).basis, {
+    source: "remotePushDefault",
+    remote: "backup",
+  });
+  f.git("config", "branch.main.pushRemote", "origin");
+  value = destinationObservation(f);
+  assert.deepEqual(value.basis, {
+    source: "branchPushRemote",
+    remote: "origin",
+  });
+  assert.deepEqual(value.config.branchMerge, {
+    state: "single",
+    values: [{ kind: "value", value: "refs/heads/main" }],
+  });
+  const before = {
+    index: readFileSync(join(f.repo, ".git/index")),
+    config: readFileSync(join(f.repo, ".git/config")),
+    refs: f.git("show-ref"),
+    paths: readdirSync(f.owned),
+  };
+  destinationObservation(f);
+  assert.deepEqual(
+    {
+      index: readFileSync(join(f.repo, ".git/index")),
+      config: readFileSync(join(f.repo, ".git/config")),
+      refs: f.git("show-ref"),
+      paths: readdirSync(f.owned),
+    },
+    before,
+  );
+});
+for (const kind of [
+  "empty",
+  "valueless",
+  "multiple",
+  "missing",
+  "invalid",
+  "unknown",
+] as const) {
+  await test(`destinations preserves ${kind} config evidence without falling through`, (t) => {
+    const f = fixture(t);
+    f.git("remote", "add", "backup", "/owned/local.git");
+    f.git("config", "remote.pushDefault", "backup");
+    const configPath = join(f.repo, ".git/config");
+    if (kind === "valueless")
+      writeFileSync(
+        configPath,
+        readFileSync(configPath, "utf8") + '\n[branch "main"]\n pushRemote\n',
+      );
+    else if (kind !== "unknown")
+      f.git(
+        "config",
+        "branch.main.pushRemote",
+        kind === "empty"
+          ? ""
+          : kind === "invalid"
+            ? "SECRET invalid config"
+            : kind === "missing"
+              ? "gone"
+              : "backup",
+      );
+    if (kind === "multiple")
+      f.git("config", "--add", "branch.main.pushRemote", "backup");
+    if (kind === "unknown") {
+      const bin = join(f.owned, "bin");
+      mkdirSync(bin);
+      writeFileSync(
+        join(bin, "git"),
+        '#!/bin/sh\ncase "$*" in *pushremote*) exit 99;; esac\nexec /usr/bin/git "$@"\n',
+        { mode: 0o700 },
+      );
+      f.env.PATH = `${bin}:${f.env.PATH}`;
+    }
+    const value = destinationObservation(f);
+    assert.deepEqual(value.basis, { source: "branchPushRemote", remote: null });
+    assert.equal(
+      value.config.branchPushRemote.state,
+      kind === "unknown"
+        ? "unknown"
+        : kind === "multiple"
+          ? "multiple"
+          : "single",
+    );
+    if (["empty", "valueless", "invalid"].includes(kind))
+      assert.deepEqual(value.config.branchPushRemote.values, [{ kind }]);
+    assert.deepEqual(value.reasons, [
+      ...(kind === "valueless" ? ["remote_observation_failed"] : []),
+      kind === "missing"
+        ? "configured_remote_missing"
+        : "invalid_destination_config",
+    ]);
+    assert.doesNotMatch(JSON.stringify(value), /SECRET/);
+  });
+}
+await test("destinations retains unsupported candidates, rewritten URLs, and PR normalization without remote/gh calls", (t) => {
+  const f = fixture(t);
+  f.git("remote", "add", "rewritten", "https://old.invalid/owner/repo.git");
+  f.git(
+    "config",
+    "url.https://new.invalid/.pushInsteadOf",
+    "https://old.invalid/",
+  );
+  f.git(
+    "remote",
+    "add",
+    "credentials",
+    "https://SECRET@example.invalid/owner/repo.git",
+  );
+  f.git("remote", "add", "dangerous", "ext::SECRET");
+  f.git("remote", "add", "multiple", "/owned/one.git");
+  f.git("config", "--add", "remote.multiple.pushurl", "/owned/one.git");
+  f.git("config", "--add", "remote.multiple.pushurl", "/owned/two.git");
+  const bin = join(f.owned, "bin");
+  mkdirSync(bin);
+  const log = join(f.owned, "calls");
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\ncase "$1" in fetch|ls-remote|push) exit 99;; esac\nexec /usr/bin/git "$@"\n`,
+    { mode: 0o700 },
+  );
+  writeFileSync(
+    join(bin, "gh"),
+    `#!/bin/sh\ntouch '${f.owned}/gh-called'\nexit 99\n`,
+    { mode: 0o700 },
+  );
+  f.env.PATH = `${bin}:${f.env.PATH}`;
+  const before = readFileSync(join(f.repo, ".git/index"));
+  const value = destinationObservation(f, "pr");
+  assert.deepEqual(
+    value.remotes.find((r) => r.name === "rewritten"),
+    {
+      name: "rewritten",
+      url: "https://new.invalid/owner/repo.git",
+      repository: "new.invalid/owner/repo",
+      reasons: [],
+    },
+  );
+  for (const [name, reason] of [
+    ["credentials", "credentials_in_remote_url"],
+    ["dangerous", "unsupported_push_url"],
+    ["multiple", "multiple_push_urls"],
+  ]) {
+    assert.deepEqual(
+      value.remotes.find((r) => r.name === name),
+      { name, url: null, repository: null, reasons: [reason] },
+    );
+  }
+  assert.deepEqual(value.reasons, [
+    "multiple_remotes",
+    "unsupported_candidates",
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(value),
+    /SECRET|configDigest|fetch|hostname|reference/,
+  );
+  assert.doesNotMatch(
+    readFileSync(log, "utf8"),
+    /^(fetch|ls-remote|push)( |$)/m,
+  );
+  assert.equal(existsSync(join(f.owned, "gh-called")), false);
+  assert.deepEqual(readFileSync(join(f.repo, ".git/index")), before);
+});
+await test("destinations uses owned SSH alias evaluation and exposes failures/custom SSH without raw output", (t) => {
+  const f = fixture(t);
+  f.git("remote", "add", "origin", "git@alias.invalid:example/project.git");
+  const bin = join(f.owned, "bin");
+  mkdirSync(bin);
+  const ssh = join(bin, "ssh");
+  writeFileSync(
+    ssh,
+    '#!/bin/sh\n[ "$1" = -G ] || exit 99\nprintf "hostname github.example.invalid\\nSECRET raw ssh\\n"\n',
+    { mode: 0o700 },
+  );
+  f.env.PATH = `${bin}:${f.env.PATH}`;
+  let value = destinationObservation(f, "pr");
+  assert.equal(value.remotes[0].repository, fixtureRepository);
+  assert.doesNotMatch(JSON.stringify(value), /SECRET|hostname/);
+  f.git(
+    "remote",
+    "set-url",
+    "origin",
+    "ssh://git@alias.invalid/example/project.git",
+  );
+  assert.equal(
+    destinationObservation(f, "pr").remotes[0].repository,
+    fixtureRepository,
+  );
+  writeFileSync(ssh, '#!/bin/sh\nprintf "SECRET failed\\n"\nexit 99\n', {
+    mode: 0o700,
+  });
+  assert.deepEqual(destinationObservation(f, "pr").remotes[0].reasons, [
+    "ssh_host_unresolved",
+  ]);
+  f.git("config", "core.sshCommand", "SECRET command");
+  value = destinationObservation(f);
+  assert.deepEqual(value.remotes[0].reasons, [
+    "custom_ssh_command_unsupported",
+  ]);
+  assert.doesNotMatch(JSON.stringify(value), /SECRET/);
+});
+await test("destinations scope shares HEAD/selected content semantics and keeps empty path", (t) => {
+  const f = fixture(t, true);
+  assert.equal(
+    destinationObservation(f, "push", { kind: "staged" }).needed,
+    false,
+  );
+  assert.equal(
+    destinationObservation(f, "pr", { kind: "paths", paths: ["outside.txt"] })
+      .needed,
+    false,
+  );
+  assert.equal(destinationObservation(f).needed, true);
+  f.git("add", "example.txt");
+  assert.equal(
+    destinationObservation(f, "push", { kind: "paths", paths: ["outside.txt"] })
+      .needed,
+    true,
+  );
+});
+
+await test("destinations preserves existing Unicode and at-sign remote names and their config basis", (t) => {
+  const f = fixture(t);
+  for (const name of ["共有", "backup@work"])
+    f.git("remote", "add", name, "/owned/local.git");
+  f.git("config", "branch.main.pushRemote", "共有");
+  const value = destinationObservation(f);
+  assert.deepEqual(value.basis, { source: "branchPushRemote", remote: "共有" });
+  assert.deepEqual(
+    value.remotes
+      .map((r) => r.name)
+      .sort((a, b) => String(a).localeCompare(String(b))),
+    ["backup@work", "共有"],
+  );
+  assert.deepEqual(value.reasons, []);
+});
+
+await test("destinations withholds unmatched credential config and invalid merge refs without fallback", (t) => {
+  const f = fixture(t);
+  f.git("remote", "add", "共有@work", "/owned/local.git");
+  f.git("config", "remote.pushDefault", "共有@work");
+  f.git(
+    "config",
+    "branch.main.pushRemote",
+    "https://TOKEN@example.invalid/owner/repo",
+  );
+  f.git("config", "branch.main.merge", "refs/heads/SECRET..invalid");
+  const value = destinationObservation(f);
+  assert.deepEqual(value.config.branchPushRemote, {
+    state: "single",
+    values: [{ kind: "missingRemote" }],
+  });
+  assert.deepEqual(value.config.branchMerge, {
+    state: "single",
+    values: [{ kind: "invalid" }],
+  });
+  assert.deepEqual(value.basis, { source: "branchPushRemote", remote: null });
+  assert.deepEqual(value.reasons, ["configured_remote_missing"]);
+  assert.doesNotMatch(JSON.stringify(value), /TOKEN|SECRET|https:/);
+  f.git("config", "branch.main.pushRemote", "共有@work");
+  f.git("config", "branch.main.merge", "refs/heads/共有@work");
+  const control = destinationObservation(f);
+  assert.deepEqual(control.basis, {
+    source: "branchPushRemote",
+    remote: "共有@work",
+  });
+  assert.deepEqual(control.config.branchMerge, {
+    state: "single",
+    values: [{ kind: "value", value: "refs/heads/共有@work" }],
+  });
 });
