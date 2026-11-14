@@ -32,7 +32,7 @@ inspectは通信せずlocal push URL（pushInsteadOf等のrewrite後）／順序
 - `phase=materials`の`commitNeeded=true`は新commitが必要。固定Staged材料から文章を作る。scanner=unavailableは新commitの未検査と明示する。
 - `commitNeeded=false`は既存HEADをそのまま送信する。messageもcommitも作らない。対象外worktreeを取り込まず、既存履歴を今回Gitleaks検査済みと呼ばない。空commit／amend／再作成なし。
 - remoteの**全refs**を観測してdefault／全空判定を確定し、送信履歴と必要object／祖先関係を確認する。不明default／non-fast-forward／必要object欠落／通信失敗はcommit前停止。PR材料／APIは使わない。
-- 小材料は一覧／固定diff／送信履歴`history`／HEADから直近最大5件の`recentHistory`を一括。新commitの言語・形式は共有local手順に従い`recentHistory`から判定する。送信履歴は5件に制限しない。大材料の未表示を明示し、共有のreadで必要な複数bytes範囲をまとめて読む。直近履歴は`name:"recent-history"`と`recentHistoryBytes`を使う。readの`material_display_budget_exceeded`かつ`materialsPreserved=true`だけは、応答のreferenceで要求量を減らして読み直す。準備／Skill全体の再実行は不要。意味不明を推測しない。質問前にはreleaseで不要diff／historyを削除する。
+- 小材料は一覧／固定diff／送信履歴`history`／HEADから直近最大5件の`recentHistory`を一括。新commitの言語・形式は共有local手順に従い`recentHistory`から判定する。送信履歴は5件に制限しない。大材料の未表示を明示し、共有の自動readへ`materials:["diff","history","recent-history","files"]`、続きは返された`cursor`だけを渡す。offset／lengthを計算せず、未表示の必要材料をdoneまで読む。単一要素が予算に収まらなければ明示停止し、同cursorをretryしない。意味不明を推測しない。質問前にはreleaseで不要diff／historyを削除する。
 
 `branchPolicy.createBranch=true`ならmain／remote defaultから、または明示新branch指示から未存在作業branchを1件計画する。既存HEADも同じ方針で、元refを保持して同SHAの新branchだけを承認後に作る。`false`なら現在作業branchを維持する。新branch名の形式／namespace衝突（dangling含む）／残存upstream設定を拒否し、既存branchへ切替・上書きしない。
 

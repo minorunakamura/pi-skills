@@ -59,6 +59,8 @@ defaultへの直接commitは`/skill:commit-main`を選びます。同じ共通�
 
 `commit`・`commit-main`・`commit-push`・`commit-pr`は`commit_inspect`と`commit_workflow`の両toolが必須です。toolが同梱TypeScriptをBun 1.3.0以上で固定起動し、assistantは起動コマンドを生成しません。未導入／非公開ならStage前に停止するため、packageのextensionを有効化して新sessionまたは`/reload`で両toolを公開してください。手書きCLI fallbackはありません。開始時は`commit_inspect`、後続は完全参照を渡す`commit_workflow`を使います。完成文章を承認前にprivate保持し、承認後は参照だけで必要なcommit・push・事後確認・cleanupまで進みます。Codemodeは不要です。PR-onlyも同じBun経路です。Bun不在・非対応・確認不能はStageを含むGit変更前に停止し、no-confirmでも省略しません。起動・停止条件と詳細は[詳細仕様](CONTRIBUTING.md#ローカル2入口のbun標準経路)を参照してください。
 
+大きな固定差分は材料名を選び、続きは返されたcursorだけで読みます。assistantによるoffset／length計算は不要で、read JSON全体は1回32KiB以内です。詳細は[自動page契約](CONTRIBUTING.md#固定材料の自動page-json)を参照してください。
+
 対象や文章への要望も指定できます。
 
 ```text

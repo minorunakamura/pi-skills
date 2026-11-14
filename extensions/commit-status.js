@@ -431,7 +431,7 @@ export default function (pi) {
     exposure: "model-only",
     executionMode: "sequential",
     description:
-      "Run bundled materials/read/release/plan/execute/cleanup with an explicit complete reference. Input is a JSON object; execute accepts reference only. Bun is obtained only from the matching final successful commit_inspect on this conversation branch. Never retry after a started failure or infer approval from a reference.",
+      "Run bundled materials/read/release/plan/execute/cleanup with an explicit complete reference. Input is a JSON object; execute accepts reference only. Read starts with materials names and continues with the returned cursor unchanged; never calculate offsets or lengths. Bun is obtained only from the matching final successful commit_inspect on this conversation branch. Never retry after a started failure or infer approval from a reference.",
     parameters: Type.Object(
       {
         repository: Type.String(),

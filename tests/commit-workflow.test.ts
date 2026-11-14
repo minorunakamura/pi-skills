@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -2896,4 +2897,381 @@ await test("PR pending preparation retains supplied PR bytes when only missing c
   assert.equal(complete.exit, 0, JSON.stringify(complete.value));
   assert.equal(complete.value.phase, "plan");
   assert.equal((complete.value.pr as { body: string }).body, body);
+});
+
+await test("automatic read pages fixed UTF-8 and lists under one serialized budget", (t) => {
+  const f = fixture(t);
+  writeFileSync(
+    join(f.repo, "example.txt"),
+    '\ufeff日本語😀"\\\t\n'.repeat(5000),
+  );
+  const materials = prepare(f);
+  const ref = materials.value.reference as { directory: string };
+  const expected = readFileSync(join(ref.directory, "diff.bin"));
+  const chunks: Buffer[] = [];
+  const files: unknown[] = [];
+  let cursor: unknown;
+  let pages = 0;
+  do {
+    const read = f.cli("read", {
+      reference: ref,
+      ...(cursor ? { cursor } : { materials: ["diff", "history", "files"] }),
+    });
+    assert.equal(read.exit, 0, JSON.stringify(read.value));
+    assert.ok(Buffer.byteLength(JSON.stringify(read.value)) <= 32768);
+    const parts = read.value.parts as {
+      name: string;
+      offset: number;
+      length: number;
+      encoding: string;
+      text: string;
+      items: unknown[];
+    }[];
+    assert.ok(parts.length > 0);
+    for (const part of parts) {
+      if (part.name === "diff") {
+        assert.equal(part.encoding, "utf8");
+        assert.equal(part.offset, Buffer.concat(chunks).length);
+        const bytes = Buffer.from(part.text);
+        assert.equal(bytes.length, part.length);
+        chunks.push(bytes);
+      }
+      if (part.name === "files") files.push(...part.items);
+    }
+    assert.notDeepEqual(read.value.next, cursor);
+    cursor = read.value.next;
+    assert.equal(read.value.done, cursor === null);
+    assert.ok(++pages < 30);
+  } while (cursor);
+  assert.ok(pages > 1);
+  assert.deepEqual(Buffer.concat(chunks), expected);
+  assert.equal(files.length, 1);
+  assert.equal((files[0] as { path: string }).path, "example.txt");
+});
+
+for (const bytes of [Buffer.from([0xff, 0xfe, 10]), Buffer.from([0, 65, 10])]) {
+  await test(`automatic read losslessly pages forced-text binary ${bytes.toString("hex")}`, (t) => {
+    const f = fixture(t);
+    writeFileSync(join(f.repo, ".gitattributes"), "example.txt diff\n");
+    writeFileSync(
+      join(f.repo, "example.txt"),
+      Buffer.concat(Array.from({ length: 15000 }, () => bytes)),
+    );
+    const materials = prepare(f);
+    const ref = materials.value.reference as { directory: string };
+    const expected = readFileSync(join(ref.directory, "diff.bin"));
+    const chunks: Buffer[] = [];
+    let cursor: unknown;
+    do {
+      const page = f.cli("read", {
+        reference: ref,
+        ...(cursor ? { cursor } : { materials: ["diff"] }),
+      });
+      assert.equal(page.exit, 0, JSON.stringify(page.value));
+      assert.ok(Buffer.byteLength(JSON.stringify(page.value)) <= 32768);
+      const part = (
+        page.value.parts as { encoding: string; text: string; offset: number }[]
+      )[0];
+      assert.equal(part.encoding, "base64");
+      assert.equal(part.offset, Buffer.concat(chunks).length);
+      chunks.push(Buffer.from(part.text, "base64"));
+      assert.notDeepEqual(page.value.next, cursor);
+      cursor = page.value.next;
+    } while (cursor);
+    assert.deepEqual(Buffer.concat(chunks), expected);
+  });
+}
+
+await test("automatic read handles empty fixed materials and EOF cursors", (t) => {
+  const f = pushFixture(t);
+  f.git("switch", "-c", "docs/existing");
+  const materials = prepare(f, { mode: "push", push: { remote: "origin" } });
+  const read = f.cli("read", {
+    reference: materials.value.reference,
+    materials: ["diff", "history", "files"],
+  });
+  assert.equal(read.exit, 0, JSON.stringify(read.value));
+  const parts = read.value.parts as {
+    name: string;
+    length?: number;
+    count?: number;
+  }[];
+  assert.equal(parts.find((p) => p.name === "diff")?.length, 0);
+  assert.equal(parts.find((p) => p.name === "files")?.count, 0);
+  assert.equal(read.value.done, true);
+  assert.equal(read.value.next, null);
+  assert.deepEqual(read.value.unread, []);
+});
+
+for (const kind of [
+  "unknown",
+  "unavailable",
+  "mixed",
+  "negative",
+  "fraction",
+  "range",
+  "binding",
+  "material",
+  "run",
+  "reference",
+] as const) {
+  await test(`automatic read rejects ${kind} input without committing`, (t) => {
+    const f = fixture(t);
+    writeFileSync(join(f.repo, "example.txt"), "日本語😀\n".repeat(10000));
+    const materials = prepare(f);
+    const first = f.cli("read", {
+      reference: materials.value.reference,
+      materials: ["diff"],
+    });
+    assert.equal(first.exit, 0);
+    const cursor = first.value.next as {
+      binding: string;
+      materials: string[];
+      index: number;
+      offset: number;
+    };
+    let ref = materials.value.reference;
+    let extra: Record<string, unknown> = { cursor };
+    if (kind === "unknown") extra = { materials: ["unknown"] };
+    if (kind === "unavailable") extra = { materials: ["pr-diff"] };
+    if (kind === "mixed") extra.parts = [];
+    if (kind === "negative") cursor.offset = -1;
+    if (kind === "fraction") cursor.offset = 0.5;
+    if (kind === "range") cursor.offset = 1e9;
+    if (kind === "binding") cursor.binding = "0".repeat(64);
+    if (kind === "material") cursor.materials = ["history"];
+    if (kind === "run") ref = prepare(f).value.reference;
+    if (kind === "reference") {
+      const released = f.cli("release", { reference: ref });
+      ref = released.value.reference;
+    }
+    const read = f.cli("read", { reference: ref, ...extra });
+    assert.equal(read.exit, 1);
+    assert.equal(read.value.error, "invalid_material_request");
+    assert.equal(f.git("rev-list", "--count", "HEAD"), "1");
+  });
+}
+
+await test("automatic read pages all PR materials and prFiles from the fixed reference", (t) => {
+  const f = prFixture(t);
+  writeFileSync(join(f.repo, "example.txt"), "日本語😀\n".repeat(6000));
+  const materials = prepare(f, {
+    mode: "pr",
+    push: { remote: "origin" },
+    pr: { repository: fixtureRepository },
+  });
+  const ref = materials.value.reference as { directory: string };
+  const names = [
+    "diff",
+    "history",
+    "recent-history",
+    "pr-diff",
+    "pr-history",
+    "pr-templates",
+    "files",
+    "prFiles",
+  ];
+  const chunks = new Map<string, Buffer[]>();
+  const lists = new Map<string, unknown[]>();
+  let cursor: unknown;
+  do {
+    const read = f.cli("read", {
+      reference: ref,
+      ...(cursor ? { cursor } : { materials: names }),
+    });
+    assert.equal(read.exit, 0, JSON.stringify(read.value));
+    assert.ok(Buffer.byteLength(JSON.stringify(read.value)) <= 32768);
+    for (const part of read.value.parts as {
+      name: string;
+      text: string;
+      encoding: BufferEncoding;
+      items?: unknown[];
+    }[]) {
+      if (part.items)
+        lists.set(part.name, [...(lists.get(part.name) ?? []), ...part.items]);
+      else
+        chunks.set(part.name, [
+          ...(chunks.get(part.name) ?? []),
+          Buffer.from(part.text, part.encoding),
+        ]);
+    }
+    assert.notDeepEqual(read.value.next, cursor);
+    cursor = read.value.next;
+  } while (cursor);
+  for (const name of names.slice(0, 6))
+    assert.deepEqual(
+      Buffer.concat(chunks.get(name)!),
+      readFileSync(join(ref.directory, `${name}.bin`)),
+    );
+  assert.equal(lists.get("files")!.length, 1);
+  assert.deepEqual(
+    lists.get("prFiles"),
+    (materials.value.pr as { files: unknown[] }).files,
+  );
+});
+
+await test("automatic read explicitly stops when one list element cannot fit", (t) => {
+  const f = fixture(t);
+  const path = "\u0001".repeat(6000);
+  const blob = f.git("rev-parse", "HEAD:example.txt");
+  f.git("update-index", "--add", "--cacheinfo", `100644,${blob},${path}`);
+  const inspected = f.cli("inspect", { scope: { kind: "staged" } });
+  assert.equal(inspected.exit, 0, JSON.stringify(inspected.value));
+  const questions = inspected.value.questions as { suspicious: string[] };
+  const materials = f.cli("materials", {
+    reference: inspected.value.reference,
+    reviewedPaths: questions.suspicious,
+  });
+  assert.equal(materials.exit, 0, JSON.stringify(materials.value));
+  assert.ok(Buffer.byteLength(JSON.stringify(materials.value)) <= 32768);
+  assert.ok(Number(materials.value.filesOmitted) > 0);
+  const read = f.cli("read", {
+    reference: materials.value.reference,
+    materials: ["files"],
+  });
+  assert.equal(read.exit, 1);
+  assert.equal(read.value.error, "material_display_budget_exceeded");
+  assert.equal(read.value.materialsPreserved, true);
+});
+
+await test("legacy parts preserve a leading BOM in the shared UTF-8 view", (t) => {
+  const f = fixture(t);
+  writeFileSync(join(f.repo, "example.txt"), "\ufeff日本語😀\n");
+  const materials = prepare(f);
+  const ref = materials.value.reference as { directory: string };
+  const bytes = readFileSync(join(ref.directory, "diff.bin"));
+  const bom = Buffer.from("\ufeff日本語😀");
+  const offset = bytes.indexOf(bom);
+  assert.ok(offset >= 0);
+  const read = f.cli("read", {
+    reference: ref,
+    parts: [{ name: "diff", offset, length: bom.length }],
+  });
+  assert.equal(read.exit, 0);
+  assert.deepEqual(
+    Buffer.from((read.value.parts as { text: string }[])[0].text),
+    bom,
+  );
+});
+
+await test("automatic read paginates omitted file lists without missing or repeated entries", (t) => {
+  const f = fixture(t);
+  const names = Array.from(
+    { length: 140 },
+    (_, i) => `${String(i).padStart(3, "0")}-${"x".repeat(190)}.txt`,
+  );
+  for (const name of names) writeFileSync(join(f.repo, name), "new\n");
+  const materials = prepare(f);
+  assert.equal(materials.value.displayed, false);
+  assert.ok(Number(materials.value.filesOmitted) > 0);
+  assert.ok(Buffer.byteLength(JSON.stringify(materials.value)) <= 32768);
+  let cursor: unknown;
+  const actual: string[] = [];
+  let pages = 0;
+  do {
+    const read = f.cli("read", {
+      reference: materials.value.reference,
+      ...(cursor ? { cursor } : { materials: ["files"] }),
+    });
+    assert.equal(read.exit, 0, JSON.stringify(read.value));
+    assert.ok(Buffer.byteLength(JSON.stringify(read.value)) <= 32768);
+    const part = (
+      read.value.parts as {
+        offset: number;
+        count: number;
+        totalCount: number;
+        items: { path: string }[];
+      }[]
+    )[0];
+    assert.equal(part.offset, actual.length);
+    assert.equal(part.count, part.items.length);
+    assert.equal(part.totalCount, names.length);
+    actual.push(...part.items.map((p) => p.path));
+    assert.notDeepEqual(read.value.next, cursor);
+    cursor = read.value.next;
+    assert.ok(++pages < 10);
+  } while (cursor);
+  assert.ok(pages > 1);
+  assert.deepEqual(actual, names);
+});
+
+await test("initial material metadata explicitly stops if irreducible branch metadata cannot fit", (t) => {
+  const f = fixture(t);
+  writeFileSync(join(f.repo, "example.txt"), "pending\n");
+  const inspected = f.cli("inspect", {
+    mode: "commit",
+    newBranch: "x".repeat(34000),
+  });
+  assert.equal(inspected.exit, 0, JSON.stringify(inspected.value));
+  const materials = f.cli("materials", {
+    reference: inspected.value.reference,
+  });
+  assert.equal(materials.exit, 1);
+  assert.equal(materials.value.error, "material_metadata_budget_exceeded");
+  assert.equal(materials.value.materialsPreserved, undefined);
+  assert.deepEqual(materials.value.cleanup, { complete: true, remaining: [] });
+});
+
+await test("automatic read accepts an exact EOF position and rejects out-of-range even with a matching checksum", (t) => {
+  const f = fixture(t);
+  writeFileSync(join(f.repo, "example.txt"), "pending\n");
+  const materials = prepare(f);
+  const ref = materials.value.reference as {
+    repository: string;
+    directory: string;
+    run: string;
+    dev: number;
+    ino: number;
+    files: Record<string, unknown>;
+  };
+  const total = Number(materials.value.diffBytes);
+  for (const offset of [total, total + 1]) {
+    const cursor = {
+      materials: ["diff"],
+      index: 0,
+      offset,
+      binding: createHash("sha256")
+        .update(
+          JSON.stringify([
+            ref.repository,
+            ref.directory,
+            ref.run,
+            ref.dev,
+            ref.ino,
+            Object.entries(ref.files).sort(([a], [b]) => a.localeCompare(b)),
+            ["diff"],
+            0,
+            offset,
+          ]),
+        )
+        .digest("hex"),
+    };
+    const read = f.cli("read", { reference: ref, cursor });
+    assert.equal(read.exit, offset === total ? 0 : 1);
+    if (offset === total) {
+      assert.equal(read.value.done, true);
+      assert.equal(read.value.next, null);
+      assert.deepEqual(read.value.unread, []);
+      assert.equal((read.value.parts as { length: number }[])[0].length, 0);
+    } else assert.equal(read.value.error, "invalid_material_request");
+  }
+});
+
+await test("legacy parts retain unrelated unknown-field compatibility while rejecting automatic mixtures", (t) => {
+  const f = fixture(t);
+  writeFileSync(join(f.repo, "example.txt"), "pending\n");
+  const materials = prepare(f);
+  const read = f.cli("read", {
+    reference: materials.value.reference,
+    parts: [{ name: "diff", offset: 0, length: 1 }],
+    unrelatedLegacyField: true,
+  });
+  assert.equal(read.exit, 0);
+  const mixed = f.cli("read", {
+    reference: materials.value.reference,
+    parts: [],
+    materials: ["diff"],
+  });
+  assert.equal(mixed.exit, 1);
+  assert.equal(mixed.value.error, "invalid_material_request");
 });

@@ -1,3 +1,4 @@
+import { materialPage, view, displayBudget } from "./material-page.ts";
 import {
   prOptions,
   preparePr,
@@ -280,16 +281,6 @@ function release(ref: Reference) {
   ])
     if (ref.files[name]) removeOwned(ref, name);
 }
-function view(bytes: Buffer) {
-  try {
-    return {
-      encoding: "utf8",
-      text: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
-    };
-  } catch {
-    return { encoding: "base64", text: bytes.toString("base64") };
-  }
-}
 function scan(repo: string, diff: Buffer): "passed" | "unavailable" {
   const scanner = (process.env.PATH ?? "/usr/bin:/bin")
     .split(delimiter)
@@ -425,10 +416,15 @@ function materialView(ref: Reference, data: Materials) {
       base.pr.reusablePathsOmitted++;
     }
   }
-  return {
+  const result = {
     ...base,
-    note: "Full fixed diff/history not displayed; read required ranges together before planning.",
+    note: "Fixed materials omitted; read by materials names, then returned cursor before planning. Omitted files/prFiles are page reachable; PR reusable paths are also marked by prFiles.reusedStaged.",
   };
+  requireThat(
+    Buffer.byteLength(JSON.stringify(result)) <= displayBudget,
+    "material_metadata_budget_exceeded",
+  );
+  return result;
 }
 function main() {
   const [operation, flag, path, ...extra] = process.argv.slice(2);
@@ -542,10 +538,21 @@ function main() {
     return { reference: ref, payloadRemoved: true };
   }
   if (operation === "read") {
-    requireThat(
-      data.phase === "materials" && Array.isArray(input.parts),
-      "invalid_material_request",
-    );
+    requireThat(data.phase === "materials", "invalid_material_request");
+    if (input.materials !== undefined || input.cursor !== undefined)
+      return materialPage(ref, input, (name) => {
+        if (name === "files") return data.state.changes.filter(isStaged);
+        if (name === "prFiles") {
+          requireThat(data.prPreparation !== null, "invalid_material_request");
+          return data.prFiles;
+        }
+        requireThat(
+          Object.hasOwn(ref.files, `${name}.bin`),
+          "invalid_material_request",
+        );
+        return readOwned(ref, `${name}.bin`);
+      });
+    requireThat(Array.isArray(input.parts), "invalid_material_request");
     const parts = input.parts.map((value: unknown) => {
       const part = object(value);
       requireThat(

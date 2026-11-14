@@ -888,15 +888,20 @@ await test("commit_workflow uses only final successful inspect evidence on the c
   assert.equal(existsSync(join(f.owned, "lookup-marker")), false);
 });
 
-async function workflowFixture(t, mode = "commit-main") {
+async function workflowFixture(
+  t,
+  mode = "commit-main",
+  content = "new content\n",
+  options = {},
+) {
   const f = inspectFixture(t);
   f.git("config", "user.name", "Test User");
   f.git("config", "user.email", "test@example.invalid");
   f.git("config", "commit.gpgsign", "false");
   f.git("add", ".");
   f.git("commit", "-m", "base");
-  writeFileSync(join(f.repo, "new.txt"), "new content\n");
-  const input = { mode };
+  writeFileSync(join(f.repo, "new.txt"), content);
+  const input = { mode, ...options };
   if (["push", "pr"].includes(mode)) {
     const remote = join(f.owned, "remote.git");
     assert.equal(
@@ -1489,4 +1494,97 @@ await test("commit_workflow preserves validated responses after cancellation or 
     );
   }
   await f.ok("cleanup", { reference: plan.reference });
+});
+
+await test("commit_workflow automatic read returns the bounded JSON once and follows cursors", async (t) => {
+  const f = await workflowFixture(
+    t,
+    "commit-main",
+    '日本語😀"\\\n'.repeat(6000),
+  );
+  const materials = await f.ok("materials", { reference: f.reference });
+  const ref = materials.reference;
+  const expected = readFileSync(join(ref.directory, "diff.bin"));
+  const chunks = [];
+  let cursor;
+  do {
+    const response = await f.call("read", {
+      reference: ref,
+      ...(cursor ? { cursor } : { materials: ["diff", "files"] }),
+    });
+    assert.notEqual(response.isError, true, JSON.stringify(response));
+    assert.equal(response.content.length, 1);
+    assert.deepEqual(JSON.parse(response.content[0].text), response.details);
+    assert.ok(Buffer.byteLength(response.content[0].text) <= 32768);
+    for (const part of response.details.parts)
+      if (part.name === "diff")
+        chunks.push(Buffer.from(part.text, part.encoding));
+    cursor = response.details.next;
+  } while (cursor);
+  assert.deepEqual(Buffer.concat(chunks), expected);
+  await f.ok("cleanup", { reference: ref });
+});
+
+await test("commit_workflow rejects mixed automatic input before child start and malformed page responses", async (t) => {
+  const f = await workflowFixture(t, "commit-main", "日本語😀\n".repeat(6000));
+  const materials = await f.ok("materials", { reference: f.reference });
+  const reference = materials.reference;
+  const rejected = await f.call("read", {
+    reference,
+    materials: ["diff"],
+    parts: [],
+  });
+  assert.equal(rejected.details.childStarted, false);
+  assert.equal(rejected.details.inputCorrectionAllowed, true);
+  assert.equal(existsSync(join(reference.directory, "diff.bin")), true);
+  const page = await f.ok("read", { reference, materials: ["diff"] });
+  const { workflow, fixedScripts } = await faultWorkflow(f, "");
+  for (const data of [
+    { ...page, done: true },
+    { ...page, unread: [] },
+    { ...page, next: { ...page.next, offset: page.next.offset + 1 } },
+    { ...page, parts: [] },
+    { ...page, reference },
+  ]) {
+    writeFileSync(
+      join(fixedScripts, "commit-workflow.ts"),
+      `console.log(${JSON.stringify(JSON.stringify(data))});`,
+    );
+    const result = await f.call(
+      "read",
+      { reference, materials: ["diff"] },
+      undefined,
+      workflow,
+    );
+    assert.equal(result.isError, true);
+    assert.equal(result.details.error, "workflow_result_unknown");
+    assert.equal(existsSync(reference.directory), true);
+  }
+  const continuation = await f.ok("read", { reference, cursor: page.next });
+  writeFileSync(
+    join(fixedScripts, "commit-workflow.ts"),
+    `console.log(${JSON.stringify(JSON.stringify(continuation))});`,
+  );
+  const mismatched = await f.call(
+    "read",
+    { reference, cursor: { ...page.next, binding: "0".repeat(64) } },
+    undefined,
+    workflow,
+  );
+  assert.equal(mismatched.isError, true);
+  assert.equal(mismatched.details.error, "workflow_result_unknown");
+  await f.ok("cleanup", { reference });
+});
+
+await test("commit_workflow explicitly reports unfit initial metadata with owned cleanup, not read recovery", async (t) => {
+  const f = await workflowFixture(t, "commit", "pending\n", {
+    newBranch: "x".repeat(34000),
+  });
+  const result = await f.call("materials", { reference: f.reference });
+  assert.equal(result.isError, true);
+  assert.equal(result.details.error, "material_metadata_budget_exceeded");
+  assert.deepEqual(result.details.cleanup, { complete: true, remaining: [] });
+  assert.equal(result.details.materialsPreserved, undefined);
+  assert.equal(existsSync(f.reference.directory), false);
+  assert.equal(f.git("rev-list", "--count", "HEAD").toString().trim(), "1");
 });
