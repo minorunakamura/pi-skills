@@ -597,7 +597,7 @@ export default function (pi) {
     renderShell: "self",
     executionMode: "sequential",
     description:
-      "Run reference-free destinations (mode push/pr, optional scope) for local destination evidence without Stage/private preparation/network; SSH -G may run Match exec. Other operations materials/read/release/plan/execute/cleanup require an explicit complete reference. Input is a JSON object; execute accepts reference only. Read starts with materials names and continues with the returned cursor unchanged; never calculate offsets or lengths. For reference operations Bun is obtained only from the matching final successful commit_inspect on this conversation branch. Never retry after a started failure or infer approval from a reference.",
+      "Run reference-free destinations (mode push/pr, optional scope) for local destination evidence without Stage/private preparation/network; SSH -G may run Match exec. Other operations materials/read/release/plan/execute/cleanup require an explicit complete reference. Input is a JSON object; execute accepts reference only. Read starts with materials names and continues with the returned cursor unchanged; never calculate offsets or lengths. For reference operations Bun is obtained only from the matching final successful commit_inspect on this conversation branch. Never retry after a started failure or infer approval from a reference. Model-only: call it directly as a tool, never from codemode scripts (tools.commit_workflow does not exist there).",
     parameters: Type.Object(
       {
         repository: Type.String(),
@@ -826,7 +826,7 @@ export default function (pi) {
     renderShell: "self",
     executionMode: "sequential",
     description:
-      "Discover and verify Bun 1.3.0+, run the bundled inspect CLI and display Git status. Creates private preparation, but does not Stage or commit. Supply the real absolute repository root and existing inspect JSON with explicit mode (commit, commit-main, push, pr). With HEAD or selected changes, push/pr require push.remote and pr also requires pr.repository ([HOST/]OWNER/REPO). Honor complete explicit destinations; otherwise use commit_workflow destinations before inspect, and ask before Stage if ambiguous, invalid or unsupported. Preserve the complete result/reference for subsequent commit_workflow calls; never construct CLI commands. Do not repeat the TUI list; approval remains separate. No fallback or automatic install after failure.",
+      "Discover and verify Bun 1.3.0+, run the bundled inspect CLI and display Git status. Creates private preparation, but does not Stage or commit. Supply the real absolute repository root and existing inspect JSON with explicit mode (commit, commit-main, push, pr). With HEAD or selected changes, push/pr require push.remote and pr also requires pr.repository ([HOST/]OWNER/REPO). Honor complete explicit destinations; otherwise use commit_workflow destinations before inspect, and ask before Stage if ambiguous, invalid or unsupported. Preserve the complete result/reference for subsequent commit_workflow calls; never construct CLI commands. Model-only: call commit_inspect and commit_workflow directly, never from codemode scripts. Do not repeat the TUI list; approval remains separate. No fallback or automatic install after failure.",
     parameters: Type.Object(
       { repository: Type.String(), input: Type.String() },
       { additionalProperties: false },
