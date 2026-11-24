@@ -6,7 +6,7 @@
 
 [commit_inspect手順](commit-inspect.md)でfresh setupからmodel-only toolをmodelに直接呼ばせる。部分Stage／renameを実Gitと照合し、content末尾JSONとdetailsの完全一致・同じBun/referenceの後続cleanup・Git不変を確認する。実TUIは次assistant本文より前の一覧snapshot・重複なし・dotのみ色、reload後の過去details描画と新callだけの再inspectを観測する。RPCとprint／JSONは色なし一覧と完全判断材料、通常cancelは参照前後をmarker／公開updateで区別しcleanup報告と実状態、Bun不足はGit変更前停止・fallback0を確認する。色失敗／不正応答は限定testで分離する。
 
-`commit_workflow` の[短い表示と展開](commit-inspect.md#commit_workflowの短いtui表示と展開)は同じowned tmuxで大きいread結果を実際に折り畳み→展開→折り畳み、長い引数・payloadの通常非表示と詳細保持を照合する。失敗の実表示、部分成功／cleanup未完了・未確認の要約と完全content不変の公開renderer testsも使う。RPCをTUI実証と呼ばず、Git操作・検証・承認契約は変えない。
+`commit_workflow` の[短い表示と展開](commit-inspect.md#commit_workflowの短いtui表示と展開)は同じowned tmuxで大きいread結果を実際に折り畳み→展開→折り畳み、長い引数・payloadの通常非表示と詳細保持を照合する。失敗の実表示、部分成功／cleanup未完了・未確認の要約と完全content不変の公開renderer testsも使う。`phase=plan`は折りたたみ時も全文表示（承認質問時点の実TUI snapshot）とTUIだけのcontent案内を同手順で確認する。RPCをTUI実証と呼ばず、Git操作・検証・承認契約は変えない。
 
 証拠は時刻付き実PTYセルsnapshot（物理screenshotでない）・必要tool結果・版／dirty／digest／exit／unknown／metricと所有PID wait／group・server不存在／owned cleanup／全参照readback。専用tool単独成功で4入口の接続・release・同ターンreadやW2前後比較を保証しない。
 

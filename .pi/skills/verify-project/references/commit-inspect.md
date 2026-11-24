@@ -98,7 +98,7 @@ date -u '+%Y-%m-%dT%H:%M:%SZ'
 
 Piのtool出力展開（標準Ctrl+O）を実際に操作し、snapshotに固定差分の識別文字列とread JSONが出ること、再度折り畳むと消えることを照合する。observerの完全tool resultは表示前後で変わらず、contentのJSON＝details、read JSON全体32KiB以内、固定referenceとcursor保持を確認する。実tool call0の描画単体テストを実TUI操作の代用にしない。read pageを完了認定せず、実際にdone=falseなら続きありと表示する。
 
-同じsessionで所有referenceのcleanupを直接呼び、完了要約とprivate不在を確認する。その後、reference:{}等の明示的な不正inputを1回だけ呼ばせ、input_rejected／childStarted=falseと折り畳み画面のFailedを確認し、retry／Git操作なしで停止する。部分成功flags／cleanup未完了／終了未確認・PR中間非実行性は公開renderer testsで正常対照と照合する。既存実Git read testで完全content／detailsを描画前後に比較する。所有PID/group wait→owned tmux終了→owned cleanup→全証拠readbackは上の共通手順のとおり。通常assistantの完成文章・承認をtool描画へ移さない。
+同じsessionで所有referenceのcleanupを直接呼び、完了要約とprivate不在を確認する。その後、reference:{}等の明示的な不正inputを1回だけ呼ばせ、input_rejected／childStarted=falseと折り畳み画面のFailedを確認し、retry／Git操作なしで停止する。部分成功flags／cleanup未完了／終了未確認・PR中間非実行性は公開renderer testsで正常対照と照合する。既存実Git read testで完全content／detailsを描画前後に比較する。所有PID/group wait→owned tmux終了→owned cleanup→全証拠readbackは上の共通手順のとおり。例外は`phase=plan`だけで、TUIでは折りたたみ時もrendererが完成message／PR title・body・branch・push・PR・operations全文を表示する（承認対象の正式な提示。承認質問は通常assistantのまま）。実TUIでは小diffの`/skill:commit`を承認質問（ask_user_question）まで進め、その時点の折りたたみ画面snapshotにmessage全文・operations・branchが出ることを確認し、キャンセル後にHEAD／refs不変・Stage残存・owned private cleanupを照合する。非plan・展開・非TUI不変と制御文字無害化は公開renderer testsで照合する。plan操作の成功結果だけが背景枠なしのMarkdown表示で、plan全文が成功背景に埋もれないこと、他の操作（観測できたmaterials等）の成功背景と失敗背景が従来の枠のままであることを実画面でも確認する。実行中背景や未呼出しの操作の枠は公開renderer testsで照合し、実画面で観測していない操作を確認済みと呼ばない。
 
 ## 通常cancelの取得前後とBun不足
 
