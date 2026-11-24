@@ -56,13 +56,13 @@ inputは`{"reference":REFERENCE}`に、commitNeeded=trueなら`message:"完成�
 
 `phase=already_pushed`なら同SHA再push・commit・通常承認なしで`cleanup.complete`と残存を確認・報告する。残るbranch／upstream操作があればplanになる。
 
-`phase=plan`は確定文章／操作がimmutable private保持され、`payloadRemoved=true`を確認してから提示する。返された新referenceだけを採用する。通常assistantで次をまとめて表示する。
+`phase=plan`は確定文章／操作がimmutable private保持され、`payloadRemoved=true`を確認してから提示する。返された新referenceだけを採用する。TUIでは`commit_workflow`のrendererが折りたたみ時も完成message（新commit時）・branch・親／tree・scope・scanner・remote／実push URL／target／予定upstream・操作一式を表示し、これが承認対象の正式な提示になる。tool contentの案内どおり再掲せず、下記のうちrendererにない補足（既存HEADなら新commitなし、元ref保持、remote default／初回例外等）と質問だけを通常assistantの可視textで書く。非TUIでは通常assistantで次をまとめて表示する。どちらも提示・補足をthinkingに書かない。
 
 - 新commitがある場合だけ返された完成messageを1 code block。固定bytes／言語／形式を維持し、WHY／Issue／未実施テスト成功を創作しない。
 - scope／Stage／scanner、元branchと予定branch（必要時だけ新規、元ref保持）、親／tree。既存HEADの場合は送信対象が既存履歴で新commitなしと明示。
 - **remote・実push URL・target（refs/heads/...）・予定upstream（設定先か既存保持）**、remote default／初回例外、操作一式（必要branch→必要commit→検証→固定SHA push必要時だけ→送信readback→予定upstream→cleanup）。
 
-表示後に通常一回のask_user_question（なければ通常テキスト）で`提示内容で実行`／新commit時だけ`commit文章を修正`／`実行設定を修正`／`キャンセル`＋自由回答を求める。script成功／参照存在は承認でない。no-confirmはこの通常承認だけ省略し、同じ表示／保持／検査を行う。存在しないPR文章／commit文章の修正選択肢は出さない。
+提示後に通常一回のask_user_question（なければ通常テキスト）で`提示内容で実行`／新commit時だけ`commit文章を修正`／`実行設定を修正`／`キャンセル`＋自由回答を求める。script成功／参照存在は承認でない。no-confirmはこの通常承認だけ省略し、同じ表示／保持／検査を行う。存在しないPR文章／commit文章の修正選択肢は出さない。
 
 文章修正は同じplanへ現参照と修正messageだけ。予定branchを保持し、旧参照失効後に最終一式を再提示・再承認。設定変更はcleanup→新inspectから影響準備を取り直し、Stage残存を説明して再確認。cancelはcleanupして終了。driftを自動再準備しない。
 

@@ -24,7 +24,7 @@ inputは入口の`mode`（`"commit"`／`"commit-main"`）を必ず指定する�
 
 結果の`reference`を**完全にそのまま**保持する。JSONを手で再構成・field削除・根拠更新しない。これはrepo外0700／file0600の今回のprivate準備への参照であり、承認token・永続stateではない。owner／非symlink／regular file／実体／bytes digestと別repo／別runをCLIが照合する。
 
-- `branch`・`head`・`changes`はtoolの取得結果から表示される。TUIでは同じ一覧を通常assistantへ繰り返さず、非TUIではcontentの色なし一覧を使う。toolなしの経路はない。完成文章・意味判断・実質問・操作一式・明示承認は通常assistantで別途行い、tool contentやbash stdoutを承認表示に使わない。
+- `branch`・`head`・`changes`はtoolの取得結果から表示される。TUIでは同じ一覧を通常assistantへ繰り返さず、非TUIではcontentの色なし一覧を使う。toolなしの経路はない。意味判断・実質問・明示承認は通常assistantの可視textで行う。完成文章・操作一式の提示は§3のTUI／非TUI別規則に従い、inspect一覧・tool content・bash stdoutを承認表示に使わない。提示・補足・質問はthinkingではなく可視textに書く。
 - defaultの根拠は全local remote HEADのsymbolic target・解決OID、対応remote・順序付きfetch設定。宛先tracking refから送信元branchへの逆mappingであり、末尾名やorigin名だけで決めない。一意defaultを優先し、真に情報なしだけmain／master fallback。競合・broken・orphan・non-symbolic・不明mapping・観測失敗は情報なしではない。ローカル情報は古い可能性があり、最新remote defaultは保証しない。通信・補修しない。
 - `default.kind=ambiguous`なら候補と理由を通常assistantで示して、**「このrepositoryのdefault branchはどれですか？」と実際に質問する**。候補選択とbranch名の自由回答を求め、未回答はStage0で回答待ち。再実行案内／停止報告だけでは質問にならない。`--no-confirm`でも省略しない。回答を`materials.defaultBranch`へ渡す。回答はcommitのbranch作成要否にも使う。commit-mainは回答後も作業branchなら拒否し、両入口とも観測不能を回答だけで迂回しない。
 - `questions.outsideStaged`があれば範囲外既存Stageも今回commitに含まれることを示して実際に質問する。明示的に含める回答だけ`includeOutsideStaged:true`で渡す。分割するなら停止し、勝手にunstageしない。
@@ -64,9 +64,14 @@ commit文章は今回のStaged材料から作る。タイトルはWHAT、本文�
 - 5件未満なら存在する分だけを使う。履歴なし・全件判定不能なら英語のConventional Commitを使う。
 - タイトルと本文は原則同じ言語にする。明示指定・固定文章を履歴で上書きせず、履歴で決まる言語・形式を聞き直さない。
 
-`plan`のinputは`{"reference":REFERENCE,"message":"完成文章の正確な文字列\n"}`に、作成が必要なら`"newBranch":"docs/example"`を追加する。明示指定は変更不可、文章だけの修正では予定branchを保持する。CLIは状態／完全diff／indexを照合し、完成文章を新しいimmutable private fileへ排他的に保持する。`phase=plan`・`payloadRemoved=true`と新referenceを確認してから、返されたmessageを通常assistantの**1つのcode block**で表示する。予定branchと元branch（新branch作成の有無／元default ref保持／新branchのupstream設定なし）・対象／Stage件数・親／tree・default根拠／古さ・scanner状態・操作一式（必要なら予定branch作成→commit→事後照合→cleanup）もまとめる。script成功や参照の存在は承認ではない。
+`plan`のinputは`{"reference":REFERENCE,"message":"完成文章の正確な文字列\n"}`に、作成が必要なら`"newBranch":"docs/example"`を追加する。明示指定は変更不可、文章だけの修正では予定branchを保持する。CLIは状態／完全diff／indexを照合し、完成文章を新しいimmutable private fileへ排他的に保持する。`phase=plan`・`payloadRemoved=true`と新referenceを確認してから提示する。
 
-`ask_user_question`が利用可能なら、完成文章と操作を**通常assistantで表示した後**に一括で `提示内容で実行` / `commit文章を修正` / `実行設定を修正` / `キャンセル` とOther自由回答を求める。質問のlabel／description／previewに全文を詰めず表示済み内容を参照する。toolがない／失敗した場合だけ同じ選択肢を通常テキストで示し回答を待つ。RPCのテキスト回答はTUI renderer実証ではない。
+- **TUI**: `commit_workflow`のrendererが折りたたみ時もplan結果（完成message全文・予定branchと元branch／新規作成の有無・親／tree・scope・scanner・操作一式）を表示し、これが承認対象の正式な提示になる。tool contentの案内どおり文章・操作一式を再掲せず、表示されない補足（対象／Stage件数・元default ref保持／新branchのupstream設定なし・default根拠／古さ・scanner未検査の意味等）と質問だけを通常assistantの可視textで書く。
+- **非TUI**: 返されたmessageを通常assistantの**1つのcode block**で表示する。予定branchと元branch（新branch作成の有無／元default ref保持／新branchのupstream設定なし）・対象／Stage件数・親／tree・default根拠／古さ・scanner状態・操作一式（必要なら予定branch作成→commit→事後照合→cleanup）もまとめる。
+
+両方とも提示・補足をthinkingに書かない。script成功や参照の存在は承認ではない。
+
+`ask_user_question`が利用可能なら、上記の提示（TUIはrenderer表示と可視の補足、非TUIは通常assistant表示）の**後**に一括で `提示内容で実行` / `commit文章を修正` / `実行設定を修正` / `キャンセル` とOther自由回答を求める。質問のlabel／description／previewに全文を詰めず表示済み内容を参照する。toolがない／失敗した場合だけ同じ選択肢を通常テキストで示し回答を待つ。RPCのテキスト回答はTUI renderer実証ではない。
 
 - 文章修正は同じ`plan`へ現referenceと修正文章を渡す。旧版file削除成功後に新参照を返す。旧参照は失効する。固定指定や未修正部分を勝手に変更せず、最終一式を再提示・再承認する。
 - branch／scope等の設定変更は現準備を`cleanup`して新しい`inspect`から影響準備を取り直し、Stage残存を説明して再確認する。driftのエラーを新しい値への自動更新で吸収しない。古い承認を流用しない。

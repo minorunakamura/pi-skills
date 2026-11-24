@@ -11,7 +11,8 @@ import {
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Type } from "@earendil-works/pi-ai";
-import { Text } from "@earendil-works/pi-tui";
+import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import { Box, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import {
   validWorkflowInput,
   validReference,
@@ -425,6 +426,103 @@ function inspectFailure(error, extra = {}) {
   };
 }
 
+// The plan is the approval presentation in TUI; show it in full even when collapsed.
+function planMarkdown(plan) {
+  // Same visible escapes as quoted(), but message/body keep newlines and tabs.
+  const visible = (value, keepLines) =>
+    value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) =>
+      keepLines && (character === "\n" || character === "\t")
+        ? character
+        : `\\u{${character.codePointAt(0).toString(16)}}`,
+    );
+  // Fences longer than any backtick run keep values literal under Markdown.
+  const longestBackticks = (text) =>
+    (text.match(/`+/g) ?? []).reduce(
+      (max, run) => Math.max(max, run.length),
+      0,
+    );
+  const code = (text) => {
+    const fence = "`".repeat(longestBackticks(text) + 1);
+    return `${fence} ${text} ${fence}`;
+  };
+  const block = (value) => {
+    const text = visible(value, true).replace(/\n+$/, "");
+    const fence = "`".repeat(Math.max(3, longestBackticks(text) + 1));
+    return ["", fence, text, fence, ""];
+  };
+  const field = (value) =>
+    typeof value === "string" ? code(visible(value, false)) : "unavailable";
+  const lines = ["**Plan** · separate approval required", ""];
+  if (typeof plan.message === "string")
+    lines.push("**Commit message**", ...block(plan.message));
+  else if (plan.commitNeeded === false)
+    lines.push("**Commit** · not needed", "");
+  lines.push(
+    `- Branch: ${field(plan.branch)} · ${typeof plan.newBranch === "string" ? "new branch" : "existing branch"}`,
+    `- Source branch: ${field(plan.sourceBranch)}`,
+    `- Parent: ${plan.parent === null ? "none (initial commit)" : field(plan.parent)}`,
+    `- Tree: ${field(plan.tree)}`,
+  );
+  const scope = object(plan.scope) ? plan.scope : {};
+  lines.push(
+    `- Scope: ${field(scope.kind)}${strings(scope.paths) ? ` ${scope.paths.map(field).join(", ")}` : ""}`,
+    `- Scanner: ${field(plan.scanner)}`,
+  );
+  if (object(plan.push)) {
+    const push = plan.push;
+    lines.push(
+      `- Push: remote ${field(push.remote)} · url ${field(push.url)} · target ${field(push.target)}`,
+      `- Upstream: ${object(push.upstream) ? `set ${field(push.upstream.remote)} ${field(push.upstream.merge)}` : field(push.upstream)}`,
+    );
+  }
+  if (object(plan.pr)) {
+    const pr = plan.pr;
+    lines.push(
+      `- PR: repository ${field(pr.repository)} · head ${field(pr.head)} · base ${field(pr.base)} · Draft ${pr.draft === true ? "yes" : pr.draft === false ? "no" : "unavailable"}`,
+    );
+    for (const existing of Array.isArray(pr.existingPullRequests)
+      ? pr.existingPullRequests
+      : [])
+      lines.push(
+        `- Existing PR: #${Number.isSafeInteger(existing?.number) ? existing.number : "?"} ${field(existing?.url)} · ${field(existing?.state)}`,
+      );
+    lines.push("");
+    if (typeof pr.title === "string")
+      lines.push("**PR title**", "", field(pr.title), "");
+    if (typeof pr.body === "string")
+      lines.push("**PR body**", ...block(pr.body));
+  } else lines.push("");
+  lines.push("**Operations**", "");
+  (strings(plan.operations) ? plan.operations : []).forEach(
+    (operation, index) =>
+      lines.push(`${index + 1}. ${code(visible(operation, false))}`),
+  );
+  lines.push("", "Expand tool output for details.");
+  return lines.join("\n");
+}
+
+// Only a successful plan is shown without the tool background; other states match the default shell.
+function workflowFramed(context, isPartial) {
+  return (
+    isPartial === true ||
+    context.isError === true ||
+    context.args?.operation !== "plan"
+  );
+}
+
+function workflowBox(theme, context, isPartial, children) {
+  const background = isPartial
+    ? "toolPendingBg"
+    : context.isError
+      ? "toolErrorBg"
+      : "toolSuccessBg";
+  const box = new Box(context.outputPad, 0, (text) =>
+    theme.bg(background, text),
+  );
+  for (const child of children) box.addChild(child);
+  return box;
+}
+
 function workflowSummary(details, isError) {
   const data = object(details) ? details : {};
   const value = object(data.result) ? data.result : data;
@@ -496,6 +594,7 @@ export default function (pi) {
     name: "commit_workflow",
     label: "Git workflow",
     exposure: "model-only",
+    renderShell: "self",
     executionMode: "sequential",
     description:
       "Run reference-free destinations (mode push/pr, optional scope) for local destination evidence without Stage/private preparation/network; SSH -G may run Match exec. Other operations materials/read/release/plan/execute/cleanup require an explicit complete reference. Input is a JSON object; execute accepts reference only. Read starts with materials names and continues with the returned cursor unchanged; never calculate offsets or lengths. For reference operations Bun is obtained only from the matching final successful commit_inspect on this conversation branch. Never retry after a started failure or infer approval from a reference.",
@@ -649,29 +748,75 @@ export default function (pi) {
           return inspectFailure(stage, { childStarted, processExitConfirmed });
         return {
           isError: ran.code !== 0,
-          content: [{ type: "text", text: JSON.stringify(data) }],
+          content: [
+            ...(ctx.mode === "tui" && ran.code === 0 && data.phase === "plan"
+              ? [
+                  {
+                    type: "text",
+                    text: "提示内容（文章・操作一式）はtool rendererに表示済みです。再掲せず、補足と質問だけを可視のtextで書いてください。承認は別途必要です。",
+                  },
+                ]
+              : []),
+            { type: "text", text: JSON.stringify(data) },
+          ],
           details: data,
         };
       } catch {
         return inspectFailure(stage, { childStarted, processExitConfirmed });
       }
     },
-    renderCall(args, _theme, context) {
+    renderCall(args, theme, context) {
       const operation = workflowOperations.includes(args.operation)
         ? ` · ${args.operation}`
         : "";
-      return new Text(`Git workflow${operation}`, context.outputPad, 0);
+      const text = `Git workflow${operation}`;
+      // The default shell's vertical padding is split: call owns the top line, and the bottom
+      // line until the final result (this tool sends no partial updates) renders it instead.
+      return workflowFramed(context, context.isPartial)
+        ? workflowBox(theme, context, context.isPartial, [
+            new Spacer(1),
+            new Text(text, 0, 0),
+            ...(context.isPartial ? [new Spacer(1)] : []),
+          ])
+        : new Text(text, context.outputPad, 0);
     },
-    renderResult(result, { expanded, isPartial }, _theme, context) {
-      const text = isPartial
-        ? "Running…"
-        : expanded
-          ? result.content
-              .filter((part) => part.type === "text")
-              .map((part) => part.text)
-              .join("\n")
-          : workflowSummary(result.details, context.isError);
-      return new Text(text, context.outputPad, 0);
+    renderResult(result, { expanded, isPartial }, theme, context) {
+      const framed = workflowFramed(context, isPartial);
+      const pad = framed ? 0 : context.outputPad;
+      let body;
+      if (
+        !isPartial &&
+        !expanded &&
+        !context.isError &&
+        result.details?.phase === "plan"
+      ) {
+        const markdown = planMarkdown(result.details);
+        let markdownTheme;
+        try {
+          markdownTheme = getMarkdownTheme();
+        } catch {}
+        body = markdownTheme
+          ? new Markdown(markdown, pad, 0, markdownTheme)
+          : new Text(markdown, pad, 0);
+      } else
+        body = new Text(
+          isPartial
+            ? "Running…"
+            : expanded
+              ? result.content
+                  .filter((part) => part.type === "text")
+                  .map((part) => part.text)
+                  .join("\n")
+              : workflowSummary(result.details, context.isError),
+          pad,
+          0,
+        );
+      return framed
+        ? workflowBox(theme, context, isPartial, [
+            body,
+            ...(isPartial ? [] : [new Spacer(1)]),
+          ])
+        : body;
     },
   });
   pi.registerTool({

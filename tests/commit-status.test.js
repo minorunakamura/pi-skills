@@ -23,8 +23,19 @@ import test from "node:test";
 const hostModules = {
   "@earendil-works/pi-ai":
     "export const Type = { Object: properties => ({type: 'object', properties}), String: () => ({type: 'string'}) };",
-  "@earendil-works/pi-tui":
-    "export class Text { constructor(text, paddingX, paddingY) { Object.assign(this, {text, paddingX, paddingY}); } }",
+  "@earendil-works/pi-tui": `
+    export class Text { constructor(text, paddingX, paddingY) { Object.assign(this, {text, paddingX, paddingY}); } }
+    export class Markdown { constructor(text, paddingX, paddingY, theme) { Object.assign(this, {text, paddingX, paddingY, theme}); } }
+    export class Spacer { constructor(lines) { this.lines = lines; } }
+    export class Box {
+      constructor(paddingX, paddingY, bgFn) { Object.assign(this, {paddingX, paddingY, bgFn, children: []}); }
+      addChild(child) { this.children.push(child); }
+    }`,
+  "@earendil-works/pi-coding-agent": `
+    export function getMarkdownTheme() {
+      if (globalThis.markdownThemeUnavailable) throw new Error("theme unavailable");
+      return { name: "markdown-theme" };
+    }`,
 };
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -216,33 +227,57 @@ await test("rejects malformed metadata without echoing invalid JSON", async () =
   );
 });
 
+// Framed rows mirror the default shell: Box(outputPad) around unpadded content.
+function workflowText(rendered, outputPad = 2) {
+  if (!Array.isArray(rendered.children)) {
+    assert.equal(rendered.paddingX, outputPad);
+    return rendered.text;
+  }
+  assert.equal(rendered.paddingX, outputPad);
+  assert.equal(rendered.paddingY, 0);
+  const content = rendered.children.filter((child) => !("lines" in child));
+  assert.equal(content.length, 1);
+  assert.equal(content[0].paddingX, 0);
+  return content[0].text;
+}
+
 function renderWorkflow(details, options = {}, isError = false) {
   const result = {
     content: [{ type: "text", text: JSON.stringify(details) }],
     details,
   };
   const before = JSON.stringify(result);
-  const rendered = tools
-    .get("commit_workflow")
-    .renderResult(result, options, {}, { outputPad: 2, isError });
+  const operation = details?.phase === "plan" ? "plan" : "read";
+  const rendered = tools.get("commit_workflow").renderResult(
+    result,
+    options,
+    {},
+    {
+      outputPad: 2,
+      isError,
+      isPartial: options.isPartial,
+      args: { operation },
+    },
+  );
   assert.equal(JSON.stringify(result), before);
-  assert.equal(rendered.paddingX, 2);
-  return rendered.text;
+  return workflowText(rendered);
 }
 
 await test("workflow renderer hides call references and collapses large results without changing their data", () => {
   const workflow = tools.get("commit_workflow");
+  const args = { operation: "read", input: { reference: "PRIVATE_REFERENCE" } };
   assert.equal(
-    workflow.renderCall(
-      { operation: "read", input: { reference: "PRIVATE_REFERENCE" } },
-      {},
-      { outputPad: 2 },
-    ).text,
+    workflowText(workflow.renderCall(args, {}, { outputPad: 2, args })),
     "Git workflow · read",
   );
   assert.equal(
-    workflow.renderCall({ operation: "SECRET_INVALID" }, {}, { outputPad: 2 })
-      .text,
+    workflowText(
+      workflow.renderCall(
+        { operation: "SECRET_INVALID" },
+        {},
+        { outputPad: 2 },
+      ),
+    ),
     "Git workflow",
   );
   const page = {
@@ -325,18 +360,381 @@ await test("workflow renderer keeps incomplete cleanup, partial success and unce
     renderWorkflow({ phase: "materials", files: [{}, {}], displayed: false }),
     /2 files.*omitted/,
   );
-  const unknown = tools
-    .get("commit_workflow")
-    .renderResult(
-      { content: [] },
-      {},
-      {},
-      { outputPad: 2, isError: true },
-    ).text;
+  const unknown = workflowText(
+    tools
+      .get("commit_workflow")
+      .renderResult({ content: [] }, {}, {}, { outputPad: 2, isError: true }),
+  );
   assert.match(unknown, /Failed.*unavailable/);
   const control = renderWorkflow({ error: "bad\n\u001b[31m\u202e" }, {}, true);
   assert.equal(control.includes("\u001b"), false);
   assert.equal(control.includes("\u202e"), false);
+});
+
+const planDetails = {
+  reference: { run: "PRIVATE_RUN" },
+  phase: "plan",
+  message: "docs: exact subject\n\nBody line one\nBody line two\n",
+  pr: null,
+  branch: "docs/example",
+  sourceBranch: "main",
+  newBranch: "docs/example",
+  parent: "a".repeat(40),
+  tree: "b".repeat(40),
+  scope: { kind: "all" },
+  scanner: "passed",
+  default: { kind: "unique", candidates: ["main"], reasons: [] },
+  defaultAnswer: "main",
+  commitNeeded: true,
+  push: null,
+  operations: ["create branch docs/example", "commit staged tree"],
+  payloadRemoved: true,
+  approval: "not inferred from this reference",
+};
+
+await test("workflow renderer shows the complete commit plan as unframed Markdown while collapsed", () => {
+  const workflow = tools.get("commit_workflow");
+  const rendered = workflow.renderResult(
+    { content: [], details: planDetails },
+    {},
+    {},
+    { outputPad: 2, isError: false, args: { operation: "plan" } },
+  );
+  assert.equal(rendered.constructor.name, "Markdown");
+  assert.deepEqual(rendered.theme, { name: "markdown-theme" });
+  assert.equal(rendered.paddingX, 2);
+  assert.equal(rendered.paddingY, 0);
+  const collapsed = rendered.text;
+  assert.ok(
+    collapsed.includes(
+      "**Commit message**\n\n```\ndocs: exact subject\n\nBody line one\nBody line two\n```\n",
+    ),
+    collapsed,
+  );
+  assert.ok(
+    collapsed.includes(
+      "**Operations**\n\n1. ` create branch docs/example `\n2. ` commit staged tree `\n",
+    ),
+    collapsed,
+  );
+  assert.match(collapsed, /- Branch: ` docs\/example ` · new branch/);
+  assert.match(collapsed, /- Source branch: ` main `/);
+  assert.ok(collapsed.includes(`- Parent: \` ${"a".repeat(40)} \``));
+  assert.ok(collapsed.includes(`- Tree: \` ${"b".repeat(40)} \``));
+  assert.match(collapsed, /- Scope: ` all `/);
+  assert.match(collapsed, /- Scanner: ` passed `/);
+  assert.match(collapsed, /^\*\*Plan\*\* · separate approval required/);
+  assert.doesNotMatch(collapsed, /PRIVATE_RUN/);
+});
+
+await test("workflow renderer shows push and new PR plan destinations and PR text as Markdown", () => {
+  const push = {
+    remote: "origin",
+    url: "git@example.invalid:owner/repo.git",
+    target: "docs/example",
+    sourceBranch: "docs/example",
+    defaultBranch: "main",
+    remoteHead: null,
+    initialMain: false,
+    setUpstream: true,
+    upstream: { remote: "origin", merge: "refs/heads/docs/example" },
+  };
+  const pushed = renderWorkflow({ ...planDetails, push });
+  assert.ok(
+    pushed.includes(
+      "- Push: remote ` origin ` · url ` git@example.invalid:owner/repo.git ` · target ` docs/example `",
+    ),
+    pushed,
+  );
+  assert.ok(
+    pushed.includes("- Upstream: set ` origin ` ` refs/heads/docs/example `"),
+  );
+  assert.match(
+    renderWorkflow({
+      ...planDetails,
+      push: {
+        ...push,
+        setUpstream: false,
+        upstream: "preserve existing settings",
+      },
+    }),
+    /- Upstream: ` preserve existing settings `/,
+  );
+  const pr = renderWorkflow({
+    ...planDetails,
+    push,
+    pr: {
+      repository: "example.invalid/owner/repo",
+      head: "docs/example",
+      base: "main",
+      draft: true,
+      existingPullRequests: [],
+      baseHead: "c".repeat(40),
+      title: "docs: exact $HOME",
+      body: "## Summary\n\n日本語 `code`\n```js\nx\n```\n",
+    },
+  });
+  assert.ok(
+    pr.includes(
+      "- PR: repository ` example.invalid/owner/repo ` · head ` docs/example ` · base ` main ` · Draft yes",
+    ),
+    pr,
+  );
+  assert.ok(pr.includes("**PR title**\n\n` docs: exact $HOME `\n"), pr);
+  // The body contains a ``` run, so its fence must be longer.
+  assert.ok(
+    pr.includes(
+      "**PR body**\n\n````\n## Summary\n\n日本語 `code`\n```js\nx\n```\n````\n",
+    ),
+    pr,
+  );
+  const existing = renderWorkflow({
+    ...planDetails,
+    pr: {
+      repository: "example.invalid/owner/repo",
+      head: "docs/example",
+      base: "main",
+      draft: false,
+      existingPullRequests: [
+        { number: 7, url: "https://example.invalid/pull/7", state: "OPEN" },
+      ],
+      baseHead: "c".repeat(40),
+    },
+  });
+  assert.match(existing, /Draft no/);
+  assert.ok(
+    existing.includes(
+      "- Existing PR: #7 ` https://example.invalid/pull/7 ` · ` OPEN `",
+    ),
+    existing,
+  );
+  assert.doesNotMatch(existing, /PR title|PR body/);
+});
+
+await test("workflow renderer plan keeps Markdown-sensitive values literal inside code spans", () => {
+  const rendered = renderWorkflow({
+    ...planDetails,
+    branch: "feat/*bold*_x_#<b>",
+    message: "subject\n````\ninner\n",
+    operations: ["push `a` and ``b``", "*not a list*"],
+    pr: {
+      repository: "r",
+      head: "h",
+      base: "b",
+      draft: false,
+      existingPullRequests: [],
+      title: "``tick``",
+    },
+  });
+  assert.ok(rendered.includes("- Branch: ` feat/*bold*_x_#<b> `"), rendered);
+  assert.ok(rendered.includes("\n`````\nsubject\n````\ninner\n`````\n"));
+  assert.ok(rendered.includes("1. ``` push `a` and ``b`` ```\n"), rendered);
+  assert.ok(rendered.includes("2. ` *not a list* `\n"));
+  assert.ok(rendered.includes("\n``` ``tick`` ```\n"), rendered);
+});
+
+await test("workflow renderer plan without a commit omits the message and escapes terminal controls", () => {
+  const noCommit = renderWorkflow({
+    ...planDetails,
+    message: null,
+    commitNeeded: false,
+    newBranch: null,
+    branch: "main",
+    operations: ["cleanup"],
+  });
+  assert.doesNotMatch(noCommit, /Commit message/);
+  assert.match(noCommit, /\*\*Commit\*\* · not needed/);
+  assert.match(noCommit, /- Branch: ` main ` · existing branch/);
+  assert.match(noCommit, /1\. ` cleanup `/);
+  const control = renderWorkflow({
+    ...planDetails,
+    message: "subject \u001b[31mred\u202e\n\tindented\u2028end\n",
+    operations: ["op\u001b]0;title\u0007"],
+    push: {
+      remote: "origin\u001b",
+      url: "u",
+      target: "t",
+      upstream: "preserve existing settings",
+    },
+    pr: {
+      repository: "r",
+      head: "h",
+      base: "b",
+      draft: false,
+      existingPullRequests: [],
+      title: "t\u202e",
+      body: "line\u001b[2J\nnext\n",
+    },
+  });
+  for (const character of ["\u001b", "\u202e", "\u2028", "\u0007"])
+    assert.equal(control.includes(character), false, JSON.stringify(character));
+  assert.ok(
+    control.includes(
+      "subject \\u{1b}[31mred\\u{202e}\n\tindented\\u{2028}end\n",
+    ),
+    control,
+  );
+  assert.ok(control.includes("line\\u{1b}[2J\nnext\n"), control);
+  assert.ok(control.includes("` origin\\u{1b} `"));
+  assert.ok(control.includes("` op\\u{1b}]0;title\\u{7} `"));
+  assert.ok(control.includes("` t\\u{202e} `"));
+  globalThis.markdownThemeUnavailable = true;
+  try {
+    const fallback = tools
+      .get("commit_workflow")
+      .renderResult(
+        { content: [], details: planDetails },
+        {},
+        {},
+        { outputPad: 2, isError: false, args: { operation: "plan" } },
+      );
+    assert.equal(fallback.constructor.name, "Text");
+    assert.equal(fallback.paddingX, 2);
+    assert.equal(fallback.text, renderWorkflow(planDetails));
+  } finally {
+    delete globalThis.markdownThemeUnavailable;
+  }
+});
+
+await test("workflow renderer keeps expanded, partial, failed and non-plan results unchanged", () => {
+  assert.equal(
+    renderWorkflow(planDetails, { expanded: true }),
+    JSON.stringify(planDetails),
+  );
+  assert.match(renderWorkflow(planDetails, { isPartial: true }), /Running/);
+  const failed = renderWorkflow(planDetails, {}, true);
+  assert.match(failed, /Failed/);
+  assert.doesNotMatch(failed, /docs: exact subject|Operations/);
+  const pending = renderWorkflow({
+    phase: "materials",
+    executable: false,
+    requiredInputs: ["pr.title", "pr.body"],
+    branch: "docs/example",
+    message: "docs: exact subject\n",
+    pr: {},
+    payloadRemoved: true,
+  });
+  assert.match(pending, /Result.*"materials"/);
+  assert.match(pending, /Not executable/);
+  assert.doesNotMatch(pending, /docs: exact subject|Operations/);
+  assert.doesNotMatch(
+    renderWorkflow({ phase: "committed", message: "docs: exact subject\n" }),
+    /docs: exact subject|Operations/,
+  );
+});
+
+await test("workflow renderer frames every state like the default shell except a successful plan", () => {
+  const workflow = tools.get("commit_workflow");
+  assert.equal(workflow.renderShell, "self");
+  const theme = { bg: (color, text) => `<${color}>${text}</${color}>` };
+  const background = (box) => box.bgFn("x");
+  const frame = (box, outputPad = 2) => {
+    assert.equal(box.constructor.name, "Box");
+    assert.equal(box.paddingX, outputPad);
+    assert.equal(box.paddingY, 0);
+    return box.children.map((child) =>
+      "lines" in child
+        ? `spacer:${child.lines}`
+        : `${child.constructor.name}:${child.paddingX}`,
+    );
+  };
+  const render = (operation, details, options, isError) =>
+    workflow.renderResult(
+      { content: [{ type: "text", text: JSON.stringify(details) }], details },
+      options,
+      theme,
+      {
+        outputPad: 3,
+        isError,
+        isPartial: options.isPartial,
+        args: { operation },
+      },
+    );
+  const call = (operation, isPartial, isError) =>
+    workflow.renderCall({ operation }, theme, {
+      outputPad: 3,
+      isPartial,
+      isError,
+      args: { operation },
+    });
+
+  // Successful plan: no frame, call and result carry outputPad themselves.
+  const plain = call("plan", false, false);
+  assert.equal(plain.constructor.name, "Text");
+  assert.equal(plain.paddingX, 3);
+  assert.equal(plain.text, "Git workflow · plan");
+  const planResult = render("plan", planDetails, {}, false);
+  assert.equal(planResult.constructor.name, "Markdown");
+  assert.equal(planResult.paddingX, 3);
+  const planExpanded = render("plan", planDetails, { expanded: true }, false);
+  assert.equal(planExpanded.constructor.name, "Text");
+  assert.equal(planExpanded.text, JSON.stringify(planDetails));
+  assert.equal(planExpanded.paddingX, 3);
+
+  // Plan while running or failed, and every other operation, keep the background frame.
+  const failure = { error: "workflow_result_unknown" };
+  const read = { fixed: true, parts: [], done: true };
+  /** @type {(operation: string, details: object, options: { isPartial?: boolean, expanded?: boolean }, isError: boolean, bg: string) => { operation: string, details: object, options: { isPartial?: boolean, expanded?: boolean }, isError: boolean, bg: string }} */
+  const frameCase = (operation, details, options, isError, bg) => ({
+    operation,
+    details,
+    options,
+    isError,
+    bg,
+  });
+  const cases = [
+    frameCase("plan", planDetails, { isPartial: true }, false, "toolPendingBg"),
+    frameCase("plan", failure, {}, true, "toolErrorBg"),
+    frameCase("plan", failure, { expanded: true }, true, "toolErrorBg"),
+    ...[
+      "destinations",
+      "materials",
+      "read",
+      "release",
+      "execute",
+      "cleanup",
+    ].flatMap((name) => [
+      frameCase(name, read, {}, false, "toolSuccessBg"),
+      frameCase(name, read, { expanded: true }, false, "toolSuccessBg"),
+      frameCase(name, failure, {}, true, "toolErrorBg"),
+      frameCase(name, read, { isPartial: true }, false, "toolPendingBg"),
+    ]),
+  ];
+  for (const { operation, details, options, isError, bg } of cases) {
+    const label = JSON.stringify([operation, options, isError]);
+    const callBox = call(operation, options.isPartial === true, isError);
+    assert.equal(background(callBox), `<${bg}>x</${bg}>`, label);
+    assert.deepEqual(
+      frame(callBox, 3),
+      options.isPartial
+        ? ["spacer:1", "Text:0", "spacer:1"]
+        : ["spacer:1", "Text:0"],
+      label,
+    );
+    const resultBox = render(operation, details, options, isError);
+    assert.equal(background(resultBox), `<${bg}>x</${bg}>`, label);
+    assert.deepEqual(
+      frame(resultBox, 3),
+      options.isPartial ? ["Text:0"] : ["Text:0", "spacer:1"],
+      label,
+    );
+    const text = resultBox.children[0].text;
+    if (options.isPartial) assert.equal(text, "Running…", label);
+    else if (options.expanded)
+      assert.equal(text, JSON.stringify(details), label);
+    else if (isError) assert.match(text, /^Failed/, label);
+  }
+
+  // A plan operation that ends without phase=plan stays unframed but keeps the short summary.
+  const pending = render(
+    "plan",
+    { phase: "materials", executable: false, payloadRemoved: true },
+    {},
+    false,
+  );
+  assert.equal(pending.constructor.name, "Text");
+  assert.equal(pending.paddingX, 3);
+  assert.match(pending.text, /Not executable/);
 });
 
 const scripts = resolve(
@@ -1144,6 +1542,32 @@ for (const mode of ["commit", "commit-main", "push", "pr"]) {
   });
 }
 
+await test("commit_workflow TUI plan content starts with renderer guidance and ends with JSON details", async (t) => {
+  const f = await workflowFixture(t);
+  f.ctx.mode = "tui";
+  const materials = await f.call("materials", { reference: f.reference });
+  assert.notEqual(materials.isError, true, JSON.stringify(materials));
+  assert.equal(materials.content.length, 1);
+  assert.deepEqual(JSON.parse(materials.content[0].text), materials.details);
+  const plan = await f.call("plan", {
+    reference: materials.details.reference,
+    message: "docs: exact example\n",
+  });
+  assert.notEqual(plan.isError, true, JSON.stringify(plan));
+  assert.equal(plan.details.phase, "plan");
+  assert.equal(plan.content.length, 2);
+  assert.match(plan.content[0].text, /tool renderer.*表示済み/);
+  assert.match(plan.content[0].text, /再掲しない|再掲せず/);
+  assert.match(plan.content[0].text, /承認は別途必要/);
+  assert.doesNotMatch(plan.content[0].text, /docs: exact example/);
+  assert.deepEqual(JSON.parse(plan.content.at(-1).text), plan.details);
+  const cleaned = await f.call("cleanup", {
+    reference: plan.details.reference,
+  });
+  assert.equal(cleaned.content.length, 1);
+  assert.equal(cleaned.details.cleanup.complete, true);
+});
+
 await test("commit_workflow release, preserved read budget and incomplete cleanup retain their distinct results", async (t) => {
   const f = await workflowFixture(t);
   writeFileSync(join(f.repo, "new.txt"), "x".repeat(40000));
@@ -1642,11 +2066,17 @@ await test("commit_workflow automatic read returns the bounded JSON once and fol
     assert.ok(Buffer.byteLength(response.content[0].text) <= 32768);
     const beforeRender = JSON.stringify(response);
     const workflow = tools.get("commit_workflow");
-    const collapsed = workflow.renderResult(response, {}, {}, { outputPad: 1 });
-    assert.ok(collapsed.text.length < 200);
+    const context = { outputPad: 1, args: { operation: "read" } };
+    const collapsed = workflowText(
+      workflow.renderResult(response, {}, {}, context),
+      1,
+    );
+    assert.ok(collapsed.length < 200);
     assert.equal(
-      workflow.renderResult(response, { expanded: true }, {}, { outputPad: 1 })
-        .text,
+      workflowText(
+        workflow.renderResult(response, { expanded: true }, {}, context),
+        1,
+      ),
       response.content[0].text,
     );
     assert.equal(JSON.stringify(response), beforeRender);

@@ -15,7 +15,7 @@
 
 無指定はUntracked・既存Staged・部分Stageの残りを含む全変更（ignore維持）。限定literal paths／既存Stagedだけにも対応します。範囲外既存Stageを勝手にunstageせず確認し、dirty nested submodule内部を自動commitしません。Stageは最終承認前のため、**キャンセル・失敗でもStageが残り得ます**。reset／unstage／amend／force push／rebase／merge／release／deployはしません。空diffでは新commit・空commitを作りません。
 
-完成文章と操作一式を通常assistantで表示し、一括承認／修正／cancelを扱います。作らない文章や操作の選択肢は出しません。明示no-confirmは通常承認だけ省略し、予定表示・検査・疑義の実質問・異常停止は維持します。ask_user_questionがなければ同じ選択肢を通常テキストで示し回答を待ちます。script成功や参照の存在は承認でありません。
+完成文章と操作一式は、TUIでは`commit_workflow`のplan結果をrendererが折りたたみ時も全文表示し（assistantは再掲せず補足と質問だけを可視textで書く）、非TUIでは通常assistantで表示してから、一括承認／修正／cancelを扱います。提示・補足はthinkingに書きません。作らない文章や操作の選択肢は出しません。明示no-confirmは通常承認だけ省略し、予定表示・検査・疑義の実質問・異常停止は維持します。ask_user_questionがなければ同じ選択肢を通常テキストで示し回答を待ちます。script成功や参照の存在は承認でありません。
 
 各入口の必要文書は開始時に**同じassistant turn**で全文readし、切断時はtailを取得します。commit／commit-mainはlocal、pushはlocal＋push、PRはlocal＋push＋PR＋diff-reviewです。読取順と規則の優先順位は別で、PR > push > local。local専用の無通信・default質問・空diff即終了をpush／PRへ転用しません。
 
@@ -39,7 +39,7 @@ Bun lookupは `ctx.sessionManager.getBranch()` のmessage/toolResult/commit_insp
 
 正常応答は終了確認／exit0／完全JSONと操作別検証が必要です。materialsとempty、phaseなしread／release、完成planとPR中間materials(executable=false)、already_pushed／existing_pr終端、executeのcommitted／pushed／already_pushed／existing_pr／pr_created、cleanupのcancelled／stagedChangesPreserved／complete／remainingを区別します。固定文章・新reference・部分成功・cleanup不完全を落とさず、contentとdetailsを同じ検証済みデータから作ります。未知field・生scanner／hook／child出力は返しません。
 
-TUIの `commit_workflow` は `renderCall` で操作名だけ、`renderResult` でphase・件数・読取の続き／終端などを短く表示します。Piのtool出力展開（標準 `Ctrl+O`、現在の割当は `/hotkeys`）で完全な結果を表示できます。失敗・先行成功flags・cleanup未完了／未確認・child終了未確認は折り畳み時も残します。描画だけの変更で、model-facing content／details、完全reference、read JSONの予算・bytes、RPC／JSON／printの結果は削りません。完成文章・通常承認は引き続きassistantで別途提示します。
+TUIの `commit_workflow` は `renderCall` で操作名だけ、`renderResult` でphase・件数・読取の続き／終端などを短く表示します。Piのtool出力展開（標準 `Ctrl+O`、現在の割当は `/hotkeys`）で完全な結果を表示できます。失敗・先行成功flags・cleanup未完了／未確認・child終了未確認は折り畳み時も残します。描画だけの変更で、model-facing content／details、完全reference、read JSONの予算・bytes、RPC／JSON／printの結果は削りません。完成文章・通常承認は引き続きassistantで別途提示します。`renderShell:"self"`で自前に枠を描き、plan操作の成功結果だけは背景枠なしで、`phase=plan`の折り畳み時の提示をMarkdown（文章はcode block、値はinline code、operationsは番号付き一覧）で表示します（PR中間materials・already_pushed・existing_prは枠なしの短い要約）。他の操作とplanの実行中・失敗は従来どおりの背景枠（実行中toolPendingBg、成功toolSuccessBg、失敗toolErrorBg）です。
 
 子process起動前の構造／許可field誤りだけが `input_rejected, childStarted=false, inputCorrectionAllowed=true` です。Bun/Git起動0・private準備不変で、同じ承認planの余分field等の形式修正だけなら同referenceで再要求でき、再承認不要です。文章／対象／操作変更は新plan提示・実承認が必要で、driftやruntime／repository／run／所有不一致はこの例外にしません。cancel済みsignalも対象外です。CLI exit1はallowlistと型検証済みの先行成功flags／SHA／cleanupを保持しますが入力修正可能にはしません。
 
@@ -108,7 +108,7 @@ inspectがexit1で終了確認済み、timeout／cancel等なし、完全JSONの
 | Added | `success` | 緑色 |
 | Deleted | `error` | 赤色 |
 
-部分StageはStaged/Unstagedを分け、rename/copyは元パスも表示します。色は有効なthemeに従います。両toolのいずれかが未導入／非公開ならStage前に停止し、手書きCLIへfallbackしません。TUI以外ではtool contentの通常textを使います。完成commit／PR文章・操作一式と明示承認は通常assistantで別途表示し、tool contentを承認表示に流用しません。承認・検査の手順は変わりません。
+部分StageはStaged/Unstagedを分け、rename/copyは元パスも表示します。色は有効なthemeに従います。両toolのいずれかが未導入／非公開ならStage前に停止し、手書きCLIへfallbackしません。TUI以外ではtool contentの通常textを使います。完成commit／PR文章・操作一式は、TUIでは`commit_workflow`のplan結果rendererが承認対象の正式な提示で、非TUIでは通常assistantで別途表示します。inspect一覧やtool contentのJSONを承認表示に流用せず、明示承認は通常assistantの質問で別途求めます。承認・検査の手順は変わりません。
 
 スキルだけをsymlinkで導入している場合は、cloneしたリポジトリのルートから表示extensionもリンクできます。既存ファイルは上書きしません。
 

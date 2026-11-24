@@ -63,9 +63,9 @@ messageはcommitNeeded=trueだけ。newBranchは必要なときだけ。PR title
 
 新規PRで文章未確定なら`phase=materials, executable=false, requiredInputs`と新参照を返す。branch／宛先／既存PR結果／既に与えたmessageを保持し、旧参照失効。`payloadRemoved=true`を確認する。これは承認提示用の完成planではなくexecute不可。次のplanへ現参照と不足するtitle/body（またはmessage）だけ渡す。中間準備からも既存PR消失／driftを拒否する。必要文章が最初から揃う既知のケースは初回planだけで完成でき、不要な往復を強制しない。
 
-`phase=plan`はimmutable private保持済み。`payloadRemoved=true`を確認し、返された新referenceだけを採用する。通常assistantメッセージ／Markdownで完成message（ある場合）と完成title/body（新PRだけ）を別code blockに表示する。緑色の成功枠を含むtool結果には表示しない。bash等のstdout／status toolを文章表示に使わない。scope／Stage／scanner、元branch保持と予定branch、remote／実URL／target／upstream、PR repo／head／base／base SHA／通常かDraft、IssueのCloses／Refsと自動Closeの条件、既存PR URL・状態、操作一式もまとめる。
+`phase=plan`はimmutable private保持済み。`payloadRemoved=true`を確認し、返された新referenceだけを採用する。TUIでは`commit_workflow`のrendererが折りたたみ時も完成message（ある場合）・完成title/body全文（新PRだけ）・branch・親／tree・scope・scanner・remote／実URL／target／upstream・PR repo／head／base／通常かDraft・既存PR・操作一式を表示し、これが承認対象の正式な提示になる。tool contentの案内どおり再掲せず、rendererにない補足（元branch保持、base SHA、IssueのCloses／Refsと自動Closeの条件等）と質問だけを通常assistantの可視textで書く。非TUIでは通常assistantメッセージ／Markdownで完成message（ある場合）と完成title/body（新PRだけ）を別code blockに表示し、scope／Stage／scanner、元branch保持と予定branch、remote／実URL／target／upstream、PR repo／head／base／base SHA／通常かDraft、IssueのCloses／Refsと自動Closeの条件、既存PR URL・状態、操作一式もまとめる。どちらも提示・補足をthinkingに書かない。bash等のstdout／status toolを文章表示に使わない。
 
-表示後に一回の`ask_user_question`で`提示内容で実行`／`commit文章を修正`（新commitだけ）／`PR文章を修正`（新PRだけ）／`実行設定を修正`／`キャンセル`＋Other自由回答を求める。question／label／description／previewには全文を入れず、表示済み内容を参照する短い質問・操作名・説明だけ。toolがなければ通常テキストで同じ選択肢と回答待ち。script成功／参照存在は承認でない。no-confirmは通常承認だけ省略し同じ最終一式を表示する。
+提示後に一回の`ask_user_question`で`提示内容で実行`／`commit文章を修正`（新commitだけ）／`PR文章を修正`（新PRだけ）／`実行設定を修正`／`キャンセル`＋Other自由回答を求める。question／label／description／previewには全文を入れず、表示済み内容を参照する短い質問・操作名・説明だけ。toolがなければ通常テキストで同じ選択肢と回答待ち。script成功／参照存在は承認でない。no-confirmは通常承認だけ省略し同じ最終一式を表示する。
 
 片側文章だけの修正では他方bytesを保持する。
 
